@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { ClerkProvider, useClerk } from "@clerk/react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -49,6 +50,38 @@ function stripBase(path: string): string {
   return basename && path.startsWith(basename)
     ? path.slice(basename.length) || "/"
     : path;
+}
+
+function StartupSplash() {
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setVisible(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-background"
+          initial={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.3 }}
+          aria-label="Sikka loading"
+        >
+          <motion.img
+            src={`${import.meta.env.BASE_URL}sikka-logo.svg`}
+            alt="Sikka"
+            className="h-44 w-44 object-contain sm:h-56 sm:w-56"
+            initial={{ scale: 0.82, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.45, ease: "easeOut" }}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 }
 
 function ClerkQueryClientCacheInvalidator() {
@@ -107,6 +140,7 @@ function AppRoutes() {
       <ClerkQueryClientCacheInvalidator />
       <AuthProvider>
         <MapLibreRtlPluginLoader />
+        <StartupSplash />
         <Toaster />
         <Sonner />
         <Routes>
