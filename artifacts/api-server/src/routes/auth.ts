@@ -14,16 +14,35 @@ function normalizePhone(value: unknown): string | null {
   return raw;
 }
 
-async function twilioVerify(path: string, body: URLSearchParams) {
+function getTwilioVerifyCredentials() {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_SECRET;
+  const authToken = process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_AUTH_SECRET;
+  const apiKey = process.env.TWILIO_API_KEY;
+  const apiSecret = process.env.TWILIO_API_SECRET || process.env.TWILIO_SECRET;
   const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
-  if (!accountSid || !authToken || !serviceSid) {
-    throw new Error("Twilio Verify is not configured");
+
+  if (apiKey && apiSecret && serviceSid) {
+    return { username: apiKey, password: apiSecret, serviceSid };
   }
-  const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+
+  if (accountSid && authToken && serviceSid) {
+    return { username: accountSid, password: authToken, serviceSid };
+  }
+
+  return null;
+}
+
+async function twilioVerify(path: string, body: URLSearchParams) {
+  const credentials = getTwilioVerifyCredentials();
+  if (!credentials) {
+    throw new Error(
+      "Twilio Verify is not configured. Set TWILIO_VERIFY_SERVICE_SID plus either TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN or TWILIO_API_KEY/TWILIO_API_SECRET.",
+    );
+  }
+
+  const auth = Buffer.from(`${credentials.username}:${credentials.password}`).toString("base64");
   const response = await fetch(
-    `https://verify.twilio.com/v2/Services/${serviceSid}/${path}`,
+    `https://verify.twilio.com/v2/Services/${credentials.serviceSid}/${path}`,
     {
       method: "POST",
       headers: {
@@ -83,7 +102,7 @@ router.post("/phone/verify", async (req, res) => {
 
 /**
  * POST /api/auth/admin-login
- * Standalone admin login — no Clerk required.
+ * Standalone admin login - no Clerk required.
  * Validates ADMIN_USERNAME + ADMIN_PASSWORD, creates a session token.
  */
 router.post("/admin-login", async (req, res) => {
