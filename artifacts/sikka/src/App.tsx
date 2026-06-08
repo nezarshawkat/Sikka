@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import maplibregl from "maplibre-gl";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
@@ -144,7 +144,7 @@ function AppRouteElements({ authEnabled }: { authEnabled: boolean }) {
   );
 }
 
-function AppChrome({ children }: { children: React.ReactNode }) {
+function AppChrome({ children }: { children: ReactNode }) {
   return (
     <>
       <MapLibreRtlPluginLoader />
