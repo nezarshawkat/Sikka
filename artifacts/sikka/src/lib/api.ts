@@ -1,6 +1,14 @@
 const API_ORIGIN = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
 const API_BASE = `${API_ORIGIN}/api`;
 
+type AuthTokenProvider = () => Promise<string | null>;
+
+let authTokenProvider: AuthTokenProvider | null = null;
+
+export function setAuthTokenProvider(provider: AuthTokenProvider | null) {
+  authTokenProvider = provider;
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {}
@@ -13,6 +21,15 @@ export async function apiFetch<T = unknown>(
   const adminToken = localStorage.getItem("sikka_admin_token");
   if (adminToken) {
     headers["X-Admin-Token"] = adminToken;
+  } else if (authTokenProvider) {
+    try {
+      const token = await authTokenProvider();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+    } catch {
+      // Public requests can still continue without a Clerk token.
+    }
   }
 
   const res = await fetch(`${API_BASE}${path}`, {
