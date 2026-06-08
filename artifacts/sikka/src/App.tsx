@@ -6,7 +6,8 @@ import { ClerkProvider, useClerk } from "@clerk/react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, GuestAuthProvider } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
 import Index from "./pages/Index";
 import Splash from "./pages/Splash";
 import Auth from "./pages/Auth";
@@ -33,16 +34,11 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-// Use the publishable key directly; host-derived keys are only needed for
-// custom-domain proxy setups.
-const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string;
+// GitHub APK builds can run without repository secrets. Do not crash the whole
+// WebView in that case; render the rider experience in local guest mode instead.
+const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
+const hasClerkConfig = Boolean(clerkPubKey);
 
-if (!clerkPubKey) {
-  throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
-}
-
-// proxyUrl is only set in production by the platform; leave undefined in dev
-// so Clerk loads from its own CDN using the URL embedded in the publishable key.
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL || undefined;
 
 function stripBase(path: string): string {
@@ -70,7 +66,6 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
-
 function MapLibreRtlPluginLoader() {
   useEffect(() => {
     try {
@@ -93,12 +88,79 @@ function MapLibreRtlPluginLoader() {
   return null;
 }
 
-function AppRoutes() {
+function OfflineAuthPage() {
+  const navigate = useNavigate();
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-background px-5 text-center">
+      <img
+        src={`${import.meta.env.BASE_URL}sikka-logo.svg`}
+        alt="Sikka"
+        className="h-24 w-auto mb-6"
+      />
+      <h1 className="text-2xl font-bold text-foreground">Sikka is ready</h1>
+      <p className="mt-3 max-w-sm text-sm text-muted-foreground">
+        This APK was built without the Clerk key, so it is running in guest mode. Add the GitHub secrets to enable phone login.
+      </p>
+      <Button className="mt-6" onClick={() => navigate('/', { replace: true })}>
+        Open Sikka
+      </Button>
+    </div>
+  );
+}
+
+function AppRouteElements({ authEnabled }: { authEnabled: boolean }) {
+  const authElement = authEnabled ? <Auth /> : <OfflineAuthPage />;
+  const signInElement = authEnabled ? <SignInPage /> : <OfflineAuthPage />;
+  const signUpElement = authEnabled ? <SignUpPage /> : <OfflineAuthPage />;
+
+  return (
+    <Routes>
+      <Route path="/" element={<Index />} />
+      <Route path="/splash" element={<Splash />} />
+      <Route path="/auth" element={authElement} />
+      <Route path="/sign-in/*" element={signInElement} />
+      <Route path="/sign-up/*" element={signUpElement} />
+      <Route path="/profile" element={<Profile />} />
+      <Route path="/plan" element={<TripPlan />} />
+      <Route path="/plan/setup" element={<PlanSetup />} />
+      <Route path="/discover-trip" element={<DiscoverTrip />} />
+      <Route path="/trip-result" element={<TripResult />} />
+      <Route path="/intercity" element={<Intercity />} />
+      <Route path="/travel/:mode" element={<TravelMode />} />
+      <Route path="/admin" element={<AdminDashboard />}>
+        <Route index element={<AdminMap />} />
+        <Route path="map" element={<AdminMap />} />
+        <Route path="transport" element={<AdminTransport />} />
+        <Route path="locations" element={<AdminLocations />} />
+        <Route path="routes" element={<AdminRoutes />} />
+        <Route path="reviews" element={<AdminReviews />} />
+        <Route path="reports" element={<AdminReports />} />
+        <Route path="discovery" element={<AdminDiscovery />} />
+        <Route path="analytics" element={<AdminAnalytics />} />
+      </Route>
+      <Route path="*" element={<NotFound />} />
+    </Routes>
+  );
+}
+
+function AppChrome({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <MapLibreRtlPluginLoader />
+      <Toaster />
+      <Sonner />
+      {children}
+    </>
+  );
+}
+
+function ClerkAppRoutes() {
   const navigate = useNavigate();
 
   return (
     <ClerkProvider
-      publishableKey={clerkPubKey}
+      publishableKey={clerkPubKey!}
       proxyUrl={clerkProxyUrl}
       signInUrl={`${basename}/sign-in`}
       signUpUrl={`${basename}/sign-up`}
@@ -107,37 +169,21 @@ function AppRoutes() {
     >
       <ClerkQueryClientCacheInvalidator />
       <AuthProvider>
-        <MapLibreRtlPluginLoader />
-        <Toaster />
-        <Sonner />
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/splash" element={<Splash />} />
-          <Route path="/auth" element={<Auth />} />
-          <Route path="/sign-in/*" element={<SignInPage />} />
-          <Route path="/sign-up/*" element={<SignUpPage />} />
-          <Route path="/profile" element={<Profile />} />
-          <Route path="/plan" element={<TripPlan />} />
-          <Route path="/plan/setup" element={<PlanSetup />} />
-          <Route path="/discover-trip" element={<DiscoverTrip />} />
-          <Route path="/trip-result" element={<TripResult />} />
-          <Route path="/intercity" element={<Intercity />} />
-          <Route path="/travel/:mode" element={<TravelMode />} />
-          <Route path="/admin" element={<AdminDashboard />}>
-            <Route index element={<AdminMap />} />
-            <Route path="map" element={<AdminMap />} />
-            <Route path="transport" element={<AdminTransport />} />
-            <Route path="locations" element={<AdminLocations />} />
-            <Route path="routes" element={<AdminRoutes />} />
-            <Route path="reviews" element={<AdminReviews />} />
-            <Route path="reports" element={<AdminReports />} />
-            <Route path="discovery" element={<AdminDiscovery />} />
-            <Route path="analytics" element={<AdminAnalytics />} />
-          </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <AppChrome>
+          <AppRouteElements authEnabled />
+        </AppChrome>
       </AuthProvider>
     </ClerkProvider>
+  );
+}
+
+function GuestAppRoutes() {
+  return (
+    <GuestAuthProvider>
+      <AppChrome>
+        <AppRouteElements authEnabled={false} />
+      </AppChrome>
+    </GuestAuthProvider>
   );
 }
 
@@ -145,7 +191,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <BrowserRouter basename={basename}>
-        <AppRoutes />
+        {hasClerkConfig ? <ClerkAppRoutes /> : <GuestAppRoutes />}
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
