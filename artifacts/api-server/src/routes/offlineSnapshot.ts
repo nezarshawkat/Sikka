@@ -3,8 +3,9 @@ import { db, transportTypesTable, transitLinesTable } from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
 
 const router = Router();
-const SNAPSHOT_VERSION = 1;
+const SNAPSHOT_VERSION = 2;
 const MAX_ROUTE_POINTS = 120;
+const PATH_SUSPECT_STEP_KM = 0.5;
 
 function roundCoord(value: number): number {
   return Math.round(value * 100000) / 100000;
@@ -23,6 +24,29 @@ function compactPath(path: [number, number][] | null | undefined): [number, numb
   const prev = out[out.length - 1];
   if (!prev || prev[0] !== compactLast[0] || prev[1] !== compactLast[1]) out.push(compactLast);
   return out.length >= 2 ? out : null;
+}
+
+function haversineKm(a: [number, number], b: [number, number]): number {
+  const r = 6371;
+  const dLat = ((b[1] - a[1]) * Math.PI) / 180;
+  const dLng = ((b[0] - a[0]) * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos((a[1] * Math.PI) / 180) * Math.cos((b[1] * Math.PI) / 180)
+    * Math.sin(dLng / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function maxConsecutiveStepKm(path: [number, number][] | null | undefined): number {
+  if (!path || path.length < 2) return 0;
+  let max = 0;
+  for (let i = 1; i < path.length; i++) max = Math.max(max, haversineKm(path[i - 1], path[i]));
+  return max;
+}
+
+function routeQuality(path: [number, number][] | null | undefined, hasFixedStops: boolean): "gtfs" | "standard" | "suspect" {
+  if (!path || path.length < 2) return "suspect";
+  if (maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM) return "suspect";
+  return hasFixedStops || path.length >= 50 ? "gtfs" : "standard";
 }
 
 function stampOf(value: unknown): number {
@@ -56,23 +80,29 @@ router.get("/snapshot", async (_req, res) => {
   }));
 
   const lines = lineRows
-    .map((l) => ({
-      id: l.id,
-      transportTypeId: l.transportTypeId,
-      lineNumber: l.lineNumber,
-      nameEn: l.nameEn,
-      nameAr: l.nameAr,
-      fromArea: l.fromArea,
-      toArea: l.toArea,
-      governorate: l.governorate,
-      viaStops: l.viaStops ?? [],
-      stops: l.stops ?? null,
-      path: compactPath(l.routePath?.coordinates ?? null),
-      priceEgp: l.priceEgp,
-      frequencyMinutes: l.frequencyMinutes,
-      hasFixedStops: l.hasFixedStops,
-      updatedAt: l.updatedAt,
-    }))
+    .map((l) => {
+      const path = l.routePath?.coordinates ?? null;
+      return {
+        id: l.id,
+        transportTypeId: l.transportTypeId,
+        lineNumber: l.lineNumber,
+        nameEn: l.nameEn,
+        nameAr: l.nameAr,
+        fromArea: l.fromArea,
+        toArea: l.toArea,
+        governorate: l.governorate,
+        viaStops: l.viaStops ?? [],
+        stops: l.stops ?? null,
+        path: compactPath(path),
+        pathPointCount: path?.length ?? 0,
+        pathSuspect: maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM,
+        routeQuality: routeQuality(path, l.hasFixedStops),
+        priceEgp: l.priceEgp,
+        frequencyMinutes: l.frequencyMinutes,
+        hasFixedStops: l.hasFixedStops,
+        updatedAt: l.updatedAt,
+      };
+    })
     .filter((l) => l.path && l.path.length >= 2);
 
   const newest = Math.max(

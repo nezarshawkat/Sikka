@@ -27,6 +27,9 @@ type OfflineLine = {
   governorate: string;
   viaStops: string[];
   path: LngLat[];
+  pathPointCount?: number;
+  pathSuspect?: boolean;
+  routeQuality?: "gtfs" | "standard" | "suspect";
   priceEgp: number;
   frequencyMinutes: number | null;
   hasFixedStops: boolean;
@@ -112,15 +115,18 @@ type Connector = {
 
 const API_ORIGIN = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
 const API_BASE = `${API_ORIGIN}/api`;
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
+  || "pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ";
 const SNAPSHOT_DB = "sikka-offline";
 const SNAPSHOT_STORE = "snapshots";
 const SNAPSHOT_KEY = "latest";
-const SNAPSHOT_SCHEMA_VERSION = 1;
+const SNAPSHOT_SCHEMA_VERSION = 2;
 const SNAPSHOT_REFRESH_MS = 10 * 60 * 1000;
 const WALK_MAX_KM = 0.8;
 const WALK_SPEED_KMH = 4.5;
 const WALK_DETOUR = 1.3;
 const FARE_MARKUP = 1.25;
+const roadGeometryCache = new Map<string, LngLat[] | null>();
 
 function modeOfType(nameEn: string): ModeKey {
   const n = nameEn.toLowerCase();
@@ -136,9 +142,9 @@ function modeOfType(nameEn: string): ModeKey {
 }
 
 function allowedModes(planKey: PlanKey): Set<ModeKey> {
-  if (planKey === "economic") return new Set(["metro", "monorail", "train", "bus", "serfis", "microbus"]);
-  if (planKey === "comfortable") return new Set(["metro", "monorail", "train", "bus", "serfis"]);
-  return new Set(["metro", "monorail", "train", "bus", "serfis", "microbus"]);
+  if (planKey === "economic") return new Set(["metro", "monorail", "train", "bus", "serfis", "microbus", "tuktuk"]);
+  if (planKey === "comfortable") return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
+  return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
 }
 
 function haversineKm(a: Coord, b: Coord): number {
@@ -147,6 +153,88 @@ function haversineKm(a: Coord, b: Coord): number {
   const dLng = ((b.lng - a.lng) * Math.PI) / 180;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
   return r * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function maxConsecutiveStepKm(path: LngLat[]): number {
+  let max = 0;
+  for (let i = 1; i < path.length; i++) {
+    max = Math.max(max, haversineKm({ lng: path[i - 1][0], lat: path[i - 1][1] }, { lng: path[i][0], lat: path[i][1] }));
+  }
+  return max;
+}
+
+function routeQuality(line: OfflineLine): "gtfs" | "standard" | "suspect" {
+  if (line.routeQuality) return line.routeQuality;
+  if (line.pathSuspect || maxConsecutiveStepKm(line.path) > 0.5) return "suspect";
+  return line.hasFixedStops || (line.pathPointCount ?? line.path.length) >= 50 ? "gtfs" : "standard";
+}
+
+function routeQualityPenalty(line: OfflineLine): number {
+  const quality = routeQuality(line);
+  if (quality === "gtfs") return -45;
+  if (quality === "suspect") return 70;
+  return 0;
+}
+
+function modePreferencePenalty(mode: ModeKey, planKey: PlanKey): number {
+  if (planKey === "economic") {
+    if (mode === "metro" || mode === "train" || mode === "bus") return -12;
+    if (mode === "microbus" || mode === "serfis") return 0;
+    if (mode === "taxi") return 90;
+  }
+  if (planKey === "comfortable") {
+    if (mode === "metro" || mode === "train" || mode === "bus") return -18;
+    if (mode === "microbus") return 85;
+    if (mode === "taxi" || mode === "tuktuk") return 18;
+  }
+  if (planKey === "premium") {
+    if (mode === "taxi") return -20;
+    if (mode === "metro" || mode === "train") return -10;
+    if (mode === "microbus") return 120;
+  }
+  return 0;
+}
+
+function connectorModeFromSegment(segment: ApiSegment): ModeKey | null {
+  if (segment.line_id) return null;
+  if (segment.transport_type_id === "walk" || segment.icon === "walk") return "walk";
+  if (segment.transport_type_id === "tuktuk" || segment.icon === "tuktuk" || segment.icon === "bike") return "tuktuk";
+  if (segment.transport_type_id === "taxi" || segment.icon === "car") return "taxi";
+  return null;
+}
+
+async function snapConnectorGeometry(mode: ModeKey, geometry: LngLat[]): Promise<LngLat[]> {
+  if (!MAPBOX_TOKEN || geometry.length < 2) return geometry;
+  if (mode !== "walk" && mode !== "taxi" && mode !== "tuktuk") return geometry;
+  const from = geometry[0];
+  const to = geometry[geometry.length - 1];
+  const profile = mode === "walk" ? "walking" : "driving";
+  const key = `${profile}:${from[0].toFixed(5)},${from[1].toFixed(5)}:${to[0].toFixed(5)},${to[1].toFixed(5)}`;
+  if (roadGeometryCache.has(key)) return roadGeometryCache.get(key) ?? geometry;
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 4500);
+  try {
+    const res = await fetch(
+      `https://api.mapbox.com/directions/v5/mapbox/${profile}/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&access_token=${encodeURIComponent(MAPBOX_TOKEN)}`,
+      { signal: controller.signal, cache: "force-cache" },
+    );
+    if (!res.ok) throw new Error("Directions failed");
+    const data = await res.json();
+    const coords = data.routes?.[0]?.geometry?.coordinates as LngLat[] | undefined;
+    if (coords && coords.length >= 2) {
+      const snapped = coords.map((p) => [p[0], p[1]] as LngLat);
+      snapped[0] = from;
+      snapped[snapped.length - 1] = to;
+      roadGeometryCache.set(key, snapped);
+      return snapped;
+    }
+  } catch {
+    roadGeometryCache.set(key, null);
+  } finally {
+    window.clearTimeout(timer);
+  }
+  return geometry;
 }
 
 function pointToSegment(point: Coord, a: LngLat, b: LngLat): { coord: Coord; distanceKm: number } {
@@ -219,6 +307,19 @@ function connectorFor(distanceKm: number, from: Coord, to: Coord, planKey: PlanK
     return { mode: "taxi", nameEn: "Taxi app", nameAr: "تطبيق تاكسي", color: "#111827", icon: "car", cost: Math.round(15 + distanceKm * 5), minutes: (distanceKm / 28) * 60, geometry };
   }
   return null;
+}
+
+function directTaxiConnector(distanceKm: number, from: Coord, to: Coord): Connector {
+  return {
+    mode: "taxi",
+    nameEn: "Taxi app",
+    nameAr: "تطبيق تاكسي",
+    color: "#111827",
+    icon: "car",
+    cost: Math.round(18 + distanceKm * 6),
+    minutes: (distanceKm / 32) * 60,
+    geometry: [[from.lng, from.lat], [to.lng, to.lat]],
+  };
 }
 
 function lineFare(type: OfflineType, line: OfflineLine, km: number): number {
@@ -350,13 +451,26 @@ function scoreSegments(segments: ApiSegment[], planKey: PlanKey): number {
   const transfers = Math.max(0, segments.filter((s) => s.line_id).length - 1);
   const costWeight = planKey === "economic" ? 2.6 : planKey === "comfortable" ? 1 : 0.25;
   const timeWeight = planKey === "economic" ? 0.7 : planKey === "comfortable" ? 1.25 : 2.2;
-  return totalCost * costWeight + totalTime * timeWeight + transfers * 15;
+  const connectorPenalty = segments.reduce((sum, s) => {
+    const mode = connectorModeFromSegment(s);
+    return sum + (mode ? modePreferencePenalty(mode, planKey) : 0);
+  }, 0);
+  return totalCost * costWeight + totalTime * timeWeight + transfers * 15 + connectorPenalty;
 }
 
-function makePlan(segments: ApiSegment[], request: PlannerRequest, snapshot: OfflineSnapshot): ApiPlan {
+async function snapConnectorSegments(segments: ApiSegment[]): Promise<ApiSegment[]> {
+  return Promise.all(segments.map(async (segment) => {
+    const mode = connectorModeFromSegment(segment);
+    if (!mode || !segment.route_geometry) return segment;
+    return { ...segment, route_geometry: await snapConnectorGeometry(mode, segment.route_geometry) };
+  }));
+}
+
+async function makePlan(segments: ApiSegment[], request: PlannerRequest, snapshot: OfflineSnapshot): Promise<ApiPlan> {
   const planKey: PlanKey = request.tripType === "economic" || request.tripType === "premium" ? request.tripType : "comfortable";
   const isArabic = request.language === "ar";
-  const enrichedSegments = attachAlternatives(snapshot, segments, planKey, isArabic);
+  const snappedSegments = await snapConnectorSegments(segments);
+  const enrichedSegments = attachAlternatives(snapshot, snappedSegments, planKey, isArabic);
   const cost = enrichedSegments.reduce((sum, s) => sum + s.cost_egp, 0);
   const time = enrichedSegments.reduce((sum, s) => sum + s.duration_minutes, 0);
   const distance = haversineKm({ lat: request.startLat, lng: request.startLng }, { lat: request.endLat, lng: request.endLng });
@@ -443,7 +557,11 @@ function buildCandidates(snapshot: OfflineSnapshot, point: Coord, planKey: PlanK
     const closest = closestPointOnPath(line.path, point);
     if (closest.distanceKm <= maxKm) candidates.push({ line, type, mode, closest });
   }
-  candidates.sort((a, b) => a.closest.distanceKm - b.closest.distanceKm);
+  candidates.sort((a, b) => {
+    const qa = routeQualityPenalty(a.line) + modePreferencePenalty(a.mode, planKey);
+    const qb = routeQualityPenalty(b.line) + modePreferencePenalty(b.mode, planKey);
+    return (a.closest.distanceKm * 18 + qa) - (b.closest.distanceKm * 18 + qb);
+  });
   return candidates.slice(0, limit);
 }
 
@@ -485,8 +603,7 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
   }
 
   if (planKey === "premium" && directKm <= 18) {
-    const taxi = connectorFor(directKm, origin, dest, planKey);
-    if (taxi) return makePlan([connectorSegment(taxi, isArabic ? "موقعك" : "Your location", request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic)], request, snapshot);
+    return makePlan([connectorSegment(directTaxiConnector(directKm, origin, dest), isArabic ? "موقعك" : "Your location", request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic)], request, snapshot);
   }
 
   const startCandidates = buildCandidates(snapshot, origin, planKey, 36);
@@ -505,7 +622,9 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
         ride,
         connectorSegment(egress, ride.end_name, request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic),
       ];
-      const score = scoreSegments(segments, planKey);
+      const score = scoreSegments(segments, planKey)
+        + routeQualityPenalty(start.line)
+        + modePreferencePenalty(start.mode, planKey);
       if (!best || score < best.score) best = { score, segments };
     }
   }
@@ -528,7 +647,11 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
         rideB,
         connectorSegment(egress, rideB.end_name, request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic),
       ];
-      const score = scoreSegments(segments, planKey);
+      const score = scoreSegments(segments, planKey)
+        + routeQualityPenalty(start.line)
+        + routeQualityPenalty(end.line)
+        + modePreferencePenalty(start.mode, planKey)
+        + modePreferencePenalty(end.mode, planKey);
       if (!best || score < best.score) best = { score, segments };
     }
   }
