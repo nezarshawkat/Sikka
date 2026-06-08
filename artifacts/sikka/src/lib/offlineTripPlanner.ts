@@ -52,23 +52,28 @@ type PlannerRequest = {
   mode?: string;
 };
 
-type ApiSegment = {
+type ApiAlternative = {
   transport_type_id: string;
   transport_name: string;
-  government_type: string;
-  category: string;
-  start_name: string;
-  end_name: string;
   cost_egp: number;
   duration_minutes: number;
   color: string;
   icon: string;
-  line_id: string | null;
-  line_number: string | null;
+  line_id?: string | null;
+  line_number?: string | null;
   info?: string;
   instructions?: string[];
   route_geometry?: LngLat[] | null;
-  alternatives: unknown[];
+};
+
+type ApiSegment = ApiAlternative & {
+  government_type: string;
+  category: string;
+  start_name: string;
+  end_name: string;
+  line_id: string | null;
+  line_number: string | null;
+  alternatives: ApiAlternative[];
 };
 
 type ApiPlan = {
@@ -260,8 +265,8 @@ function rideSegment(candidate: Candidate, from: ClosestPoint, to: ClosestPoint,
     transport_name: transportName(candidate.type, candidate.line, isArabic),
     government_type: candidate.type.governmentType,
     category: candidate.type.category,
-    start_name: from.coord.lat === candidate.line.path[0]?.[1] ? candidate.line.fromArea : candidate.line.fromArea,
-    end_name: to.coord.lat === candidate.line.path[candidate.line.path.length - 1]?.[1] ? candidate.line.toArea : candidate.line.toArea,
+    start_name: candidate.line.fromArea,
+    end_name: candidate.line.toArea,
     cost_egp: lineFare(candidate.type, candidate.line, km),
     duration_minutes: Math.max(2, Math.round(minutes)),
     color: candidate.type.color,
@@ -279,6 +284,66 @@ function rideSegment(candidate: Candidate, from: ClosestPoint, to: ClosestPoint,
   };
 }
 
+function toAlternative(segment: ApiSegment): ApiAlternative {
+  return {
+    transport_type_id: segment.transport_type_id,
+    transport_name: segment.transport_name,
+    cost_egp: segment.cost_egp,
+    duration_minutes: segment.duration_minutes,
+    color: segment.color,
+    icon: segment.icon,
+    line_id: segment.line_id,
+    line_number: segment.line_number,
+    info: segment.info,
+    instructions: segment.instructions,
+    route_geometry: segment.route_geometry,
+  };
+}
+
+function buildRideAlternatives(
+  snapshot: OfflineSnapshot,
+  segment: ApiSegment,
+  planKey: PlanKey,
+  isArabic: boolean,
+): ApiAlternative[] {
+  if (!segment.line_id || !segment.route_geometry || segment.route_geometry.length < 2) return [];
+  const startPoint = segment.route_geometry[0];
+  const endPoint = segment.route_geometry[segment.route_geometry.length - 1];
+  const start = { lat: startPoint[1], lng: startPoint[0] };
+  const end = { lat: endPoint[1], lng: endPoint[0] };
+  const starts = buildCandidates(snapshot, start, planKey, 40);
+  const ends = buildCandidates(snapshot, end, planKey, 40);
+  const alternatives: ApiAlternative[] = [];
+  const seen = new Set<string>();
+
+  for (const a of starts) {
+    if (a.line.id === segment.line_id || seen.has(a.line.id)) continue;
+    const b = ends.find((candidate) => candidate.line.id === a.line.id);
+    if (!b) continue;
+    const ride = rideSegment(a, a.closest, b.closest, isArabic);
+    if (ride.route_geometry && ride.route_geometry.length >= 2) {
+      alternatives.push(toAlternative(ride));
+      seen.add(a.line.id);
+    }
+    if (alternatives.length >= 4) break;
+  }
+
+  alternatives.sort((a, b) => (a.cost_egp + a.duration_minutes) - (b.cost_egp + b.duration_minutes));
+  return alternatives;
+}
+
+function attachAlternatives(
+  snapshot: OfflineSnapshot,
+  segments: ApiSegment[],
+  planKey: PlanKey,
+  isArabic: boolean,
+): ApiSegment[] {
+  return segments.map((segment) => ({
+    ...segment,
+    alternatives: segment.line_id ? buildRideAlternatives(snapshot, segment, planKey, isArabic) : segment.alternatives,
+  }));
+}
+
 function scoreSegments(segments: ApiSegment[], planKey: PlanKey): number {
   const totalCost = segments.reduce((sum, s) => sum + s.cost_egp, 0);
   const totalTime = segments.reduce((sum, s) => sum + s.duration_minutes, 0);
@@ -289,11 +354,14 @@ function scoreSegments(segments: ApiSegment[], planKey: PlanKey): number {
 }
 
 function makePlan(segments: ApiSegment[], request: PlannerRequest, snapshot: OfflineSnapshot): ApiPlan {
-  const cost = segments.reduce((sum, s) => sum + s.cost_egp, 0);
-  const time = segments.reduce((sum, s) => sum + s.duration_minutes, 0);
+  const planKey: PlanKey = request.tripType === "economic" || request.tripType === "premium" ? request.tripType : "comfortable";
+  const isArabic = request.language === "ar";
+  const enrichedSegments = attachAlternatives(snapshot, segments, planKey, isArabic);
+  const cost = enrichedSegments.reduce((sum, s) => sum + s.cost_egp, 0);
+  const time = enrichedSegments.reduce((sum, s) => sum + s.duration_minutes, 0);
   const distance = haversineKm({ lat: request.startLat, lng: request.startLng }, { lat: request.endLat, lng: request.endLng });
   return {
-    segments,
+    segments: enrichedSegments,
     total_cost_egp: Math.round(cost),
     total_duration_minutes: Math.round(time),
     budget_range: { min: Math.max(0, Math.round(cost * 0.8)), max: Math.round(cost * 1.35 + 10) },
