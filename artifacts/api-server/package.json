@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
-    "start": "node --max-old-space-size=384 --enable-source-maps ./dist/index.mjs",
+    "start": "node --max-old-space-size=1536 --enable-source-maps ./dist/index.mjs",
     "seed:stops": "node --enable-source-maps ./dist/scripts/importStops.mjs",
     "enrich:bus-paths": "node --enable-source-maps ./dist/scripts/enrichBusPaths.mjs",
     "enrich-routes": "node --enable-source-maps ./dist/scripts/enrichBusPaths.mjs",
