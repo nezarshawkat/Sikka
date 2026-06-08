@@ -5,5 +5,5 @@
         android:width="168dp"
         android:height="168dp"
         android:gravity="center"
-        android:drawable="@drawable/ic_launcher_foreground" />
+        android:drawable="@drawable/sikka_logo" />
 </layer-list>
