@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t, Language } from '@/lib/i18n';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, Shield, ArrowLeft, Users, Globe, UserRound } from 'lucide-react';
+import { Phone, Shield, ArrowLeft, Users, Globe, UserRound, LocateFixed } from 'lucide-react';
 import { toast } from 'sonner';
 import CountryCodeSelect, { countries, Country } from '@/components/auth/CountryCodeSelect';
 import { api } from '@/lib/api';
@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import { languageNames } from '@/lib/i18n';
 
-type Step = 'language' | 'phone' | 'otp' | 'name' | 'nationality' | 'admin';
+type Step = 'language' | 'phone' | 'otp' | 'name' | 'location' | 'nationality' | 'admin';
 
 const countriesByDialLength = [...countries].sort((a, b) => b.dial.length - a.dial.length);
 const stripNationalPrefix = (value: string) => value.replace(/^0/, '');
@@ -272,6 +272,24 @@ const Auth = () => {
       localStorage.setItem('sikka-display-name', displayName.trim());
     } finally {
       setIsLoading(false);
+      setStep('location');
+    }
+  };
+
+  const handleEnableLocation = async () => {
+    setIsLoading(true);
+    try {
+      if ('geolocation' in navigator) {
+        await new Promise<void>((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            () => resolve(),
+            () => resolve(),
+            { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 },
+          );
+        });
+      }
+    } finally {
+      setIsLoading(false);
       setStep('nationality');
     }
   };
@@ -521,6 +539,47 @@ const Auth = () => {
                 >
                   {isLoading ? '...' : t('continue', language)}
                 </Button>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {step === 'location' && (
+          <motion.div
+            key="location"
+            variants={slideVariants}
+            initial="enter" animate="center" exit="exit"
+            transition={{ duration: 0.2 }}
+            className="w-full max-w-sm"
+          >
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <LocateFixed className="h-5 w-5" />
+                  </span>
+                  {language === 'ar' ? 'فعّل الموقع' : 'Enable location'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  {language === 'ar'
+                    ? 'نستخدم موقعك لعرض أقرب نقطة ركوب وتخطيط الرحلة بدقة.'
+                    : 'Sikka uses your location to find nearby pickup points and plan accurate trips.'}
+                </p>
+                <Button
+                  onClick={handleEnableLocation}
+                  disabled={isLoading}
+                  className="w-full"
+                >
+                  {isLoading ? '...' : (language === 'ar' ? 'تفعيل الموقع' : 'Enable location')}
+                </Button>
+                <button
+                  onClick={() => setStep('nationality')}
+                  className="w-full text-sm text-muted-foreground hover:text-primary transition-colors"
+                >
+                  {language === 'ar' ? 'ليس الآن' : 'Not now'}
+                </button>
               </CardContent>
             </Card>
           </motion.div>
