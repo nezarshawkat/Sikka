@@ -1,0 +1,256 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 220 20% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 10%;
+
+    --primary: 204 100% 57%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 20% 10%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 142 71% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 217 91% 60%;
+
+    --radius: 1.35rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 204 100% 57%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 96%;
+    --sidebar-accent-foreground: 220 20% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217 91% 60%;
+
+    /* Transport colors */
+    --transport-taxi: 217 91% 60%;
+    --transport-metro: 0 84% 60%;
+    --transport-train: 142 71% 45%;
+    --transport-bus: 45 93% 47%;
+    --transport-airplane: 270 70% 60%;
+    --transport-microbus: 30 80% 50%;
+    --transport-tuktuk: 340 75% 55%;
+    --transport-monorail: 190 80% 45%;
+  }
+
+  .dark {
+    --background: 220 20% 7%;
+    --foreground: 210 20% 98%;
+
+    --card: 220 20% 10%;
+    --card-foreground: 210 20% 98%;
+
+    --popover: 220 20% 10%;
+    --popover-foreground: 210 20% 98%;
+
+    --primary: 204 100% 57%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 16%;
+    --secondary-foreground: 210 20% 98%;
+
+    --muted: 220 14% 16%;
+    --muted-foreground: 220 10% 60%;
+
+    --accent: 142 71% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 210 20% 98%;
+
+    --border: 220 14% 16%;
+    --input: 220 14% 16%;
+    --ring: 217 91% 60%;
+
+    --sidebar-background: 220 20% 7%;
+    --sidebar-foreground: 210 20% 98%;
+    --sidebar-primary: 204 100% 57%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 16%;
+    --sidebar-accent-foreground: 210 20% 98%;
+    --sidebar-border: 220 14% 16%;
+    --sidebar-ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  /* RTL support */
+  [dir="rtl"] body {
+    font-family: 'Cairo', sans-serif;
+  }
+}
+
+/* Mapbox overrides */
+.mapboxgl-ctrl-logo {
+  display: none !important;
+}
+
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-attrib-button {
+  display: none !important;
+}
+
+.mapboxgl-ctrl-bottom-left,
+.mapboxgl-ctrl-bottom-right {
+  display: none !important;
+}
+
+
+@layer components {
+  .glass-panel {
+    @apply backdrop-blur-xl border border-white/25 shadow-xl;
+    background-color: transparent;
+    background-image: linear-gradient(135deg, hsl(var(--card) / 0.6), hsl(var(--card) / 0.42));
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+  }
+}
+
+@layer base {
+  button,
+  input,
+  textarea,
+  select,
+  [role="button"],
+  [role="dialog"],
+  [data-radix-popper-content-wrapper] > *,
+  .rounded-lg,
+  .rounded-xl,
+  .rounded-md {
+    border-radius: max(var(--radius), 1.15rem);
+  }
+
+  .bg-card,
+  [class*="bg-card/"],
+  .bg-popover,
+  [class*="bg-popover/"],
+  .bg-background\/50,
+  .bg-background\/70,
+  .bg-background\/80,
+  .bg-muted\/50 {
+    backdrop-filter: blur(18px) saturate(1.25);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  .shadow-sm {
+    box-shadow: 0 10px 30px hsl(220 40% 2% / 0.08);
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply backdrop-blur-2xl border border-white/25 shadow-xl;
+    background-color: transparent;
+    background-image: linear-gradient(135deg, hsl(var(--card) / 0.6), hsl(var(--card) / 0.42));
+    backdrop-filter: blur(24px) saturate(185%);
+    -webkit-backdrop-filter: blur(24px) saturate(185%);
+    box-shadow: 0 18px 60px hsl(220 40% 2% / 0.18), inset 0 1px 0 hsl(0 0% 100% / 0.5);
+  }
+
+  .dark .glass-panel {
+    background-image: linear-gradient(135deg, hsl(var(--card) / 0.52), hsl(var(--card) / 0.32));
+    border-color: hsl(0 0% 100% / 0.14);
+    box-shadow: 0 20px 70px hsl(220 60% 1% / 0.4), inset 0 1px 0 hsl(0 0% 100% / 0.12);
+  }
+
+  :root:not(.dark) .profile-glass-action {
+    background: linear-gradient(135deg, hsl(0 0% 100% / 0.72), hsl(204 100% 94% / 0.34)) !important;
+    border-color: hsl(204 100% 80% / 0.4) !important;
+    color: hsl(var(--foreground)) !important;
+    box-shadow: 0 18px 42px hsl(204 80% 45% / 0.12), inset 0 1px 0 hsl(0 0% 100% / 0.72);
+  }
+}
+
+@layer base {
+  .bg-card,
+  [class*="bg-card/"],
+  .bg-popover,
+  [class*="bg-popover/"],
+  .bg-background,
+  [class*="bg-background/"],
+  .bg-muted,
+  [class*="bg-muted/"] {
+    backdrop-filter: blur(18px) saturate(1.25);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  [dir="rtl"] .maplibregl-canvas,
+  [dir="rtl"] .mapboxgl-canvas {
+    font-family: 'Cairo', 'Noto Naskh Arabic', 'Noto Sans Arabic', sans-serif;
+  }
+}
+
+@layer components {
+  .gradient-button-surface {
+    background: linear-gradient(90deg, #02cffa 0%, #02cffa 68%, #258dff 100%);
+    box-shadow: none;
+    background-clip: padding-box;
+    overflow: hidden;
+  }
+
+  .gradient-button-surface::before,
+  .gradient-button-surface::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  .glass-popup-surface {
+    background: hsl(var(--card) / 0.84);
+    border: 1px solid hsl(0 0% 100% / 0.32);
+    backdrop-filter: blur(26px) saturate(1.45);
+    -webkit-backdrop-filter: blur(26px) saturate(1.45);
+  }
+
+  .dark .glass-popup-surface {
+    background: hsl(220 22% 8% / 0.88);
+    border-color: hsl(0 0% 100% / 0.12);
+  }
+
+  .planning-orb {
+    position: absolute;
+    width: 16rem;
+    height: 16rem;
+    border-radius: 999px;
+    filter: blur(14px);
+    opacity: 0.55;
+    animation: float-orb 7s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes float-orb {
+  from { transform: translate3d(-8%, 4%, 0) scale(0.95); }
+  to { transform: translate3d(12%, -10%, 0) scale(1.08); }
+}
+
