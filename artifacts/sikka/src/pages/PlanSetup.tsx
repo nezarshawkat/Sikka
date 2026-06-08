@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { api } from '@/lib/api';
+import { planTripOnDevice } from '@/lib/offlineTripPlanner';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 
@@ -62,16 +63,31 @@ export default function PlanSetup() {
     let cancelled = false;
     const plan = async () => {
       try {
-        const data = await api.post<{ segments?: Array<Record<string, unknown>>; [k: string]: unknown }>('/trips/plan', {
+        let data = await planTripOnDevice({
           startLat: request.startLat,
           startLng: request.startLng,
           endLat: request.destLat,
           endLng: request.destLng,
+          destination: request.destination,
           tripType: request.tripType,
           budget: request.budget,
           language,
           mode: request.mode,
         });
+
+        if (!data) {
+          data = await api.post<{ segments?: Array<Record<string, unknown>>; [k: string]: unknown }>('/trips/plan', {
+            startLat: request.startLat,
+            startLng: request.startLng,
+            endLat: request.destLat,
+            endLng: request.destLng,
+            tripType: request.tripType,
+            budget: request.budget,
+            language,
+            mode: request.mode,
+          });
+        }
+
         if (cancelled) return;
         if (!data?.segments?.length) throw new Error(t('noRouteTitle', language));
 
