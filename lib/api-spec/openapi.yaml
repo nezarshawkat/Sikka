@@ -1,0 +1,214 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: Egypt Transit API - Sikka + Intercity aggregator
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: intercity
+    description: Intercity transport aggregation
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /intercity/cities:
+    get:
+      operationId: listInterCities
+      tags: [intercity]
+      summary: List all cities available across operators
+      responses:
+        "200":
+          description: Cities list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InterCity"
+  /intercity/search:
+    get:
+      operationId: searchInterTrips
+      tags: [intercity]
+      summary: Search intercity trips across all operators
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Origin city name or "auto"
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Destination city name
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Travel date YYYY-MM-DD
+        - name: userLat
+          in: query
+          required: false
+          schema:
+            type: ["number", "null"]
+          description: User latitude for nearest-station routing
+        - name: userLng
+          in: query
+          required: false
+          schema:
+            type: ["number", "null"]
+          description: User longitude for nearest-station routing
+      responses:
+        "200":
+          description: Trip results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterTripResults"
+  /intercity/operators:
+    get:
+      operationId: listInterOperators
+      tags: [intercity]
+      summary: List all supported operators
+      responses:
+        "200":
+          description: Operators list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InterOperator"
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required: [status]
+    InterCity:
+      type: object
+      required: [id, nameEn, nameAr, governorate]
+      properties:
+        id:
+          type: string
+        nameEn:
+          type: string
+        nameAr:
+          type: string
+        normalizedName:
+          type: string
+        governorate:
+          type: string
+        lat:
+          type: ["number", "null"]
+        lng:
+          type: ["number", "null"]
+    InterOperator:
+      type: object
+      required: [id, name, slug, bookingType, active]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        logoUrl:
+          type: ["string", "null"]
+        website:
+          type: ["string", "null"]
+        bookingType:
+          type: string
+          description: "online | office | hotline | onboard"
+        active:
+          type: boolean
+    InterStation:
+      type: object
+      required: [id, operatorId, cityId, name]
+      properties:
+        id:
+          type: string
+        operatorId:
+          type: string
+        cityId:
+          type: string
+        name:
+          type: string
+        address:
+          type: ["string", "null"]
+        lat:
+          type: ["number", "null"]
+        lng:
+          type: ["number", "null"]
+    InterTrip:
+      type: object
+      required: [operator, operatorSlug, departure, arrival, durationMinutes, priceEgp, fromStation, toStation, bookingMethod]
+      properties:
+        operator:
+          type: string
+        operatorSlug:
+          type: string
+        operatorLogo:
+          type: ["string", "null"]
+        departure:
+          type: string
+          description: "HH:MM format"
+        arrival:
+          type: string
+          description: "HH:MM format"
+        durationMinutes:
+          type: integer
+        priceEgp:
+          type: number
+        fromStation:
+          type: string
+        toStation:
+          type: string
+        bookingMethod:
+          type: string
+          description: "online | office | hotline | onboard"
+        bookingUrl:
+          type: ["string", "null"]
+        availableSeats:
+          type: ["integer", "null"]
+        distanceKm:
+          type: ["number", "null"]
+        distanceScore:
+          type: ["number", "null"]
+        busType:
+          type: ["string", "null"]
+    InterTripResults:
+      type: object
+      required: [trips, fromCity, toCity, date]
+      properties:
+        trips:
+          type: array
+          items:
+            $ref: "#/components/schemas/InterTrip"
+        fromCity:
+          type: string
+        toCity:
+          type: string
+        date:
+          type: string
+        cached:
+          type: boolean
