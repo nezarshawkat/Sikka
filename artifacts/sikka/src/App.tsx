@@ -30,6 +30,7 @@ import AdminDiscovery from "./pages/admin/AdminDiscovery";
 import AdminAnalytics from "./pages/admin/AdminAnalytics";
 import AdminMap from "./pages/admin/AdminMap";
 import NotFound from "./pages/NotFound";
+import "./mobile-shell.css";
 
 const queryClient = new QueryClient();
 const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
