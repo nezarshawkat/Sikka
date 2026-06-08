@@ -49,11 +49,11 @@ jobs:
       - name: Build web app
         run: pnpm --filter @workspace/sikka run build:mobile
 
-      - name: Apply Android app icon
-        run: node scripts/apply-android-icon.mjs
-
       - name: Sync Capacitor Android
         run: pnpm --filter @workspace/sikka exec cap sync android
+
+      - name: Apply Android app icon
+        run: node scripts/apply-android-icon.mjs
 
       - name: Build debug APK
         working-directory: artifacts/sikka/android
