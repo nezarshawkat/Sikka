@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 import { planTripOnDevice } from '@/lib/offlineTripPlanner';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+type TripPlanResponse = { segments?: unknown[]; [k: string]: unknown };
 
 const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
 
@@ -63,7 +64,7 @@ export default function PlanSetup() {
     let cancelled = false;
     const plan = async () => {
       try {
-        let data = await planTripOnDevice({
+        let data: TripPlanResponse | null = await planTripOnDevice({
           startLat: request.startLat,
           startLng: request.startLng,
           endLat: request.destLat,
@@ -76,7 +77,7 @@ export default function PlanSetup() {
         });
 
         if (!data) {
-          data = await api.post<{ segments?: Array<Record<string, unknown>>; [k: string]: unknown }>('/trips/plan', {
+          data = await api.post<TripPlanResponse>('/trips/plan', {
             startLat: request.startLat,
             startLng: request.startLng,
             endLat: request.destLat,
@@ -94,10 +95,10 @@ export default function PlanSetup() {
         const originName = await reverseGeocode(request.startLat, request.startLng, language);
         if (Array.isArray(data.segments) && data.segments.length > 0) {
           const segs = [...data.segments];
-          if (originName) segs[0] = { ...segs[0], start_name: originName };
+          if (originName && typeof segs[0] === 'object' && segs[0]) segs[0] = { ...segs[0], start_name: originName };
           if (request.destination) {
             const last = segs.length - 1;
-            segs[last] = { ...segs[last], end_name: request.destination };
+            if (typeof segs[last] === 'object' && segs[last]) segs[last] = { ...segs[last], end_name: request.destination };
           }
           data.segments = segs;
         }
