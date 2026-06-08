@@ -37,6 +37,62 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
+export const GuestAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [language, setLanguageState] = useState<Language>(() => {
+    return (localStorage.getItem('sikka-lang') as Language) || 'en';
+  });
+  const [profile, setProfile] = useState<Profile | null>(() => ({
+    displayName: localStorage.getItem('sikka-display-name') || 'Sikka rider',
+    phone: null,
+    language: (localStorage.getItem('sikka-lang') as Language) || 'en',
+    nationality: (localStorage.getItem('sikka-nationality') as 'egyptian' | 'foreigner') || 'egyptian',
+    isAdmin: false,
+  }));
+
+  const setLanguage = (lang: Language) => {
+    setLanguageState(lang);
+    localStorage.setItem('sikka-lang', lang);
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    document.documentElement.lang = lang;
+    setProfile((current) => current ? { ...current, language: lang } : current);
+  };
+
+  useEffect(() => {
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+    document.documentElement.lang = language;
+  }, [language]);
+
+  const refreshProfile = async () => {
+    setProfile({
+      displayName: localStorage.getItem('sikka-display-name') || 'Sikka rider',
+      phone: null,
+      language,
+      nationality: (localStorage.getItem('sikka-nationality') as 'egyptian' | 'foreigner') || 'egyptian',
+      isAdmin: false,
+    });
+  };
+
+  const signOut = async () => {
+    localStorage.removeItem('sikka_admin_token');
+    await refreshProfile();
+  };
+
+  return (
+    <AuthContext.Provider value={{
+      user: { id: 'sikka-mobile-guest' },
+      profile,
+      isAdmin: false,
+      isLoading: false,
+      language,
+      setLanguage,
+      signOut,
+      refreshProfile,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user: clerkUser, isLoaded: userLoaded } = useUser();
   const { signOut: clerkSignOut } = useClerkAuth();
