@@ -23,6 +23,10 @@ for (const folder of densityFolders) {
   }
 }
 
+const drawableDir = join(resRoot, 'drawable');
+mkdirSync(drawableDir, { recursive: true });
+writeFileSync(join(drawableDir, 'sikka_logo.png'), iconPng);
+
 const adaptiveIcon = `<?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
@@ -35,4 +39,4 @@ mkdirSync(adaptiveDir, { recursive: true });
 writeFileSync(join(adaptiveDir, 'ic_launcher.xml'), adaptiveIcon);
 writeFileSync(join(adaptiveDir, 'ic_launcher_round.xml'), adaptiveIcon);
 
-console.log('Applied Sikka Android launcher icon.');
+console.log('Applied Sikka Android launcher and splash logo assets.');
