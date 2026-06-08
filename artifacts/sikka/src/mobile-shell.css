@@ -23,21 +23,25 @@ body {
   min-height: 100dvh;
   height: 100dvh;
   max-height: 100dvh;
-  overflow: hidden;
-}
-
-#root .min-h-screen > :not(.fixed):not(.absolute):not(.sticky):last-child {
-  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
-#root .sticky + div,
-#root .sticky + main,
-#root .sticky + section {
-  min-height: 0;
-  overflow-y: auto;
+#root .h-screen,
+#root .fixed.inset-0 {
   overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
+}
+
+#root .sticky.top-0 {
+  top: 0;
+}
+
+#root .sticky.bottom-0 {
+  bottom: 0;
+}
+
+#root .min-h-screen > :not(.fixed):not(.absolute) {
+  min-width: 0;
 }
