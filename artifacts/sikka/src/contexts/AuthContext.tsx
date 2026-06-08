@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useUser, useAuth as useClerkAuth } from '@clerk/react';
-import { api } from '@/lib/api';
+import { api, setAuthTokenProvider } from '@/lib/api';
 import type { Language } from '@/lib/i18n';
 
 export interface Profile {
@@ -39,7 +39,7 @@ export function useAuth() {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user: clerkUser, isLoaded: userLoaded } = useUser();
-  const { signOut: clerkSignOut } = useClerkAuth();
+  const { signOut: clerkSignOut, getToken } = useClerkAuth();
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -49,6 +49,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const adminToken = typeof window !== 'undefined' ? localStorage.getItem('sikka_admin_token') : null;
+
+  useEffect(() => {
+    setAuthTokenProvider(async () => getToken());
+    return () => setAuthTokenProvider(null);
+  }, [getToken]);
 
   const fetchProfile = useCallback(async () => {
     const hasAdminToken = !!localStorage.getItem('sikka_admin_token');
