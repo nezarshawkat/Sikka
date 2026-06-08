@@ -202,7 +202,7 @@ function walkMinutes(km: number): number {
   return ((km * WALK_DETOUR) / WALK_SPEED_KMH) * 60;
 }
 
-function connectorFor(distanceKm: number, from: Coord, to: Coord, planKey: PlanKey, isArabic: boolean): Connector | null {
+function connectorFor(distanceKm: number, from: Coord, to: Coord, planKey: PlanKey): Connector | null {
   const geometry: LngLat[] = [[from.lng, from.lat], [to.lng, to.lat]];
   if (distanceKm <= WALK_MAX_KM) {
     return { mode: "walk", nameEn: "Walk", nameAr: "مشي", color: "#64748B", icon: "walk", cost: 0, minutes: walkMinutes(distanceKm), geometry };
@@ -213,7 +213,6 @@ function connectorFor(distanceKm: number, from: Coord, to: Coord, planKey: PlanK
   if (planKey !== "economic" && distanceKm <= 5) {
     return { mode: "taxi", nameEn: "Taxi app", nameAr: "تطبيق تاكسي", color: "#111827", icon: "car", cost: Math.round(15 + distanceKm * 5), minutes: (distanceKm / 28) * 60, geometry };
   }
-  if (isArabic) return null;
   return null;
 }
 
@@ -261,8 +260,8 @@ function rideSegment(candidate: Candidate, from: ClosestPoint, to: ClosestPoint,
     transport_name: transportName(candidate.type, candidate.line, isArabic),
     government_type: candidate.type.governmentType,
     category: candidate.type.category,
-    start_name: candidate.line.fromArea,
-    end_name: candidate.line.toArea,
+    start_name: from.coord.lat === candidate.line.path[0]?.[1] ? candidate.line.fromArea : candidate.line.fromArea,
+    end_name: to.coord.lat === candidate.line.path[candidate.line.path.length - 1]?.[1] ? candidate.line.toArea : candidate.line.toArea,
     cost_egp: lineFare(candidate.type, candidate.line, km),
     duration_minutes: Math.max(2, Math.round(minutes)),
     color: candidate.type.color,
@@ -413,12 +412,12 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
   const directKm = haversineKm(origin, dest);
 
   if (directKm <= WALK_MAX_KM) {
-    const walk = connectorFor(directKm, origin, dest, planKey, isArabic);
+    const walk = connectorFor(directKm, origin, dest, planKey);
     if (walk) return makePlan([connectorSegment(walk, isArabic ? "موقعك" : "Your location", request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic)], request, snapshot);
   }
 
   if (planKey === "premium" && directKm <= 18) {
-    const taxi = connectorFor(directKm, origin, dest, planKey, isArabic);
+    const taxi = connectorFor(directKm, origin, dest, planKey);
     if (taxi) return makePlan([connectorSegment(taxi, isArabic ? "موقعك" : "Your location", request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic)], request, snapshot);
   }
 
@@ -429,14 +428,14 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
   for (const start of startCandidates) {
     for (const end of endCandidates) {
       if (start.line.id !== end.line.id) continue;
-      const access = connectorFor(start.closest.distanceKm, origin, start.closest.coord, planKey, isArabic);
-      const egress = connectorFor(end.closest.distanceKm, end.closest.coord, dest, planKey, isArabic);
+      const access = connectorFor(start.closest.distanceKm, origin, start.closest.coord, planKey);
+      const egress = connectorFor(end.closest.distanceKm, end.closest.coord, dest, planKey);
       if (!access || !egress) continue;
       const ride = rideSegment(start, start.closest, end.closest, isArabic);
       const segments = [
-        ...(access.mode === "walk" && access.distanceKm === 0 ? [] : [connectorSegment(access, isArabic ? "موقعك" : "Your location", ride.start_name, isArabic)]),
+        connectorSegment(access, isArabic ? "موقعك" : "Your location", ride.start_name, isArabic),
         ride,
-        ...(egress.mode === "walk" && egress.distanceKm === 0 ? [] : [connectorSegment(egress, ride.end_name, request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic)]),
+        connectorSegment(egress, ride.end_name, request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic),
       ];
       const score = scoreSegments(segments, planKey);
       if (!best || score < best.score) best = { score, segments };
@@ -448,9 +447,9 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
       if (start.line.id === end.line.id) continue;
       const transfer = bestTransfer(start.line, end.line, 0.7);
       if (!transfer) continue;
-      const access = connectorFor(start.closest.distanceKm, origin, start.closest.coord, planKey, isArabic);
-      const egress = connectorFor(end.closest.distanceKm, end.closest.coord, dest, planKey, isArabic);
-      const transferWalk = connectorFor(transfer.km, transfer.aPoint.coord, transfer.bPoint.coord, planKey, isArabic);
+      const access = connectorFor(start.closest.distanceKm, origin, start.closest.coord, planKey);
+      const egress = connectorFor(end.closest.distanceKm, end.closest.coord, dest, planKey);
+      const transferWalk = connectorFor(transfer.km, transfer.aPoint.coord, transfer.bPoint.coord, planKey);
       if (!access || !egress || !transferWalk || transferWalk.mode !== "walk") continue;
       const rideA = rideSegment(start, start.closest, transfer.aPoint, isArabic);
       const rideB = rideSegment(end, transfer.bPoint, end.closest, isArabic);
