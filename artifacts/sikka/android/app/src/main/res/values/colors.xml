@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#258DFF</color>
+    <color name="colorPrimaryDark">#0B1020</color>
+    <color name="colorAccent">#02F6FC</color>
+    <color name="sikka_splash_background">#FFFFFF</color>
+</resources>
