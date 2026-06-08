@@ -1,3 +1,0 @@
-stop_id,stop_name,stop_lat,stop_lon
-1,Ramses Station,30.0636,31.2460
-2,Sadat Metro,30.0444,31.2357

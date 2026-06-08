@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "y7gy_kRtJqSVnxUuqdeW4"
+uri = "file://SIKKA_APP_OVERVIEW.md"
+type = "text"
+title = "Sikka App — A-to-Z Overview"
+
+[[outputs]]
+id = "Z14bUtStj5OYV1SfVV07k"
+uri = "file://sikka-key-files.zip"
+type = "unspecified"
+title = "Sikka Key Files"

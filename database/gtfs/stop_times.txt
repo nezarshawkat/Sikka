@@ -1,2 +1,0 @@
-trip_id,arrival_time,departure_time,stop_id,stop_sequence
-1001,08:00:00,08:00:30,2,1

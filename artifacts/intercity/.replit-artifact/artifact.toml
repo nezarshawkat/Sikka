@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/intercity/"
+title = "Egypt Intercity Transit"
+version = "1.0.0"
+id = "artifacts/intercity"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/intercity/" ]
+localPort = 18951
+
+[services.development]
+run = "pnpm --filter @workspace/intercity run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/intercity", "run", "build" ]
+publicDir = "artifacts/intercity/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18951"
+BASE_PATH = "/intercity/"
