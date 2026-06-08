@@ -10,7 +10,7 @@ import reviewsRouter from "./reviews";
 import tripsRouter from "./trips";
 import heatmapsRouter from "./heatmaps";
 import analyticsRouter from "./analytics";
-import tripPlanRouter from "./tripPlan";
+import tripPlanRouter from "./tripPlanStable";
 import seedCairoRouter from "./seedCairo";
 import seedAlexandriaRouter from "./seedAlexandria";
 import seedFromCSVRouter from "./seedFromCSV";
