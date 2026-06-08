@@ -9,7 +9,7 @@ function replaceRequired(source, label, from, to, fileName = "source") {
 }
 
 function patchFile(file, patches) {
-  let source = readFileSync(file, "utf8");
+  let source = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
   for (const patch of patches) {
     source = replaceRequired(source, patch.label, patch.from, patch.to, path.basename(file));
   }
