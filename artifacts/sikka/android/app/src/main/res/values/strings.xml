@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Sikka Go</string>
+    <string name="title_activity_main">Sikka Go</string>
+    <string name="package_name">com.sikkago.app</string>
+    <string name="custom_url_scheme">com.sikkago.app</string>
+</resources>

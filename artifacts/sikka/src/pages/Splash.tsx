@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { motion } from 'framer-motion';
-import logo from '@assets/Group_1_1780314663182.png';
+const logo = '/sikka-logo.svg';
 
 const Splash = () => {
   const { user, isLoading } = useAuth();
