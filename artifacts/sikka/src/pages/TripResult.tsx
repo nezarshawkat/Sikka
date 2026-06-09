@@ -13,7 +13,7 @@ import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
-import { getDirections, type RoutingProfile } from '@/lib/routePaths';
+import { snapPathToRoads, type RoutingProfile } from '@/lib/routePaths';
 
 interface Segment {
   transport_type_id: string; transport_name: string; start_name: string; end_name: string;
@@ -38,10 +38,13 @@ const ICONS: Record<string, string> = {
   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
 };
 
-const connectorProfileForSegment = (seg: Pick<Segment, 'transport_type_id' | 'icon' | 'transport_name'>): RoutingProfile | null => {
+const roadProfileForSegment = (seg: Pick<Segment, 'transport_type_id' | 'icon' | 'transport_name'>): RoutingProfile | null => {
   const text = `${seg.transport_type_id || ''} ${seg.icon || ''} ${seg.transport_name || ''}`.toLowerCase();
   if (text.includes('walk') || text.includes('مشي')) return 'walking';
   if (
+    text.includes('bus') ||
+    text.includes('microbus') ||
+    text.includes('serfis') ||
     text.includes('taxi') ||
     text.includes('uber') ||
     text.includes('careem') ||
@@ -50,6 +53,10 @@ const connectorProfileForSegment = (seg: Pick<Segment, 'transport_type_id' | 'ic
     text.includes('toktok') ||
     text.includes('توك') ||
     text.includes('تاكسي') ||
+    seg.icon === 'bus' ||
+    seg.transport_type_id === 'bus' ||
+    seg.transport_type_id === 'microbus' ||
+    seg.transport_type_id === 'serfis' ||
     seg.icon === 'bike' ||
     seg.icon === 'car'
   ) {
@@ -72,9 +79,9 @@ const roadSnapTripRoutes = async (plan: TripPlanData): Promise<RouteCoords> => {
     const rawCoords = seg.route_geometry && seg.route_geometry.length >= 2
       ? seg.route_geometry
       : fallbackCoordsForSegment(plan, index);
-    const profile = connectorProfileForSegment(seg);
+    const profile = roadProfileForSegment(seg);
     if (!profile || rawCoords.length < 2) return { segIndex: index, coords: rawCoords };
-    const snapped = await getDirections(rawCoords[0], rawCoords[rawCoords.length - 1], profile);
+    const snapped = await snapPathToRoads(rawCoords, profile);
     return { segIndex: index, coords: snapped.length >= 2 ? snapped : rawCoords };
   }));
   return routes;

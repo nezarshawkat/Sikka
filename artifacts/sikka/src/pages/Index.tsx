@@ -11,7 +11,8 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { useMapStyle } from '@/hooks/useMapStyle';
 import { useTripTracking } from '@/hooks/useTripTracking';
-import { getDirections, type RoutingProfile } from '@/lib/routePaths';
+import { snapPathToRoads, type RoutingProfile } from '@/lib/routePaths';
+import { clearTripNotification, showTripNotification } from '@/lib/nativeTripNotification';
 import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
 import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
 import BusUsedDialog from '@/components/trip/BusUsedDialog';
@@ -80,10 +81,13 @@ const transportIconFor = (seg?: Pick<ActiveTripSegment, 'icon' | 'transport_type
   return TRANSPORT_ICONS[seg.icon] || TRANSPORT_ICONS[seg.transport_type_id || ''] || TRANSPORT_ICONS.bus;
 };
 
-const connectorProfileForSegment = (seg: ActiveTripSegment): RoutingProfile | null => {
+const roadProfileForSegment = (seg: ActiveTripSegment): RoutingProfile | null => {
   const text = `${seg.transport_type_id || ''} ${seg.icon || ''} ${seg.transport_name || ''}`.toLowerCase();
   if (text.includes('walk') || text.includes('مشي')) return 'walking';
   if (
+    text.includes('bus') ||
+    text.includes('microbus') ||
+    text.includes('serfis') ||
     text.includes('taxi') ||
     text.includes('uber') ||
     text.includes('careem') ||
@@ -92,6 +96,10 @@ const connectorProfileForSegment = (seg: ActiveTripSegment): RoutingProfile | nu
     text.includes('toktok') ||
     text.includes('توك') ||
     text.includes('تاكسي') ||
+    seg.icon === 'bus' ||
+    seg.transport_type_id === 'bus' ||
+    seg.transport_type_id === 'microbus' ||
+    seg.transport_type_id === 'serfis' ||
     seg.icon === 'bike' ||
     seg.icon === 'car'
   ) {
@@ -114,9 +122,9 @@ const roadSnapTripRoutes = async (plan: ActiveTripPlan): Promise<RouteCoordSet> 
     const rawCoords = seg.route_geometry && seg.route_geometry.length >= 2
       ? seg.route_geometry
       : fallbackCoordsForSegment(plan, index);
-    const profile = connectorProfileForSegment(seg);
+    const profile = roadProfileForSegment(seg);
     if (!profile || rawCoords.length < 2) return { segIndex: index, coords: rawCoords };
-    const snapped = await getDirections(rawCoords[0], rawCoords[rawCoords.length - 1], profile);
+    const snapped = await snapPathToRoads(rawCoords, profile);
     return { segIndex: index, coords: snapped.length >= 2 ? snapped : rawCoords };
   }));
   return routes;
@@ -328,6 +336,7 @@ const Index = () => {
   const clearTrip = () => {
     sessionStorage.removeItem('activeTrip');
     sessionStorage.removeItem('tripPlan');
+    void clearTripNotification();
     setActiveTrip(null);
     setCurrentSegIdx(0);
     setExpanded(false);
@@ -501,29 +510,17 @@ const Index = () => {
   const currentSegment = activeTrip?.segments[currentSegIdx];
 
   useEffect(() => {
-    if (!activeTrip || !currentSegment || !('Notification' in window)) return;
+    if (!activeTrip || !currentSegment) return;
     const notificationKey = `${currentSegIdx}:${currentSegment.start_name}:${currentSegment.end_name}:${currentSegment.transport_name}`;
     if (lastTripNotificationRef.current === notificationKey) return;
-    const title = 'Sikka trip right now';
-    const body = `${currentSegment.start_name} -> ${currentSegment.end_name} by ${currentSegment.transport_name}`;
-    const showNotification = () => {
-      try {
-        new Notification(title, {
-          body,
-          tag: 'sikka-active-trip',
-          renotify: true,
-          requireInteraction: true,
-        });
-        lastTripNotificationRef.current = notificationKey;
-      } catch {}
-    };
-
-    if (Notification.permission === 'granted') showNotification();
-    else if (Notification.permission === 'default') {
-      Notification.requestPermission().then((permission) => {
-        if (permission === 'granted') showNotification();
-      });
-    }
+    lastTripNotificationRef.current = notificationKey;
+    void showTripNotification({
+      from: currentSegment.start_name,
+      to: currentSegment.end_name,
+      transportName: currentSegment.transport_name,
+      icon: transportIconFor(currentSegment),
+      color: currentSegment.color,
+    });
   }, [activeTrip, currentSegIdx, currentSegment]);
 
   const routeGeoJSON = {
@@ -616,32 +613,6 @@ const Index = () => {
             </Marker>
           )}
         </Map>
-
-      {activeTrip && currentSegment && (
-        <div className="pointer-events-none absolute left-4 right-4 top-[5.75rem] z-30">
-          <motion.div
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="pointer-events-auto flex items-center gap-3 rounded-[1.75rem] border border-white/20 p-3 shadow-2xl glass-panel"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-foreground">
-                {currentSegment.start_name} -&gt; {currentSegment.end_name}
-              </p>
-              <p className="truncate text-xs text-muted-foreground">
-                right now - {currentSegment.transport_name}
-              </p>
-            </div>
-            <div
-              className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-white/30 text-xl text-white shadow-lg"
-              style={{ backgroundColor: currentSegment.color }}
-              aria-label={currentSegment.transport_name}
-            >
-              {transportIconFor(currentSegment)}
-            </div>
-          </motion.div>
-        </div>
-      )}
 
       {activeTrip && mapNeedsRecenter && (
         <Button
