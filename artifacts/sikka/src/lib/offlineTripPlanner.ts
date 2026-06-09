@@ -115,8 +115,6 @@ type Connector = {
 
 const API_ORIGIN = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
 const API_BASE = `${API_ORIGIN}/api`;
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
-  || "pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ";
 const SNAPSHOT_DB = "sikka-offline";
 const SNAPSHOT_STORE = "snapshots";
 const SNAPSHOT_KEY = "latest";
@@ -126,7 +124,7 @@ const WALK_MAX_KM = 0.8;
 const WALK_SPEED_KMH = 4.5;
 const WALK_DETOUR = 1.3;
 const FARE_MARKUP = 1.25;
-const roadGeometryCache = new Map<string, LngLat[] | null>();
+const streetGeometryCache = new Map<string, LngLat[] | null>();
 
 function modeOfType(nameEn: string): ModeKey {
   const n = nameEn.toLowerCase();
@@ -203,37 +201,55 @@ function connectorModeFromSegment(segment: ApiSegment): ModeKey | null {
   return null;
 }
 
+async function fetchStreetGeometry(mode: ModeKey, from: LngLat, to: LngLat, signal: AbortSignal): Promise<LngLat[] | null> {
+  const drivingUrls = [
+    `https://router.project-osrm.org/route/v1/driving/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
+    `https://routing.openstreetmap.de/routed-car/route/v1/driving/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
+  ];
+  const walkingUrls = [
+    `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
+    `https://router.project-osrm.org/route/v1/foot/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
+    `https://router.project-osrm.org/route/v1/walking/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
+  ];
+  const urls = mode === "walk" ? walkingUrls : drivingUrls;
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { signal, cache: "force-cache" });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const coords = data.routes?.[0]?.geometry?.coordinates as LngLat[] | undefined;
+      if (Array.isArray(coords) && coords.length >= 2) return coords.map((p) => [p[0], p[1]] as LngLat);
+    } catch {
+      if (signal.aborted) return null;
+    }
+  }
+  return null;
+}
+
 async function snapConnectorGeometry(mode: ModeKey, geometry: LngLat[]): Promise<LngLat[]> {
-  if (!MAPBOX_TOKEN || geometry.length < 2) return geometry;
+  if (geometry.length < 2) return geometry;
   if (mode !== "walk" && mode !== "taxi" && mode !== "tuktuk") return geometry;
   const from = geometry[0];
   const to = geometry[geometry.length - 1];
-  const profile = mode === "walk" ? "walking" : "driving";
+  const profile = mode === "walk" ? "foot" : "driving";
   const key = `${profile}:${from[0].toFixed(5)},${from[1].toFixed(5)}:${to[0].toFixed(5)},${to[1].toFixed(5)}`;
-  if (roadGeometryCache.has(key)) return roadGeometryCache.get(key) ?? geometry;
+  if (streetGeometryCache.has(key)) return streetGeometryCache.get(key) ?? geometry;
 
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 4500);
+  const timer = window.setTimeout(() => controller.abort(), 5000);
   try {
-    const res = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/${profile}/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&access_token=${encodeURIComponent(MAPBOX_TOKEN)}`,
-      { signal: controller.signal, cache: "force-cache" },
-    );
-    if (!res.ok) throw new Error("Directions failed");
-    const data = await res.json();
-    const coords = data.routes?.[0]?.geometry?.coordinates as LngLat[] | undefined;
-    if (coords && coords.length >= 2) {
-      const snapped = coords.map((p) => [p[0], p[1]] as LngLat);
+    const snapped = await fetchStreetGeometry(mode, from, to, controller.signal);
+    if (snapped?.length) {
       snapped[0] = from;
       snapped[snapped.length - 1] = to;
-      roadGeometryCache.set(key, snapped);
+      streetGeometryCache.set(key, snapped);
       return snapped;
     }
-  } catch {
-    roadGeometryCache.set(key, null);
   } finally {
     window.clearTimeout(timer);
   }
+  streetGeometryCache.set(key, null);
   return geometry;
 }
 
@@ -469,8 +485,8 @@ async function snapConnectorSegments(segments: ApiSegment[]): Promise<ApiSegment
 async function makePlan(segments: ApiSegment[], request: PlannerRequest, snapshot: OfflineSnapshot): Promise<ApiPlan> {
   const planKey: PlanKey = request.tripType === "economic" || request.tripType === "premium" ? request.tripType : "comfortable";
   const isArabic = request.language === "ar";
-  const snappedSegments = await snapConnectorSegments(segments);
-  const enrichedSegments = attachAlternatives(snapshot, snappedSegments, planKey, isArabic);
+  const streetSegments = await snapConnectorSegments(segments);
+  const enrichedSegments = attachAlternatives(snapshot, streetSegments, planKey, isArabic);
   const cost = enrichedSegments.reduce((sum, s) => sum + s.cost_egp, 0);
   const time = enrichedSegments.reduce((sum, s) => sum + s.duration_minutes, 0);
   const distance = haversineKm({ lat: request.startLat, lng: request.startLng }, { lat: request.endLat, lng: request.endLng });

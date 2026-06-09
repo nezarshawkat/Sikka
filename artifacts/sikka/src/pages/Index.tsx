@@ -39,101 +39,6 @@ const hasDomesticFlightOption = (fromId: string, toId: string) => (
 
 const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
 
-const haversineMeters = (aLat: number, aLng: number, bLat: number, bLng: number) => {
-  const R = 6371000;
-  const dLat = ((bLat - aLat) * Math.PI) / 180;
-  const dLng = ((bLng - aLng) * Math.PI) / 180;
-  const lat1 = (aLat * Math.PI) / 180;
-  const lat2 = (bLat * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-};
-
-const pointToSegmentMeters = (
-  p: { lat: number; lng: number },
-  a: [number, number],
-  b: [number, number],
-) => {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const cosLat = Math.cos(toRad(p.lat));
-  const ax = toRad(a[0] - p.lng) * cosLat * R;
-  const ay = toRad(a[1] - p.lat) * R;
-  const bx = toRad(b[0] - p.lng) * cosLat * R;
-  const by = toRad(b[1] - p.lat) * R;
-  const dx = bx - ax;
-  const dy = by - ay;
-  const len2 = dx * dx + dy * dy;
-  const t = len2 > 0 ? Math.max(0, Math.min(1, (-ax * dx + -ay * dy) / len2)) : 0;
-  return Math.hypot(ax + t * dx, ay + t * dy);
-};
-
-const distanceToRouteMeters = (p: { lat: number; lng: number }, coords: [number, number][]) => {
-  if (coords.length < 2) return Infinity;
-  let best = Infinity;
-  for (let i = 0; i < coords.length - 1; i++) {
-    best = Math.min(best, pointToSegmentMeters(p, coords[i], coords[i + 1]));
-  }
-  return best;
-};
-
-const closestPointOnRoute = (p: { lat: number; lng: number }, coords: [number, number][]): [number, number] | null => {
-  if (coords.length < 2) return null;
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const toDeg = (r: number) => (r * 180) / Math.PI;
-  const cosLat = Math.cos(toRad(p.lat));
-  let best: { point: [number, number]; dist: number } | null = null;
-  for (let i = 0; i < coords.length - 1; i++) {
-    const a = coords[i];
-    const b = coords[i + 1];
-    const ax = toRad(a[0] - p.lng) * cosLat * R;
-    const ay = toRad(a[1] - p.lat) * R;
-    const bx = toRad(b[0] - p.lng) * cosLat * R;
-    const by = toRad(b[1] - p.lat) * R;
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len2 = dx * dx + dy * dy;
-    const t = len2 > 0 ? Math.max(0, Math.min(1, (-ax * dx + -ay * dy) / len2)) : 0;
-    const px = ax + dx * t;
-    const py = ay + dy * t;
-    const dist = Math.hypot(px, py);
-    if (!best || dist < best.dist) {
-      best = {
-        dist,
-        point: [p.lng + toDeg(px / (cosLat * R)), p.lat + toDeg(py / R)],
-      };
-    }
-  }
-  return best?.point ?? null;
-};
-
-const isFlexibleConnector = (seg?: { icon?: string; transport_type_id?: string }) => {
-  const key = `${seg?.icon || ''} ${seg?.transport_type_id || ''}`.toLowerCase();
-  return /\b(walk|car|taxi|tuktuk|bike)\b/.test(key);
-};
-
-const isBoardAnywhereTransit = (seg?: { icon?: string; transport_type_id?: string; transport_name?: string }) => {
-  const key = `${seg?.icon || ''} ${seg?.transport_type_id || ''} ${seg?.transport_name || ''}`.toLowerCase();
-  return /\b(bus|microbus|serfis)\b/.test(key);
-};
-
-async function fetchConnectorRoute(
-  mode: 'walking' | 'driving',
-  start: { lat: number; lng: number },
-  end: [number, number],
-): Promise<[number, number][]> {
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/${mode}/${start.lng},${start.lat};${end[0]},${end[1]}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`,
-    );
-    const data = await res.json();
-    const coords = data.routes?.[0]?.geometry?.coordinates;
-    if (Array.isArray(coords) && coords.length >= 2) return coords;
-  } catch {}
-  return [[start.lng, start.lat], end];
-}
-
 const reverseGeocode = async (lat: number, lng: number, language: string): Promise<string> => {
   try {
     const res = await fetch(
@@ -158,7 +63,6 @@ const Index = () => {
   const { style: mapStyle, mode: mapMode } = useMapStyle();
   const mapRef = useRef<MapRef | null>(null);
   const recenteringRef = useRef(false);
-  const reroutingRef = useRef(false);
   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
   const [mapNeedsRecenter, setMapNeedsRecenter] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -358,38 +262,6 @@ const Index = () => {
     mapRef.current.easeTo({ center: [userPos.lng, userPos.lat], duration: 450 });
     window.setTimeout(() => { recenteringRef.current = false; }, 550);
   }, [activeTrip, mapNeedsRecenter, userPos]);
-
-  useEffect(() => {
-    if (!activeTrip || !userPos || reroutingRef.current) return;
-    const seg = activeTrip.segments[currentSegIdx];
-    if (!isFlexibleConnector(seg)) return;
-    const route = routeCoords.find((r) => r.segIndex === currentSegIdx);
-    const nextSeg = activeTrip.segments[currentSegIdx + 1];
-    const nextRoute = routeCoords.find((r) => r.segIndex === currentSegIdx + 1);
-    const boardAnywhereTarget = isBoardAnywhereTransit(nextSeg) && nextRoute?.coords?.length
-      ? closestPointOnRoute(userPos, nextRoute.coords)
-      : null;
-    const end = boardAnywhereTarget ?? route?.coords?.[route.coords.length - 1];
-    if (!route || !end || route.coords.length < 2) return;
-    if (distanceToRouteMeters(userPos, route.coords) < 90) return;
-    reroutingRef.current = true;
-    const mode = seg.icon === 'walk' ? 'walking' : 'driving';
-    fetchConnectorRoute(mode, userPos, end)
-      .then((coords) => {
-        setRouteCoords((prev) => prev.map((r) => r.segIndex === currentSegIdx ? { ...r, coords } : r));
-        setActiveTrip((prev) => {
-          if (!prev) return prev;
-          const segments = prev.segments.map((s, idx) => idx === currentSegIdx ? { ...s, route_geometry: coords } : s);
-          const updated = { ...prev, segments };
-          sessionStorage.setItem('activeTrip', JSON.stringify(updated));
-          return updated;
-        });
-        toast.info(t('reroutingConnector', language));
-      })
-      .finally(() => {
-        window.setTimeout(() => { reroutingRef.current = false; }, 5000);
-      });
-  }, [activeTrip, currentSegIdx, language, routeCoords, userPos]);
 
   const clearTrip = () => {
     sessionStorage.removeItem('activeTrip');

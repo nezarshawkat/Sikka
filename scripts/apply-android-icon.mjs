@@ -20,7 +20,7 @@ const densityFolders = [
 for (const folder of densityFolders) {
   const dir = join(resRoot, folder);
   mkdirSync(dir, { recursive: true });
-  for (const name of ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png']) {
+  for (const name of ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png', 'sikka_launcher.png']) {
     writeFileSync(join(dir, name), iconPng);
   }
 }
@@ -45,7 +45,7 @@ const manifestPath = join(androidRoot, 'AndroidManifest.xml');
 let manifest = readFileSync(manifestPath, 'utf8');
 manifest = manifest
   .replace(/android:icon="@[^"]+"/, 'android:icon="@mipmap/ic_launcher"')
-  .replace(/android:roundIcon="@[^"]+"/, 'android:roundIcon="@mipmap/ic_launcher_round"');
+  .replace(/android:roundIcon="@[^"]+"/, 'android:roundIcon="@mipmap/ic_launcher"');
 writeFileSync(manifestPath, manifest);
 
 console.log('Applied uploaded Sikka PNG as Android launcher and splash logo assets.');
