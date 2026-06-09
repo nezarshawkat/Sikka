@@ -13,6 +13,7 @@ import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
+import { getDirections, type RoutingProfile } from '@/lib/routePaths';
 
 interface Segment {
   transport_type_id: string; transport_name: string; start_name: string; end_name: string;
@@ -35,6 +36,48 @@ type RouteCoords = { segIndex: number; coords: LngLat[] }[];
 
 const ICONS: Record<string, string> = {
   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+};
+
+const connectorProfileForSegment = (seg: Pick<Segment, 'transport_type_id' | 'icon' | 'transport_name'>): RoutingProfile | null => {
+  const text = `${seg.transport_type_id || ''} ${seg.icon || ''} ${seg.transport_name || ''}`.toLowerCase();
+  if (text.includes('walk') || text.includes('مشي')) return 'walking';
+  if (
+    text.includes('taxi') ||
+    text.includes('uber') ||
+    text.includes('careem') ||
+    text.includes('car') ||
+    text.includes('tuktuk') ||
+    text.includes('toktok') ||
+    text.includes('توك') ||
+    text.includes('تاكسي') ||
+    seg.icon === 'bike' ||
+    seg.icon === 'car'
+  ) {
+    return 'driving';
+  }
+  return null;
+};
+
+const fallbackCoordsForSegment = (plan: TripPlanData, index: number): LngLat[] => {
+  const segCount = Math.max(plan.segments.length, 1);
+  const startLng = plan.startLng + (plan.destLng - plan.startLng) * (index / segCount);
+  const startLat = plan.startLat + (plan.destLat - plan.startLat) * (index / segCount);
+  const endLng = plan.startLng + (plan.destLng - plan.startLng) * ((index + 1) / segCount);
+  const endLat = plan.startLat + (plan.destLat - plan.startLat) * ((index + 1) / segCount);
+  return [[startLng, startLat], [endLng, endLat]];
+};
+
+const roadSnapTripRoutes = async (plan: TripPlanData): Promise<RouteCoords> => {
+  const routes = await Promise.all(plan.segments.map(async (seg, index) => {
+    const rawCoords = seg.route_geometry && seg.route_geometry.length >= 2
+      ? seg.route_geometry
+      : fallbackCoordsForSegment(plan, index);
+    const profile = connectorProfileForSegment(seg);
+    if (!profile || rawCoords.length < 2) return { segIndex: index, coords: rawCoords };
+    const snapped = await getDirections(rawCoords[0], rawCoords[rawCoords.length - 1], profile);
+    return { segIndex: index, coords: snapped.length >= 2 ? snapped : rawCoords };
+  }));
+  return routes;
 };
 
 const toRad = (deg: number) => deg * Math.PI / 180;
@@ -139,34 +182,19 @@ const TripResult = () => {
     else navigate('/');
   }, [navigate]);
 
-  // Render the route geometry supplied by the backend directly — no client-side
-  // road snapping. Segments without geometry fall back to a straight line.
-  const loadRoutes = useCallback(() => {
+  // Keep GTFS/transit geometry intact, but repair walking/taxi/tuktuk connectors
+  // onto open street routes before drawing the preview.
+  const loadRoutes = useCallback(async () => {
     if (!plan) return;
     setIsLoadingRoutes(true);
-    const results: { segIndex: number; coords: [number, number][] }[] = [];
-
-    const segCount = plan.segments.length;
-    for (let i = 0; i < segCount; i++) {
-      const seg = plan.segments[i];
-      // Use the backend-supplied geometry for this segment directly
-      if (seg.route_geometry && seg.route_geometry.length >= 2) {
-        results.push({ segIndex: i, coords: seg.route_geometry });
-        continue;
-      }
-      // Otherwise draw a straight line between approximated start/end positions
-      const startLng = plan.startLng + (plan.destLng - plan.startLng) * (i / segCount);
-      const startLat = plan.startLat + (plan.destLat - plan.startLat) * (i / segCount);
-      const endLng = plan.startLng + (plan.destLng - plan.startLng) * ((i + 1) / segCount);
-      const endLat = plan.startLat + (plan.destLat - plan.startLat) * ((i + 1) / segCount);
-      results.push({ segIndex: i, coords: [[startLng, startLat], [endLng, endLat]] });
+    try {
+      setRouteCoords(await roadSnapTripRoutes(plan));
+    } finally {
+      setIsLoadingRoutes(false);
     }
-
-    setRouteCoords(results);
-    setIsLoadingRoutes(false);
   }, [plan]);
 
-  useEffect(() => { if (plan) loadRoutes(); }, [plan, loadRoutes]);
+  useEffect(() => { if (plan) void loadRoutes(); }, [plan, loadRoutes]);
 
   const startTracking = useCallback(() => {
     setIsTracking(true);

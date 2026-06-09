@@ -11,6 +11,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { useMapStyle } from '@/hooks/useMapStyle';
 import { useTripTracking } from '@/hooks/useTripTracking';
+import { getDirections, type RoutingProfile } from '@/lib/routePaths';
 import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
 import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
 import BusUsedDialog from '@/components/trip/BusUsedDialog';
@@ -32,6 +33,21 @@ const FLIGHT_CITY_IDS = new Set([
   'sohag', 'asyut', 'matrouh',
 ]);
 const NILE_CITY_IDS = new Set(['cairo', 'giza', 'luxor', 'aswan']);
+const TRANSPORT_ICONS: Record<string, string> = {
+  bus: '🚌',
+  train: '🚆',
+  car: '🚕',
+  taxi: '🚕',
+  bike: '🛺',
+  tuktuk: '🛺',
+  ship: '🚢',
+  plane: '✈️',
+  metro: '🚇',
+  monorail: '🚝',
+  walk: '🚶',
+  microbus: '🚐',
+  serfis: '🚐',
+};
 
 const hasDomesticFlightOption = (fromId: string, toId: string) => (
   fromId !== toId && FLIGHT_CITY_IDS.has(fromId) && FLIGHT_CITY_IDS.has(toId)
@@ -56,6 +72,55 @@ interface ActiveTripPlan extends GuidePlan {
   startLat: number; startLng: number; destLat: number; destLng: number;
   destination: string;
 }
+type ActiveTripSegment = ActiveTripPlan['segments'][number];
+type RouteCoordSet = { segIndex: number; coords: [number, number][] }[];
+
+const transportIconFor = (seg?: Pick<ActiveTripSegment, 'icon' | 'transport_type_id'> | null) => {
+  if (!seg) return TRANSPORT_ICONS.bus;
+  return TRANSPORT_ICONS[seg.icon] || TRANSPORT_ICONS[seg.transport_type_id || ''] || TRANSPORT_ICONS.bus;
+};
+
+const connectorProfileForSegment = (seg: ActiveTripSegment): RoutingProfile | null => {
+  const text = `${seg.transport_type_id || ''} ${seg.icon || ''} ${seg.transport_name || ''}`.toLowerCase();
+  if (text.includes('walk') || text.includes('مشي')) return 'walking';
+  if (
+    text.includes('taxi') ||
+    text.includes('uber') ||
+    text.includes('careem') ||
+    text.includes('car') ||
+    text.includes('tuktuk') ||
+    text.includes('toktok') ||
+    text.includes('توك') ||
+    text.includes('تاكسي') ||
+    seg.icon === 'bike' ||
+    seg.icon === 'car'
+  ) {
+    return 'driving';
+  }
+  return null;
+};
+
+const fallbackCoordsForSegment = (plan: ActiveTripPlan, index: number): [number, number][] => {
+  const segCount = Math.max(plan.segments.length, 1);
+  const startLng = plan.startLng + (plan.destLng - plan.startLng) * (index / segCount);
+  const startLat = plan.startLat + (plan.destLat - plan.startLat) * (index / segCount);
+  const endLng = plan.startLng + (plan.destLng - plan.startLng) * ((index + 1) / segCount);
+  const endLat = plan.startLat + (plan.destLat - plan.startLat) * ((index + 1) / segCount);
+  return [[startLng, startLat], [endLng, endLat]];
+};
+
+const roadSnapTripRoutes = async (plan: ActiveTripPlan): Promise<RouteCoordSet> => {
+  const routes = await Promise.all(plan.segments.map(async (seg, index) => {
+    const rawCoords = seg.route_geometry && seg.route_geometry.length >= 2
+      ? seg.route_geometry
+      : fallbackCoordsForSegment(plan, index);
+    const profile = connectorProfileForSegment(seg);
+    if (!profile || rawCoords.length < 2) return { segIndex: index, coords: rawCoords };
+    const snapped = await getDirections(rawCoords[0], rawCoords[rawCoords.length - 1], profile);
+    return { segIndex: index, coords: snapped.length >= 2 ? snapped : rawCoords };
+  }));
+  return routes;
+};
 
 const Index = () => {
   const { user, isLoading, language } = useAuth();
@@ -65,6 +130,7 @@ const Index = () => {
   const recenteringRef = useRef(false);
   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
   const [mapNeedsRecenter, setMapNeedsRecenter] = useState(false);
+  const [followUser, setFollowUser] = useState(true);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationName, setLocationName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -82,6 +148,7 @@ const Index = () => {
   const [contributionDialogOpen, setContributionDialogOpen] = useState(false);
   const [contributionOperator, setContributionOperator] = useState<'microbus' | 'bus'>('microbus');
   const contributionWatchRef = useRef<number | null>(null);
+  const lastTripNotificationRef = useRef<string | null>(null);
 
   const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -174,31 +241,19 @@ const Index = () => {
     }
   }, [language]);
 
-  // Render the route geometry supplied by the backend directly — no client-side
-  // road snapping. Segments without geometry fall back to a straight line drawn
-  // between their approximated start/end positions along the trip.
-  const loadRoutes = useCallback((plan: ActiveTripPlan) => {
-    const results: { segIndex: number; coords: [number, number][] }[] = [];
-    const segCount = plan.segments.length;
-    for (let i = 0; i < segCount; i++) {
-      const seg = plan.segments[i];
-      if (seg.route_geometry && seg.route_geometry.length >= 2) {
-        results.push({ segIndex: i, coords: seg.route_geometry });
-        continue;
-      }
-      const startLng = plan.startLng + (plan.destLng - plan.startLng) * (i / segCount);
-      const startLat = plan.startLat + (plan.destLat - plan.startLat) * (i / segCount);
-      const endLng = plan.startLng + (plan.destLng - plan.startLng) * ((i + 1) / segCount);
-      const endLat = plan.startLat + (plan.destLat - plan.startLat) * ((i + 1) / segCount);
-      results.push({ segIndex: i, coords: [[startLng, startLat], [endLng, endLat]] });
-    }
-    setRouteCoords(results);
-  }, []);
+  // Keep GTFS/transit geometry intact, but repair walking/taxi/tuktuk connectors
+  // onto open street routes before drawing the line.
+  const loadRoutes = useCallback((plan: ActiveTripPlan) => roadSnapTripRoutes(plan), []);
 
   useEffect(() => {
     if (activeTrip) {
+      let cancelled = false;
       setRouteCoords([]);
-      loadRoutes(activeTrip);
+      setFollowUser(true);
+      loadRoutes(activeTrip).then((routes) => {
+        if (!cancelled) setRouteCoords(routes);
+      });
+      return () => { cancelled = true; };
     }
   }, [activeTrip, loadRoutes]);
 
@@ -254,14 +309,21 @@ const Index = () => {
     }
     window.setTimeout(() => { recenteringRef.current = false; }, 650);
     setMapNeedsRecenter(false);
+    setFollowUser(true);
   }, [routeCoords, userPos]);
 
   useEffect(() => {
-    if (!activeTrip || !userPos || mapNeedsRecenter || !mapRef.current) return;
+    if (!activeTrip || !userPos || !followUser || !mapRef.current) return;
     recenteringRef.current = true;
-    mapRef.current.easeTo({ center: [userPos.lng, userPos.lat], duration: 450 });
+    const map = mapRef.current.getMap();
+    map.easeTo({
+      center: [userPos.lng, userPos.lat],
+      zoom: Math.max(map.getZoom(), 16.2),
+      duration: 450,
+      essential: true,
+    });
     window.setTimeout(() => { recenteringRef.current = false; }, 550);
-  }, [activeTrip, mapNeedsRecenter, userPos]);
+  }, [activeTrip, followUser, userPos]);
 
   const clearTrip = () => {
     sessionStorage.removeItem('activeTrip');
@@ -270,6 +332,8 @@ const Index = () => {
     setCurrentSegIdx(0);
     setExpanded(false);
     setRouteCoords([]);
+    setMapNeedsRecenter(false);
+    setFollowUser(true);
   };
 
   const stopContributionRecording = useCallback(() => {
@@ -434,6 +498,34 @@ const Index = () => {
     toast.success(t('planUpdated', language));
   };
 
+  const currentSegment = activeTrip?.segments[currentSegIdx];
+
+  useEffect(() => {
+    if (!activeTrip || !currentSegment || !('Notification' in window)) return;
+    const notificationKey = `${currentSegIdx}:${currentSegment.start_name}:${currentSegment.end_name}:${currentSegment.transport_name}`;
+    if (lastTripNotificationRef.current === notificationKey) return;
+    const title = 'Sikka trip right now';
+    const body = `${currentSegment.start_name} -> ${currentSegment.end_name} by ${currentSegment.transport_name}`;
+    const showNotification = () => {
+      try {
+        new Notification(title, {
+          body,
+          tag: 'sikka-active-trip',
+          renotify: true,
+          requireInteraction: true,
+        });
+        lastTripNotificationRef.current = notificationKey;
+      } catch {}
+    };
+
+    if (Notification.permission === 'granted') showNotification();
+    else if (Notification.permission === 'default') {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') showNotification();
+      });
+    }
+  }, [activeTrip, currentSegIdx, currentSegment]);
+
   const routeGeoJSON = {
     type: 'FeatureCollection' as const,
     features: routeCoords.map(({ segIndex, coords }) => ({
@@ -461,7 +553,10 @@ const Index = () => {
           {...viewState}
           onMove={(evt) => {
             setViewState(evt.viewState);
-            if (activeTrip && !recenteringRef.current) setMapNeedsRecenter(true);
+            if (activeTrip && !recenteringRef.current) {
+              setMapNeedsRecenter(true);
+              setFollowUser(false);
+            }
           }}
           onClick={(evt) => { void handleMapClick(evt); }}
           onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[home-map] error:', err?.message || e, err?.stack); }}
@@ -506,13 +601,47 @@ const Index = () => {
 
           {(userPos || userLocation) && (
             <Marker latitude={(userPos ?? userLocation)!.lat} longitude={(userPos ?? userLocation)!.lng}>
-              <div className="relative">
-                <div className="h-4 w-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
-                <div className="absolute inset-0 h-4 w-4 rounded-full bg-blue-500 animate-ping opacity-30" />
+              <div className="relative grid place-items-center">
+                <div
+                  className={`${activeTrip ? 'h-11 w-11 text-xl' : 'h-4 w-4'} grid place-items-center rounded-full border-2 border-white shadow-xl`}
+                  style={{ backgroundColor: activeTrip && currentSegment ? currentSegment.color : '#3B82F6' }}
+                >
+                  {activeTrip && currentSegment ? transportIconFor(currentSegment) : null}
+                </div>
+                <div
+                  className={`${activeTrip ? 'h-11 w-11' : 'h-4 w-4'} absolute inset-0 rounded-full animate-ping opacity-30`}
+                  style={{ backgroundColor: activeTrip && currentSegment ? currentSegment.color : '#3B82F6' }}
+                />
               </div>
             </Marker>
           )}
         </Map>
+
+      {activeTrip && currentSegment && (
+        <div className="pointer-events-none absolute left-4 right-4 top-[5.75rem] z-30">
+          <motion.div
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="pointer-events-auto flex items-center gap-3 rounded-[1.75rem] border border-white/20 p-3 shadow-2xl glass-panel"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-foreground">
+                {currentSegment.start_name} -&gt; {currentSegment.end_name}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                right now - {currentSegment.transport_name}
+              </p>
+            </div>
+            <div
+              className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-white/30 text-xl text-white shadow-lg"
+              style={{ backgroundColor: currentSegment.color }}
+              aria-label={currentSegment.transport_name}
+            >
+              {transportIconFor(currentSegment)}
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {activeTrip && mapNeedsRecenter && (
         <Button

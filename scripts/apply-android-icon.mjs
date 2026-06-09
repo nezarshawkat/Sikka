@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,7 +7,10 @@ const repoRoot = join(scriptDir, '..');
 const iconSource = join(scriptDir, 'sikka-app-icon.b64');
 const androidRoot = join(repoRoot, 'artifacts', 'sikka', 'android', 'app', 'src', 'main');
 const resRoot = join(androidRoot, 'res');
-const iconPng = Buffer.from(readFileSync(iconSource, 'utf8').replace(/\s+/g, ''), 'base64');
+const checkedInIcon = join(resRoot, 'drawable', 'sikka_icon.png');
+const iconPng = existsSync(checkedInIcon)
+  ? readFileSync(checkedInIcon)
+  : Buffer.from(readFileSync(iconSource, 'utf8').replace(/\s+/g, ''), 'base64');
 
 const densityFolders = [
   'mipmap-mdpi',
@@ -44,8 +47,8 @@ writeFileSync(join(adaptiveDir, 'ic_launcher_round.xml'), adaptiveIcon);
 const manifestPath = join(androidRoot, 'AndroidManifest.xml');
 let manifest = readFileSync(manifestPath, 'utf8');
 manifest = manifest
-  .replace(/android:icon="@[^"]+"/, 'android:icon="@mipmap/ic_launcher"')
-  .replace(/android:roundIcon="@[^"]+"/, 'android:roundIcon="@mipmap/ic_launcher"');
+  .replace(/android:icon="@[^"]+"/, 'android:icon="@drawable/sikka_icon"')
+  .replace(/android:roundIcon="@[^"]+"/, 'android:roundIcon="@drawable/sikka_icon"');
 writeFileSync(manifestPath, manifest);
 
-console.log('Applied uploaded Sikka PNG as Android launcher and splash logo assets.');
+console.log('Applied uploaded Sikka PNG as the static Android launcher and splash logo assets.');
