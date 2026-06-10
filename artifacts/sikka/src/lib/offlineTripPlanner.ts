@@ -118,6 +118,7 @@ type Connector = {
 type GraphEdge = {
   to: string;
   km: number;
+  modes?: number;
 };
 
 type GraphNode = {
@@ -142,6 +143,7 @@ const MIN_COMPATIBLE_SNAPSHOT_SCHEMA_VERSION = 2;
 const SNAPSHOT_REFRESH_MS = 10 * 60 * 1000;
 const SNAPSHOT_FETCH_TIMEOUT_MS = 20 * 1000;
 const BUNDLED_SNAPSHOT_URL = "/offline-snapshot.json";
+const BUNDLED_ROAD_GRAPH_URL = "/offline-road-graph.json";
 const WALK_MAX_KM = 0.8;
 const WALK_SPEED_KMH = 4.5;
 const WALK_DETOUR = 1.3;
@@ -149,7 +151,17 @@ const FARE_MARKUP = 1.25;
 const GRAPH_CELL_SIZE_DEG = 0.01;
 const GRAPH_MAX_NEAREST_KM = 0.75;
 const GRAPH_MAX_EDGE_KM = 0.5;
-const GRAPH_MAX_EXPANSIONS = 4500;
+const GRAPH_MAX_EXPANSIONS = 18000;
+const ROAD_MODE_DRIVE = 1;
+const ROAD_MODE_WALK = 2;
+
+type RoadGraphJson = {
+  schemaVersion: number;
+  nodes: LngLat[];
+  edges: [number, number, number, number?, number?][];
+};
+
+let roadGraphPromise: Promise<ConnectorGraph | null> | null = null;
 
 function modeOfType(nameEn: string): ModeKey {
   const n = nameEn.toLowerCase();
@@ -251,13 +263,13 @@ function addGraphNode(graph: ConnectorGraph, point: LngLat): GraphNode {
   return node;
 }
 
-function addGraphEdge(graph: ConnectorGraph, from: LngLat, to: LngLat): void {
+function addGraphEdge(graph: ConnectorGraph, from: LngLat, to: LngLat, modes = ROAD_MODE_DRIVE | ROAD_MODE_WALK): void {
   const km = haversineKm({ lng: from[0], lat: from[1] }, { lng: to[0], lat: to[1] });
   if (!Number.isFinite(km) || km <= 0 || km > GRAPH_MAX_EDGE_KM) return;
   const a = addGraphNode(graph, from);
   const b = addGraphNode(graph, to);
-  a.edges.push({ to: b.id, km });
-  b.edges.push({ to: a.id, km });
+  a.edges.push({ to: b.id, km, modes });
+  b.edges.push({ to: a.id, km, modes });
 }
 
 function buildConnectorGraph(snapshot: OfflineSnapshot): ConnectorGraph {
@@ -269,6 +281,39 @@ function buildConnectorGraph(snapshot: OfflineSnapshot): ConnectorGraph {
     }
   }
   return graph;
+}
+
+function buildRoadConnectorGraph(roadGraph: RoadGraphJson): ConnectorGraph | null {
+  if (!Array.isArray(roadGraph.nodes) || !Array.isArray(roadGraph.edges) || roadGraph.nodes.length < 2) return null;
+  const graph: ConnectorGraph = { nodes: new Map(), grid: new Map() };
+  for (let i = 0; i < roadGraph.nodes.length; i++) {
+    const point = roadGraph.nodes[i];
+    const node: GraphNode = { id: String(i), coord: { lng: point[0], lat: point[1] }, edges: [] };
+    graph.nodes.set(node.id, node);
+    const cell = graphGridKey(node.coord);
+    const bucket = graph.grid.get(cell);
+    if (bucket) bucket.push(node.id);
+    else graph.grid.set(cell, [node.id]);
+  }
+  for (const edge of roadGraph.edges) {
+    const from = graph.nodes.get(String(edge[0]));
+    const to = graph.nodes.get(String(edge[1]));
+    if (!from || !to) continue;
+    const km = edge[2] / 1000;
+    if (!Number.isFinite(km) || km <= 0 || km > 3) continue;
+    from.edges.push({ to: to.id, km, modes: edge[3] ?? (ROAD_MODE_DRIVE | ROAD_MODE_WALK) });
+  }
+  return graph.nodes.size ? graph : null;
+}
+
+async function getRoadConnectorGraph(): Promise<ConnectorGraph | null> {
+  if (!roadGraphPromise) {
+    roadGraphPromise = fetch(BUNDLED_ROAD_GRAPH_URL, { cache: "force-cache" })
+      .then((res) => res.ok ? res.json() : null)
+      .then((json) => json ? buildRoadConnectorGraph(json as RoadGraphJson) : null)
+      .catch(() => null);
+  }
+  return roadGraphPromise;
 }
 
 function nearestGraphNode(graph: ConnectorGraph, point: Coord): { node: GraphNode; km: number } | null {
@@ -307,11 +352,12 @@ function reconstructGraphPath(cameFrom: Map<string, string>, current: string, gr
     .map((node) => [node.coord.lng, node.coord.lat] as LngLat);
 }
 
-function routeOnConnectorGraph(graph: ConnectorGraph, from: Coord, to: Coord): LngLat[] | null {
+function routeOnConnectorGraph(graph: ConnectorGraph, from: Coord, to: Coord, mode: ModeKey): LngLat[] | null {
   if (!graph.nodes.size) return null;
   const start = nearestGraphNode(graph, from);
   const end = nearestGraphNode(graph, to);
   if (!start || !end || start.node.id === end.node.id) return null;
+  const requiredMode = mode === "walk" ? ROAD_MODE_WALK : ROAD_MODE_DRIVE;
 
   const open = new Set<string>([start.node.id]);
   const cameFrom = new Map<string, string>();
@@ -341,6 +387,7 @@ function routeOnConnectorGraph(graph: ConnectorGraph, from: Coord, to: Coord): L
     if (!node) continue;
     const base = gScore.get(current) ?? Infinity;
     for (const edge of node.edges) {
+      if (edge.modes && (edge.modes & requiredMode) === 0) continue;
       const next = graph.nodes.get(edge.to);
       if (!next) continue;
       const tentative = base + edge.km;
@@ -361,6 +408,7 @@ async function snapConnectorGeometry(mode: ModeKey, geometry: LngLat[], graph: C
     graph,
     { lng: geometry[0][0], lat: geometry[0][1] },
     { lng: geometry[geometry.length - 1][0], lat: geometry[geometry.length - 1][1] },
+    mode,
   );
   if (graphRoute && graphRoute.length >= 2) {
     const directKm = haversineKm(
@@ -781,9 +829,9 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
   if (request.mode && request.mode === "intercity") return null;
   const planKey: PlanKey = request.tripType === "economic" || request.tripType === "premium" ? request.tripType : "comfortable";
   const isArabic = request.language === "ar";
-  const snapshot = await getSnapshot();
+  const [snapshot, roadGraph] = await Promise.all([getSnapshot(), getRoadConnectorGraph()]);
   if (!snapshot) return null;
-  const connectorGraph = buildConnectorGraph(snapshot);
+  const connectorGraph = roadGraph ?? buildConnectorGraph(snapshot);
 
   const origin = { lat: request.startLat, lng: request.startLng };
   const dest = { lat: request.endLat, lng: request.endLng };
