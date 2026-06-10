@@ -43,9 +43,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Patch mobile auth behavior
-        run: node scripts/patch-mobile-auth.mjs
-
       - name: Build web app
         run: pnpm --filter @workspace/sikka run build:mobile
 

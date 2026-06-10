@@ -1,4 +1,5 @@
-const API_ORIGIN = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
+const DEFAULT_API_ORIGIN = "https://sikka-mq6w.onrender.com";
+const API_ORIGIN = ((import.meta.env.VITE_API_URL as string | undefined) || DEFAULT_API_ORIGIN).replace(/\/+$/, "");
 const API_BASE = `${API_ORIGIN}/api`;
 
 type AuthTokenProvider = () => Promise<string | null>;

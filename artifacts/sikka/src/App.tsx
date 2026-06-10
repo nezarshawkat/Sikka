@@ -37,7 +37,8 @@ const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 // Use the publishable key directly; host-derived keys are only needed for
 // custom-domain proxy setups.
-const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string;
+const DEFAULT_CLERK_PUBLISHABLE_KEY = "pk_test_Y2hhcm1lZC1nYXItMjMuY2xlcmsuYWNjb3VudHMuZGV2JA";
+const clerkPubKey = (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined) || DEFAULT_CLERK_PUBLISHABLE_KEY;
 
 if (!clerkPubKey) {
   throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
