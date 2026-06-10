@@ -1,6 +1,8 @@
 export type RoutingProfile = 'driving' | 'walking';
 type LngLat = [number, number];
 
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+
 const toRad = (deg: number) => (deg * Math.PI) / 180;
 
 const distanceKm = (a: LngLat, b: LngLat) => {
@@ -60,14 +62,14 @@ const isStreetSnapSafe = (raw: LngLat[], snapped: LngLat[]) => {
   if (snapped.length < 2) return false;
   const rawLength = Math.max(0.05, pathLengthKm(raw));
   const snappedLength = pathLengthKm(snapped);
-  if (snappedLength > rawLength * 1.15 + 0.2) return false;
+  if (snappedLength > rawLength * 1.8 + 0.6) return false;
   if (distanceKm(raw[0], snapped[0]) > 0.08) return false;
   if (distanceKm(raw[raw.length - 1], snapped[snapped.length - 1]) > 0.08) return false;
 
   const sampleCount = Math.min(40, snapped.length);
   for (let i = 0; i < sampleCount; i += 1) {
     const point = snapped[Math.round((i / Math.max(1, sampleCount - 1)) * (snapped.length - 1))];
-    if (distanceToPathKm(point, raw) > 0.08) return false;
+    if (distanceToPathKm(point, raw) > 0.35) return false;
   }
   return true;
 };
@@ -96,7 +98,27 @@ const denseTraceForMatching = (coords: LngLat[]) => {
   return dense;
 };
 
-const matchTransitChunk = async (coords: LngLat[]): Promise<LngLat[] | null> => {
+const matchMapboxTransitChunk = async (coords: LngLat[]): Promise<LngLat[] | null> => {
+  if (!MAPBOX_TOKEN || coords.length < 2) return null;
+  const encoded = coords.map(([lng, lat]) => `${lng},${lat}`).join(';');
+  const radiuses = coords.map(() => 50).join(';');
+  const url = `https://api.mapbox.com/matching/v5/mapbox/driving/${encoded}?geometries=geojson&overview=full&radiuses=${radiuses}&tidy=true&access_token=${MAPBOX_TOKEN}`;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 6500);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const coords = data.matchings?.[0]?.geometry?.coordinates;
+    return Array.isArray(coords) && coords.length >= 2 ? coords : null;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
+
+const matchOsrmTransitChunk = async (coords: LngLat[]): Promise<LngLat[] | null> => {
   if (coords.length < 2) return null;
   const encoded = coords.map(([lng, lat]) => `${lng},${lat}`).join(';');
   const radiuses = coords.map(() => 90).join(';');
@@ -116,15 +138,74 @@ const matchTransitChunk = async (coords: LngLat[]): Promise<LngLat[] | null> => 
   }
 };
 
+const routeMapboxTransitChunk = async (coords: LngLat[]): Promise<LngLat[] | null> => {
+  if (!MAPBOX_TOKEN || coords.length < 2) return null;
+  const encoded = coords.map(([lng, lat]) => `${lng},${lat}`).join(';');
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${encoded}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 6500);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const coords = data.routes?.[0]?.geometry?.coordinates;
+    return Array.isArray(coords) && coords.length >= 2 ? coords : null;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
+
+const directionAnchorsForFixedRoute = (coords: LngLat[]) => {
+  const dense = denseTraceForMatching(coords);
+  const anchors: LngLat[] = [dense[0]];
+  let sinceLast = 0;
+  for (let i = 1; i < dense.length - 1; i += 1) {
+    sinceLast += distanceKm(dense[i - 1], dense[i]);
+    if (sinceLast >= 0.45) {
+      anchors.push(dense[i]);
+      sinceLast = 0;
+    }
+  }
+  anchors.push(dense[dense.length - 1]);
+  return anchors;
+};
+
 const matchTransitTraceToRoads = async (coords: LngLat[]) => {
   const trace = denseTraceForMatching(coords);
   if (trace.length < 2) return null;
+
+  const mapboxMatched: LngLat[] = [];
+  for (let start = 0; start < trace.length - 1; start += 89) {
+    const chunk = trace.slice(start, Math.min(trace.length, start + 90));
+    const chunkMatch = await matchMapboxTransitChunk(chunk);
+    if (!chunkMatch) {
+      mapboxMatched.length = 0;
+      break;
+    }
+    appendCoords(mapboxMatched, chunkMatch);
+  }
+  if (mapboxMatched.length >= 2) return mapboxMatched;
+
+  const anchors = directionAnchorsForFixedRoute(coords);
+  const mapboxRouted: LngLat[] = [];
+  for (let start = 0; start < anchors.length - 1; start += 23) {
+    const chunk = anchors.slice(start, Math.min(anchors.length, start + 24));
+    const chunkRoute = await routeMapboxTransitChunk(chunk);
+    if (!chunkRoute) {
+      mapboxRouted.length = 0;
+      break;
+    }
+    appendCoords(mapboxRouted, chunkRoute);
+  }
+  if (mapboxRouted.length >= 2) return mapboxRouted;
 
   const matched: LngLat[] = [];
   const chunkSize = 90;
   for (let start = 0; start < trace.length - 1; start += chunkSize - 1) {
     const chunk = trace.slice(start, Math.min(trace.length, start + chunkSize));
-    const chunkMatch = await matchTransitChunk(chunk);
+    const chunkMatch = await matchOsrmTransitChunk(chunk);
     if (!chunkMatch) return null;
     appendCoords(matched, chunkMatch);
   }

@@ -29,6 +29,7 @@ public class SikkaTripNotificationPlugin extends Plugin {
     private static final String CHANNEL_ID = "sikka_active_trip";
     private static final int NOTIFICATION_ID = 3107;
     private static final int REQUEST_NOTIFICATIONS = 3108;
+    private static final int SIKKA_BLUE = Color.rgb(37, 141, 255);
 
     @PluginMethod
     public void show(PluginCall call) {
@@ -71,8 +72,8 @@ public class SikkaTripNotificationPlugin extends Plugin {
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
-            .setColor(color)
-            .setColorized(true)
+            .setColor(SIKKA_BLUE)
+            .setColorized(false)
             .setOngoing(true)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
