@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,31 +24,30 @@ for (const folder of densityFolders) {
   const dir = join(resRoot, folder);
   mkdirSync(dir, { recursive: true });
   for (const name of ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png', 'sikka_launcher.png']) {
-    writeFileSync(join(dir, name), iconPng);
+    const target = join(dir, name);
+    if (!existsSync(target)) writeFileSync(target, iconPng);
   }
 }
 
 const drawableDir = join(resRoot, 'drawable');
 mkdirSync(drawableDir, { recursive: true });
-writeFileSync(join(drawableDir, 'sikka_logo.png'), iconPng);
-
-const adaptiveIcon = `<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-</adaptive-icon>
-`;
+for (const name of ['sikka_icon.png', 'sikka_logo.png']) {
+  const target = join(drawableDir, name);
+  if (!existsSync(target)) writeFileSync(target, iconPng);
+}
 
 const adaptiveDir = join(resRoot, 'mipmap-anydpi-v26');
 mkdirSync(adaptiveDir, { recursive: true });
-writeFileSync(join(adaptiveDir, 'ic_launcher.xml'), adaptiveIcon);
-writeFileSync(join(adaptiveDir, 'ic_launcher_round.xml'), adaptiveIcon);
+for (const name of ['ic_launcher.xml', 'ic_launcher_round.xml']) {
+  const target = join(adaptiveDir, name);
+  if (existsSync(target)) rmSync(target);
+}
 
 const manifestPath = join(androidRoot, 'AndroidManifest.xml');
 let manifest = readFileSync(manifestPath, 'utf8');
 manifest = manifest
-  .replace(/android:icon="@[^"]+"/, 'android:icon="@drawable/sikka_icon"')
-  .replace(/android:roundIcon="@[^"]+"/, 'android:roundIcon="@drawable/sikka_icon"');
+  .replace(/android:icon="@[^"]+"/, 'android:icon="@mipmap/ic_launcher"')
+  .replace(/android:roundIcon="@[^"]+"/, 'android:roundIcon="@mipmap/ic_launcher_round"');
 writeFileSync(manifestPath, manifest);
 
-console.log('Applied uploaded Sikka PNG as the static Android launcher and splash logo assets.');
+console.log('Applied safe Android launcher icon references.');
