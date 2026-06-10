@@ -3,26 +3,72 @@ import { db, transportTypesTable, transitLinesTable } from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
 
 const router = Router();
-const SNAPSHOT_VERSION = 2;
-const MAX_ROUTE_POINTS = 120;
+const SNAPSHOT_VERSION = 3;
+const MAX_ROUTE_POINTS = 2000;
+const SIMPLIFY_TOLERANCE_KM = 0.006;
 const PATH_SUSPECT_STEP_KM = 0.5;
+const PATH_POOR_STEP_KM = 0.18;
 
 function roundCoord(value: number): number {
   return Math.round(value * 100000) / 100000;
 }
 
+function pointToSegmentKm(point: [number, number], a: [number, number], b: [number, number]): number {
+  const r = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (d: number) => (d * 180) / Math.PI;
+  const cosLat = Math.max(Math.cos(toRad(point[1])), 0.000001);
+  const ax = toRad(a[0] - point[0]) * cosLat * r;
+  const ay = toRad(a[1] - point[1]) * r;
+  const bx = toRad(b[0] - point[0]) * cosLat * r;
+  const by = toRad(b[1] - point[1]) * r;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, (-ax * dx + -ay * dy) / len2)) : 0;
+  const px = ax + dx * t;
+  const py = ay + dy * t;
+  return haversineKm(point, [point[0] + toDeg(px / (cosLat * r)), point[1] + toDeg(py / r)]);
+}
+
+function simplifyDouglasPeucker(path: [number, number][], toleranceKm: number): [number, number][] {
+  if (path.length <= 2) return path;
+  let maxDistance = 0;
+  let index = 0;
+  for (let i = 1; i < path.length - 1; i++) {
+    const distance = pointToSegmentKm(path[i], path[0], path[path.length - 1]);
+    if (distance > maxDistance) {
+      index = i;
+      maxDistance = distance;
+    }
+  }
+  if (maxDistance <= toleranceKm) return [path[0], path[path.length - 1]];
+  const left = simplifyDouglasPeucker(path.slice(0, index + 1), toleranceKm);
+  const right = simplifyDouglasPeucker(path.slice(index), toleranceKm);
+  return left.slice(0, -1).concat(right);
+}
+
+function cleanPath(path: [number, number][]): [number, number][] {
+  const out: [number, number][] = [];
+  for (const p of path) {
+    if (!Number.isFinite(p?.[0]) || !Number.isFinite(p?.[1])) continue;
+    const rounded: [number, number] = [roundCoord(p[0]), roundCoord(p[1])];
+    const prev = out[out.length - 1];
+    if (!prev || haversineKm(prev, rounded) >= 0.003) out.push(rounded);
+  }
+  return out;
+}
+
 function compactPath(path: [number, number][] | null | undefined): [number, number][] | null {
   if (!path || path.length < 2) return null;
-  const step = Math.max(1, Math.ceil(path.length / MAX_ROUTE_POINTS));
-  const out: [number, number][] = [];
-  for (let i = 0; i < path.length; i += step) {
-    const p = path[i];
-    if (Number.isFinite(p?.[0]) && Number.isFinite(p?.[1])) out.push([roundCoord(p[0]), roundCoord(p[1])]);
+  const cleaned = cleanPath(path);
+  if (cleaned.length < 2) return null;
+  let out = cleaned.length <= MAX_ROUTE_POINTS ? cleaned : simplifyDouglasPeucker(cleaned, SIMPLIFY_TOLERANCE_KM);
+  let tolerance = SIMPLIFY_TOLERANCE_KM;
+  while (out.length > MAX_ROUTE_POINTS && tolerance < 0.05) {
+    tolerance *= 1.35;
+    out = simplifyDouglasPeucker(cleaned, tolerance);
   }
-  const last = path[path.length - 1];
-  const compactLast: [number, number] = [roundCoord(last[0]), roundCoord(last[1])];
-  const prev = out[out.length - 1];
-  if (!prev || prev[0] !== compactLast[0] || prev[1] !== compactLast[1]) out.push(compactLast);
   return out.length >= 2 ? out : null;
 }
 
@@ -43,10 +89,13 @@ function maxConsecutiveStepKm(path: [number, number][] | null | undefined): numb
   return max;
 }
 
-function routeQuality(path: [number, number][] | null | undefined, hasFixedStops: boolean): "gtfs" | "standard" | "suspect" {
+function routeQuality(path: [number, number][] | null | undefined, hasFixedStops: boolean): "gtfs" | "recorded" | "standard" | "rough" | "suspect" {
   if (!path || path.length < 2) return "suspect";
-  if (maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM) return "suspect";
-  return hasFixedStops || path.length >= 50 ? "gtfs" : "standard";
+  const maxStepKm = maxConsecutiveStepKm(path);
+  if (maxStepKm > PATH_SUSPECT_STEP_KM) return "suspect";
+  if (maxStepKm > PATH_POOR_STEP_KM) return "rough";
+  if (hasFixedStops) return "gtfs";
+  return path.length >= 50 ? "recorded" : "standard";
 }
 
 function stampOf(value: unknown): number {
@@ -81,7 +130,9 @@ router.get("/snapshot", async (_req, res) => {
 
   const lines = lineRows
     .map((l) => {
-      const path = l.routePath?.coordinates ?? null;
+      const rawPath = l.routePath?.coordinates ?? null;
+      const path = compactPath(rawPath);
+      const maxStepKm = maxConsecutiveStepKm(path);
       return {
         id: l.id,
         transportTypeId: l.transportTypeId,
@@ -93,9 +144,11 @@ router.get("/snapshot", async (_req, res) => {
         governorate: l.governorate,
         viaStops: l.viaStops ?? [],
         stops: l.stops ?? null,
-        path: compactPath(path),
-        pathPointCount: path?.length ?? 0,
-        pathSuspect: maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM,
+        path,
+        pathPointCount: rawPath?.length ?? 0,
+        snapshotPointCount: path?.length ?? 0,
+        maxStepMeters: Math.round(maxStepKm * 1000),
+        pathSuspect: maxStepKm > PATH_SUSPECT_STEP_KM,
         routeQuality: routeQuality(path, l.hasFixedStops),
         priceEgp: l.priceEgp,
         frequencyMinutes: l.frequencyMinutes,

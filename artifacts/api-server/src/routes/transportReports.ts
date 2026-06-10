@@ -500,6 +500,15 @@ router.put("/:id", requireAdmin, async (req, res) => {
     .where(eq(transportReportsTable.id, req.params.id as string))
     .returning();
   if (!row) return res.status(404).json({ error: "transport report not found" });
+  if (status === "approved" && row.gpsTrace) {
+    await promoteDiscoveredRoute({
+      transportName: row.transportName,
+      transportNumber: row.transportNumber,
+      transportTypeId: row.transportTypeId,
+      fromArea: row.fromArea,
+      toArea: row.toArea,
+    });
+  }
   return res.json(row);
 });
 

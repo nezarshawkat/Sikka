@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
-import { api } from '@/lib/api';
+import { planTripOnDevice } from '@/lib/offlineTripPlanner';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 
@@ -62,7 +62,8 @@ export default function PlanSetup() {
     let cancelled = false;
     const plan = async () => {
       try {
-        const data = await api.post<{ segments?: Array<Record<string, unknown>>; [k: string]: unknown }>('/trips/plan', {
+        const data = await planTripOnDevice({
+          destination: request.destination,
           startLat: request.startLat,
           startLng: request.startLng,
           endLat: request.destLat,

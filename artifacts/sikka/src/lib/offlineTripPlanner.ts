@@ -28,8 +28,10 @@ type OfflineLine = {
   viaStops: string[];
   path: LngLat[];
   pathPointCount?: number;
+  snapshotPointCount?: number;
+  maxStepMeters?: number;
   pathSuspect?: boolean;
-  routeQuality?: "gtfs" | "standard" | "suspect";
+  routeQuality?: "gtfs" | "recorded" | "standard" | "rough" | "suspect";
   priceEgp: number;
   frequencyMinutes: number | null;
   hasFixedStops: boolean;
@@ -113,18 +115,18 @@ type Connector = {
   geometry: LngLat[];
 };
 
-const API_ORIGIN = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
+const DEFAULT_API_ORIGIN = "https://sikka-mq6w.onrender.com";
+const API_ORIGIN = ((import.meta.env.VITE_API_URL as string | undefined) || DEFAULT_API_ORIGIN).replace(/\/+$/, "");
 const API_BASE = `${API_ORIGIN}/api`;
 const SNAPSHOT_DB = "sikka-offline";
 const SNAPSHOT_STORE = "snapshots";
 const SNAPSHOT_KEY = "latest";
-const SNAPSHOT_SCHEMA_VERSION = 2;
+const SNAPSHOT_SCHEMA_VERSION = 3;
 const SNAPSHOT_REFRESH_MS = 10 * 60 * 1000;
 const WALK_MAX_KM = 0.8;
 const WALK_SPEED_KMH = 4.5;
 const WALK_DETOUR = 1.3;
 const FARE_MARKUP = 1.25;
-const streetGeometryCache = new Map<string, LngLat[] | null>();
 
 function modeOfType(nameEn: string): ModeKey {
   const n = nameEn.toLowerCase();
@@ -161,15 +163,19 @@ function maxConsecutiveStepKm(path: LngLat[]): number {
   return max;
 }
 
-function routeQuality(line: OfflineLine): "gtfs" | "standard" | "suspect" {
+function routeQuality(line: OfflineLine): NonNullable<OfflineLine["routeQuality"]> {
   if (line.routeQuality) return line.routeQuality;
   if (line.pathSuspect || maxConsecutiveStepKm(line.path) > 0.5) return "suspect";
-  return line.hasFixedStops || (line.pathPointCount ?? line.path.length) >= 50 ? "gtfs" : "standard";
+  if ((line.maxStepMeters ?? 0) > 180) return "rough";
+  if (line.hasFixedStops) return "gtfs";
+  return (line.pathPointCount ?? line.path.length) >= 50 ? "recorded" : "standard";
 }
 
 function routeQualityPenalty(line: OfflineLine): number {
   const quality = routeQuality(line);
   if (quality === "gtfs") return -45;
+  if (quality === "recorded") return -35;
+  if (quality === "rough") return 35;
   if (quality === "suspect") return 70;
   return 0;
 }
@@ -201,56 +207,24 @@ function connectorModeFromSegment(segment: ApiSegment): ModeKey | null {
   return null;
 }
 
-async function fetchStreetGeometry(mode: ModeKey, from: LngLat, to: LngLat, signal: AbortSignal): Promise<LngLat[] | null> {
-  const drivingUrls = [
-    `https://router.project-osrm.org/route/v1/driving/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-    `https://routing.openstreetmap.de/routed-car/route/v1/driving/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-  ];
-  const walkingUrls = [
-    `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-    `https://router.project-osrm.org/route/v1/foot/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-    `https://router.project-osrm.org/route/v1/walking/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-  ];
-  const urls = mode === "walk" ? walkingUrls : drivingUrls;
-
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, { signal, cache: "force-cache" });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const coords = data.routes?.[0]?.geometry?.coordinates as LngLat[] | undefined;
-      if (Array.isArray(coords) && coords.length >= 2) return coords.map((p) => [p[0], p[1]] as LngLat);
-    } catch {
-      if (signal.aborted) return null;
-    }
-  }
-  return null;
-}
-
 async function snapConnectorGeometry(mode: ModeKey, geometry: LngLat[]): Promise<LngLat[]> {
   if (geometry.length < 2) return geometry;
   if (mode !== "walk" && mode !== "taxi" && mode !== "tuktuk") return geometry;
-  const from = geometry[0];
-  const to = geometry[geometry.length - 1];
-  const profile = mode === "walk" ? "foot" : "driving";
-  const key = `${profile}:${from[0].toFixed(5)},${from[1].toFixed(5)}:${to[0].toFixed(5)},${to[1].toFixed(5)}`;
-  if (streetGeometryCache.has(key)) return streetGeometryCache.get(key) ?? geometry;
-
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 5000);
-  try {
-    const snapped = await fetchStreetGeometry(mode, from, to, controller.signal);
-    if (snapped?.length) {
-      snapped[0] = from;
-      snapped[snapped.length - 1] = to;
-      streetGeometryCache.set(key, snapped);
-      return snapped;
+  const out: LngLat[] = [geometry[0]];
+  for (let i = 1; i < geometry.length; i++) {
+    const from = geometry[i - 1];
+    const to = geometry[i];
+    const km = haversineKm({ lng: from[0], lat: from[1] }, { lng: to[0], lat: to[1] });
+    const steps = Math.max(1, Math.ceil(km / 0.06));
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps;
+      out.push([
+        from[0] + (to[0] - from[0]) * t,
+        from[1] + (to[1] - from[1]) * t,
+      ]);
     }
-  } finally {
-    window.clearTimeout(timer);
   }
-  streetGeometryCache.set(key, null);
-  return geometry;
+  return out;
 }
 
 function pointToSegment(point: Coord, a: LngLat, b: LngLat): { coord: Coord; distanceKm: number } {
