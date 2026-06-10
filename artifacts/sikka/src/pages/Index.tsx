@@ -11,7 +11,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { useMapStyle } from '@/hooks/useMapStyle';
 import { useTripTracking } from '@/hooks/useTripTracking';
-import { getDirections, type RoutingProfile } from '@/lib/routePaths';
+import { getDirections, snapTransitPathToRoads, type RoutingProfile } from '@/lib/routePaths';
 import { clearTripNotification, showTripNotification } from '@/lib/nativeTripNotification';
 import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
 import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
@@ -81,9 +81,22 @@ const transportIconFor = (seg?: Pick<ActiveTripSegment, 'icon' | 'transport_type
   return TRANSPORT_ICONS[seg.icon] || TRANSPORT_ICONS[seg.transport_type_id || ''] || TRANSPORT_ICONS.bus;
 };
 
+const isRoadTransitSegment = (seg: ActiveTripSegment) => {
+  const text = `${seg.transport_type_id || ''} ${seg.icon || ''} ${seg.transport_name || ''}`.toLowerCase();
+  return !!seg.line_id && (
+    seg.transport_type_id === 'bus'
+    || seg.transport_type_id === 'microbus'
+    || seg.transport_type_id === 'serfis'
+    || seg.icon === 'bus'
+    || text.includes('bus')
+    || text.includes('microbus')
+    || text.includes('serfis')
+  );
+};
+
 const connectorProfileForSegment = (seg: ActiveTripSegment): RoutingProfile | null => {
   const text = `${seg.transport_type_id || ''} ${seg.icon || ''} ${seg.transport_name || ''}`.toLowerCase();
-  if (seg.line_id || seg.transport_type_id === 'bus' || seg.transport_type_id === 'microbus' || seg.transport_type_id === 'serfis' || seg.icon === 'bus') return null;
+  if (isRoadTransitSegment(seg)) return null;
   if (text.includes('walk') || text.includes('مشي')) return 'walking';
   if (
     text.includes('taxi') ||
@@ -111,15 +124,28 @@ const fallbackCoordsForSegment = (plan: ActiveTripPlan, index: number): [number,
   return [[startLng, startLat], [endLng, endLat]];
 };
 
+const buildRouteCoordsForSegment = async (
+  plan: ActiveTripPlan,
+  seg: ActiveTripSegment,
+  index: number
+) => {
+  const rawCoords = seg.route_geometry && seg.route_geometry.length >= 2
+    ? seg.route_geometry
+    : fallbackCoordsForSegment(plan, index);
+  if (isRoadTransitSegment(seg) && rawCoords.length >= 3) {
+    const snapped = await snapTransitPathToRoads(rawCoords);
+    return snapped.length >= 2 ? snapped : rawCoords;
+  }
+  const profile = connectorProfileForSegment(seg);
+  if (!profile || rawCoords.length < 2) return rawCoords;
+  const snapped = await getDirections(rawCoords[0], rawCoords[rawCoords.length - 1], profile);
+  return snapped.length >= 2 ? snapped : rawCoords;
+};
+
 const roadSnapTripRoutes = async (plan: ActiveTripPlan): Promise<RouteCoordSet> => {
   const routes = await Promise.all(plan.segments.map(async (seg, index) => {
-    const rawCoords = seg.route_geometry && seg.route_geometry.length >= 2
-      ? seg.route_geometry
-      : fallbackCoordsForSegment(plan, index);
-    const profile = connectorProfileForSegment(seg);
-    if (!profile || rawCoords.length < 2) return { segIndex: index, coords: rawCoords };
-    const snapped = await getDirections(rawCoords[0], rawCoords[rawCoords.length - 1], profile);
-    return { segIndex: index, coords: snapped.length >= 2 ? snapped : rawCoords };
+    const coords = await buildRouteCoordsForSegment(plan, seg, index);
+    return { segIndex: index, coords };
   }));
   return routes;
 };
@@ -481,7 +507,7 @@ const Index = () => {
     }
   };
 
-  const handleSwap = (segIdx: number, alt: GuideAlternative) => {
+  const handleSwap = async (segIdx: number, alt: GuideAlternative) => {
     if (!activeTrip) return;
     const newSegments = [...activeTrip.segments];
     const old = newSegments[segIdx];
@@ -496,7 +522,8 @@ const Index = () => {
     const newTime = newSegments.reduce((s, sg) => s + sg.duration_minutes, 0);
     const updated = { ...activeTrip, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime };
     setActiveTrip(updated);
-    setRouteCoords((prev) => prev.map((r) => r.segIndex === segIdx && alt.route_geometry?.length ? { ...r, coords: alt.route_geometry! } : r));
+    const coords = await buildRouteCoordsForSegment(updated, newSegments[segIdx], segIdx);
+    setRouteCoords((prev) => prev.map((r) => r.segIndex === segIdx ? { ...r, coords } : r));
     sessionStorage.setItem('activeTrip', JSON.stringify(updated));
     toast.success(t('planUpdated', language));
   };
