@@ -8,8 +8,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.os.Build;
 
 import androidx.core.app.NotificationCompat;
@@ -59,12 +61,12 @@ public class SikkaTripNotificationPlugin extends Plugin {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        Bitmap largeIcon = BitmapFactory.decodeResource(context.getResources(), R.drawable.sikka_icon);
+        Bitmap largeIcon = buildTransportIcon(icon, color);
         String title = from + " -> " + to + " right now";
         String text = icon.isEmpty() ? transportName : icon + "  " + transportName;
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_sikka)
+            .setSmallIcon(R.drawable.sikka_app_icon)
             .setLargeIcon(largeIcon)
             .setContentTitle(title)
             .setContentText(text)
@@ -110,5 +112,33 @@ public class SikkaTripNotificationPlugin extends Plugin {
         } catch (Exception ignored) {
             return Color.parseColor("#258DFF");
         }
+    }
+
+    private Bitmap buildTransportIcon(String icon, int color) {
+        int size = 192;
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+
+        Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        circlePaint.setColor(color);
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, circlePaint);
+
+        Paint ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        ringPaint.setStyle(Paint.Style.STROKE);
+        ringPaint.setStrokeWidth(8f);
+        ringPaint.setColor(Color.argb(90, 255, 255, 255));
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 7f, ringPaint);
+
+        Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        textPaint.setColor(Color.WHITE);
+        textPaint.setTextAlign(Paint.Align.CENTER);
+        textPaint.setTextSize(86f);
+        textPaint.setTypeface(Typeface.DEFAULT_BOLD);
+        Paint.FontMetrics metrics = textPaint.getFontMetrics();
+        float y = size / 2f - (metrics.ascent + metrics.descent) / 2f;
+
+        String glyph = icon == null || icon.trim().isEmpty() ? "●" : icon.trim();
+        canvas.drawText(glyph, size / 2f, y, textPaint);
+        return bitmap;
     }
 }

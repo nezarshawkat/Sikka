@@ -56,33 +56,6 @@ const compactPath = (coords: LngLat[]) => {
   return out.length >= 2 ? out : coords;
 };
 
-const transitAnchors = (coords: LngLat[]) => {
-  const clean = compactPath(coords);
-  if (clean.length <= 2) return clean;
-
-  const total = pathLengthKm(clean);
-  const targetGapKm = total > 12 ? 0.5 : total > 5 ? 0.4 : 0.28;
-  const maxAnchors = total > 12 ? 42 : 34;
-  const anchors: LngLat[] = [clean[0]];
-  let sinceLast = 0;
-
-  for (let i = 1; i < clean.length - 1; i += 1) {
-    sinceLast += distanceKm(clean[i - 1], clean[i]);
-    if (sinceLast >= targetGapKm) {
-      anchors.push(clean[i]);
-      sinceLast = 0;
-    }
-  }
-  anchors.push(clean[clean.length - 1]);
-
-  if (anchors.length <= maxAnchors) return anchors;
-  const sampled: LngLat[] = [];
-  for (let i = 0; i < maxAnchors; i += 1) {
-    sampled.push(anchors[Math.round((i / (maxAnchors - 1)) * (anchors.length - 1))]);
-  }
-  return sampled;
-};
-
 const isStreetSnapSafe = (raw: LngLat[], snapped: LngLat[]) => {
   if (snapped.length < 2) return false;
   const rawLength = Math.max(0.05, pathLengthKm(raw));
@@ -99,19 +72,34 @@ const isStreetSnapSafe = (raw: LngLat[], snapped: LngLat[]) => {
   return true;
 };
 
-const downsampleByIndex = (coords: LngLat[], maxPoints: number) => {
-  if (coords.length <= maxPoints) return coords;
-  const sampled: LngLat[] = [];
-  for (let i = 0; i < maxPoints; i += 1) {
-    sampled.push(coords[Math.round((i / (maxPoints - 1)) * (coords.length - 1))]);
+const interpolatePoint = (a: LngLat, b: LngLat, t: number): LngLat => [
+  a[0] + (b[0] - a[0]) * t,
+  a[1] + (b[1] - a[1]) * t,
+];
+
+const denseTraceForMatching = (coords: LngLat[]) => {
+  const clean = compactPath(coords);
+  if (clean.length < 2) return clean;
+  const dense: LngLat[] = [clean[0]];
+  const targetGapKm = 0.055;
+
+  for (let i = 0; i < clean.length - 1; i += 1) {
+    const a = clean[i];
+    const b = clean[i + 1];
+    const segmentKm = distanceKm(a, b);
+    const steps = Math.max(1, Math.ceil(segmentKm / targetGapKm));
+    for (let step = 1; step <= steps; step += 1) {
+      dense.push(interpolatePoint(a, b, step / steps));
+    }
   }
-  return sampled;
+
+  return dense;
 };
 
 const matchTransitChunk = async (coords: LngLat[]): Promise<LngLat[] | null> => {
   if (coords.length < 2) return null;
   const encoded = coords.map(([lng, lat]) => `${lng},${lat}`).join(';');
-  const radiuses = coords.map(() => 35).join(';');
+  const radiuses = coords.map(() => 90).join(';');
   const url = `https://router.project-osrm.org/match/v1/driving/${encoded}?overview=full&geometries=geojson&steps=false&annotations=false&gaps=ignore&tidy=true&radiuses=${radiuses}`;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 4500);
@@ -129,7 +117,7 @@ const matchTransitChunk = async (coords: LngLat[]): Promise<LngLat[] | null> => 
 };
 
 const matchTransitTraceToRoads = async (coords: LngLat[]) => {
-  const trace = downsampleByIndex(compactPath(coords), 95);
+  const trace = denseTraceForMatching(coords);
   if (trace.length < 2) return null;
 
   const matched: LngLat[] = [];
@@ -192,16 +180,5 @@ export async function snapTransitPathToRoads(coords: LngLat[]): Promise<LngLat[]
     return matched;
   }
 
-  const anchors = transitAnchors(raw);
-  const snapped: LngLat[] = [];
-  for (let i = 0; i < anchors.length - 1; i += 1) {
-    const leg = await getDirections(anchors[i], anchors[i + 1], 'driving');
-    if (leg.length < 2) return raw;
-    appendCoords(snapped, leg);
-  }
-
-  if (!isStreetSnapSafe(raw, snapped)) return raw;
-  snapped[0] = raw[0];
-  snapped[snapped.length - 1] = raw[raw.length - 1];
-  return snapped;
+  return raw;
 }
