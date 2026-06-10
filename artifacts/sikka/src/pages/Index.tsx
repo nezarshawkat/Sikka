@@ -11,7 +11,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { useMapStyle } from '@/hooks/useMapStyle';
 import { useTripTracking } from '@/hooks/useTripTracking';
-import { snapPathToRoads, type RoutingProfile } from '@/lib/routePaths';
+import { getDirections, type RoutingProfile } from '@/lib/routePaths';
 import { clearTripNotification, showTripNotification } from '@/lib/nativeTripNotification';
 import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
 import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
@@ -81,13 +81,11 @@ const transportIconFor = (seg?: Pick<ActiveTripSegment, 'icon' | 'transport_type
   return TRANSPORT_ICONS[seg.icon] || TRANSPORT_ICONS[seg.transport_type_id || ''] || TRANSPORT_ICONS.bus;
 };
 
-const roadProfileForSegment = (seg: ActiveTripSegment): RoutingProfile | null => {
+const connectorProfileForSegment = (seg: ActiveTripSegment): RoutingProfile | null => {
   const text = `${seg.transport_type_id || ''} ${seg.icon || ''} ${seg.transport_name || ''}`.toLowerCase();
+  if (seg.line_id || seg.transport_type_id === 'bus' || seg.transport_type_id === 'microbus' || seg.transport_type_id === 'serfis' || seg.icon === 'bus') return null;
   if (text.includes('walk') || text.includes('مشي')) return 'walking';
   if (
-    text.includes('bus') ||
-    text.includes('microbus') ||
-    text.includes('serfis') ||
     text.includes('taxi') ||
     text.includes('uber') ||
     text.includes('careem') ||
@@ -96,10 +94,6 @@ const roadProfileForSegment = (seg: ActiveTripSegment): RoutingProfile | null =>
     text.includes('toktok') ||
     text.includes('توك') ||
     text.includes('تاكسي') ||
-    seg.icon === 'bus' ||
-    seg.transport_type_id === 'bus' ||
-    seg.transport_type_id === 'microbus' ||
-    seg.transport_type_id === 'serfis' ||
     seg.icon === 'bike' ||
     seg.icon === 'car'
   ) {
@@ -122,9 +116,9 @@ const roadSnapTripRoutes = async (plan: ActiveTripPlan): Promise<RouteCoordSet> 
     const rawCoords = seg.route_geometry && seg.route_geometry.length >= 2
       ? seg.route_geometry
       : fallbackCoordsForSegment(plan, index);
-    const profile = roadProfileForSegment(seg);
+    const profile = connectorProfileForSegment(seg);
     if (!profile || rawCoords.length < 2) return { segIndex: index, coords: rawCoords };
-    const snapped = await snapPathToRoads(rawCoords, profile);
+    const snapped = await getDirections(rawCoords[0], rawCoords[rawCoords.length - 1], profile);
     return { segIndex: index, coords: snapped.length >= 2 ? snapped : rawCoords };
   }));
   return routes;
