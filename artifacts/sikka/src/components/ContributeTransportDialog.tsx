@@ -194,33 +194,18 @@ export default function ContributeTransportDialog({
               </div>
             </>
           )}
-          {operator === 'microbus' && (
-            <p className="text-xs font-medium text-foreground">
-              {t('microbusBoardingPrompt', language)}
-            </p>
-          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted-foreground">
-                {t(operator === 'microbus' ? 'microbusGetIn' : 'fromArea', language)}
+                {t(operator === 'microbus' ? 'microbusBoardingArea' : 'fromArea', language)}
               </label>
-              <Input
-                value={fromArea}
-                onChange={(e) => setFromArea(e.target.value)}
-                placeholder={operator === 'microbus' ? t('microbusBoardingArea', language) : undefined}
-                className="text-sm rounded-[2rem]"
-              />
+              <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm rounded-[2rem]" />
             </div>
             <div>
               <label className="text-xs text-muted-foreground">
-                {t(operator === 'microbus' ? 'microbusGetOut' : 'toArea', language)}
+                {t(operator === 'microbus' ? 'microbusRouteEnd' : 'toArea', language)}
               </label>
-              <Input
-                value={toArea}
-                onChange={(e) => setToArea(e.target.value)}
-                placeholder={operator === 'microbus' ? t('microbusRouteEnd', language) : undefined}
-                className="text-sm rounded-[2rem]"
-              />
+              <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm rounded-[2rem]" />
             </div>
           </div>
           <div>

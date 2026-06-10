@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { motion } from 'framer-motion';
-const logo = '/sikka-logo.svg';
+import logo from '@assets/sikka-logo.svg';
 
 const Splash = () => {
   const { user, isLoading } = useAuth();
@@ -14,26 +14,49 @@ const Splash = () => {
         sessionStorage.setItem('splashShown', '1');
         navigate(user ? '/' : '/auth', { replace: true });
       }
-    }, 4000);
+    }, 2800);
     return () => clearTimeout(timer);
   }, [isLoading, user, navigate]);
 
+  useEffect(() => {
+    if (!isLoading && user) {
+      sessionStorage.setItem('splashShown', '1');
+      navigate('/', { replace: true });
+    }
+  }, [isLoading, user, navigate]);
+
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center bg-background overflow-hidden">
+    <div className="fixed inset-0 flex flex-col items-center justify-center bg-white dark:bg-background overflow-hidden">
       <motion.div
-        initial={{ scale: 0.82, opacity: 0 }}
+        initial={{ scale: 0.6, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.45, ease: 'easeOut' }}
+        transition={{ type: 'spring', stiffness: 200, damping: 18, duration: 0.6 }}
         className="flex flex-col items-center gap-8"
       >
         <motion.img
           src={logo}
           alt="Sikka"
-          className="w-52 h-52 object-contain sm:h-56 sm:w-56"
+          className="w-56 h-56 object-contain"
           initial={{ y: 20 }}
           animate={{ y: 0 }}
           transition={{ delay: 0.1, type: 'spring', stiffness: 200, damping: 18 }}
         />
+      </motion.div>
+
+      <motion.div
+        className="absolute bottom-16 flex gap-2"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 1.2 }}
+      >
+        {[0, 1, 2].map((i) => (
+          <motion.div
+            key={i}
+            className="h-2 w-2 rounded-full bg-primary/70"
+            animate={{ opacity: [0.3, 1, 0.3] }}
+            transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
+          />
+        ))}
       </motion.div>
     </div>
   );

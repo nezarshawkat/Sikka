@@ -17,7 +17,7 @@ const TYPES = [
   { nameEn: "Microbus",      nameAr: "ميكروباص",                   icon: "bus",      color: "#10B981", base: 3,   pkm: 0.5, spd: 25 },
   { nameEn: "Tuktuk",        nameAr: "توك توك",                    icon: "bike",     color: "#F97316", base: 5,   pkm: 2,   spd: 20 },
   { nameEn: "White Taxi",    nameAr: "تاكسي أبيض",                icon: "car",      color: "#64748B", base: 10,  pkm: 3,   spd: 30 },
-  { nameEn: "Uber / Careem", nameAr: "أوبر / كريم",               icon: "car",      color: "#06B6D4", base: 15,  pkm: 4,   spd: 35 },
+  { nameEn: "Taxi app", nameAr: "تطبيق تاكسي",                    icon: "car",      color: "#06B6D4", base: 15,  pkm: 4,   spd: 35 },
 ];
 
 // ─── Metro lines ─────────────────────────────────────────────────────────────

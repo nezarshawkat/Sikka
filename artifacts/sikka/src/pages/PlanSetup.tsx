@@ -7,10 +7,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { api } from '@/lib/api';
-import { planTripOnDevice } from '@/lib/offlineTripPlanner';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
-type TripPlanResponse = { segments?: unknown[]; [k: string]: unknown };
 
 const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
 
@@ -64,41 +62,26 @@ export default function PlanSetup() {
     let cancelled = false;
     const plan = async () => {
       try {
-        let data: TripPlanResponse | null = await planTripOnDevice({
+        const data = await api.post<{ segments?: Array<Record<string, unknown>>; [k: string]: unknown }>('/trips/plan', {
           startLat: request.startLat,
           startLng: request.startLng,
           endLat: request.destLat,
           endLng: request.destLng,
-          destination: request.destination,
           tripType: request.tripType,
           budget: request.budget,
           language,
           mode: request.mode,
         });
-
-        if (!data) {
-          data = await api.post<TripPlanResponse>('/trips/plan', {
-            startLat: request.startLat,
-            startLng: request.startLng,
-            endLat: request.destLat,
-            endLng: request.destLng,
-            tripType: request.tripType,
-            budget: request.budget,
-            language,
-            mode: request.mode,
-          });
-        }
-
         if (cancelled) return;
         if (!data?.segments?.length) throw new Error(t('noRouteTitle', language));
 
         const originName = await reverseGeocode(request.startLat, request.startLng, language);
         if (Array.isArray(data.segments) && data.segments.length > 0) {
           const segs = [...data.segments];
-          if (originName && typeof segs[0] === 'object' && segs[0]) segs[0] = { ...segs[0], start_name: originName };
+          if (originName) segs[0] = { ...segs[0], start_name: originName };
           if (request.destination) {
             const last = segs.length - 1;
-            if (typeof segs[last] === 'object' && segs[last]) segs[last] = { ...segs[last], end_name: request.destination };
+            segs[last] = { ...segs[last], end_name: request.destination };
           }
           data.segments = segs;
         }
@@ -178,6 +161,7 @@ export default function PlanSetup() {
             </div>
             <div className="space-y-2">
               <h1 className="text-2xl font-bold text-foreground">{t('settingUpPlanTitle', language)}</h1>
+              <p className="text-sm text-muted-foreground">{t('settingUpPlanBody', language)}</p>
             </div>
             <div className="min-h-[3.5rem] flex items-center justify-center">
               <AnimatePresence mode="wait">

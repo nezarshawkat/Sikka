@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
-import { t } from '@/lib/i18n';
 
 type Mode = 'flight' | 'train' | 'taxi' | 'nile';
 
@@ -120,37 +119,6 @@ const NILE_SERVICES: ServiceOption[] = [
   },
 ];
 
-const DOMESTIC_AIRPORTS: Record<string, {
-  code: string;
-  airport: string;
-  city: string;
-  notes: string;
-}> = {
-  cairo: { code: 'CAI', airport: 'Cairo International Airport', city: 'Cairo', notes: 'Main domestic hub for EgyptAir and seasonal operators.' },
-  giza: { code: 'CAI/SPX', airport: 'Cairo International or Sphinx International', city: 'Greater Cairo', notes: 'Use Cairo International for most domestic schedules; Sphinx can be useful for west Cairo/Giza when flights are available.' },
-  newcairo: { code: 'CAI', airport: 'Cairo International Airport', city: 'New Cairo', notes: 'Closest practical domestic airport is Cairo International.' },
-  '6october': { code: 'SPX/CAI', airport: 'Sphinx International or Cairo International', city: '6th of October', notes: 'Check Sphinx availability first, then Cairo International.' },
-  '6thofoctober': { code: 'SPX/CAI', airport: 'Sphinx International or Cairo International', city: '6th of October', notes: 'Check Sphinx availability first, then Cairo International.' },
-  alexandria: { code: 'HBE', airport: 'Borg El Arab Airport', city: 'Alexandria', notes: 'Domestic availability changes by season; Cairo connection may be required.' },
-  luxor: { code: 'LXR', airport: 'Luxor International Airport', city: 'Luxor', notes: 'Regularly supported from Cairo and tourism routes.' },
-  aswan: { code: 'ASW', airport: 'Aswan International Airport', city: 'Aswan', notes: 'Regularly supported from Cairo; Abu Simbel is usually a separate tourism leg.' },
-  hurghada: { code: 'HRG', airport: 'Hurghada International Airport', city: 'Hurghada', notes: 'Strong domestic and tourism coverage.' },
-  sharm: { code: 'SSH', airport: 'Sharm El-Sheikh International Airport', city: 'Sharm El-Sheikh', notes: 'Strong domestic and tourism coverage.' },
-  sohag: { code: 'HMB', airport: 'Sohag International Airport', city: 'Sohag', notes: 'Check live schedule; service can vary.' },
-  asyut: { code: 'ATZ', airport: 'Assiut Airport', city: 'Asyut', notes: 'Check live schedule; service can vary.' },
-  matrouh: { code: 'MUH', airport: 'Marsa Matrouh Airport', city: 'Marsa Matrouh', notes: 'Mostly seasonal; confirm before recommending.' },
-};
-
-const normalizeAirportKey = (value: string) => normalizeCity(value).replace(/\s+/g, '');
-
-function airportFor(value: string) {
-  const compact = normalizeAirportKey(value);
-  const spaced = normalizeCity(value);
-  return DOMESTIC_AIRPORTS[compact] ??
-    Object.entries(DOMESTIC_AIRPORTS).find(([key, airport]) => compact.includes(key) || spaced.includes(normalizeCity(airport.city)))?.[1] ??
-    null;
-}
-
 const DATA: Record<Mode, ModeData> = {
   flight: {
     icon: Plane,
@@ -221,10 +189,6 @@ export default function TravelMode() {
   const to = params.get('toLabel') || params.get('to') || '';
   const routeText = from && to ? `${from} -> ${to}` : '';
   const cityPair = `${normalizeCity(from)} ${normalizeCity(to)}`;
-  const fromAirport = airportFor(from);
-  const toAirport = airportFor(to);
-  const flightAvailable = mode === 'flight' && !!fromAirport && !!toAirport && fromAirport.code !== toAirport.code;
-  const flightViaCairo = flightAvailable && !fromAirport.code.includes('CAI') && !toAirport.code.includes('CAI');
   const taxiAppUrl = useMemo(() => {
     const pickup = encodeURIComponent(from);
     const dropoff = encodeURIComponent(to);
@@ -233,7 +197,7 @@ export default function TravelMode() {
   const bookingUrl = mode === 'taxi' ? taxiAppUrl : item.bookingUrl;
   const recommended =
     mode === 'taxi' ||
-    (mode === 'flight' && flightAvailable) ||
+    (mode === 'flight' && /cairo|alexandria|luxor|aswan|hurghada|sharm/.test(cityPair)) ||
     (mode === 'nile' && /cairo|giza|luxor|aswan/.test(cityPair)) ||
     (mode === 'train' && !/hurghada|sharm|dahab|taba|nuweiba/.test(cityPair));
 
@@ -250,7 +214,7 @@ export default function TravelMode() {
       </div>
 
       <main className="mx-auto max-w-2xl space-y-4 p-4">
-        <Card className="glass-panel rounded-[2rem] border-primary/15">
+        <Card className="glass-panel rounded-[2rem]">
           <CardContent className="space-y-4 p-5">
             <div className="flex items-start gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[1.5rem] bg-primary/10">
@@ -268,48 +232,6 @@ export default function TravelMode() {
             </div>
           </CardContent>
         </Card>
-
-        {mode === 'flight' && (
-          <Card className="rounded-[2rem] border-primary/15 bg-card/80">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    {flightAvailable ? t('flightRouteAvailable', language) : t('flightRouteUnavailable', language)}
-                  </p>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    {flightAvailable ? t('flightRouteCheck', language) : t('flightDataNote', language)}
-                  </p>
-                </div>
-                <Plane className="h-6 w-6 shrink-0 text-primary" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-[1.5rem] border bg-background/60 p-3">
-                  <p className="text-[11px] uppercase text-muted-foreground">{isAr ? 'مطار المغادرة' : 'Departure airport'}</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{fromAirport?.code ?? 'N/A'}</p>
-                  <p className="text-xs leading-snug text-muted-foreground">{(fromAirport?.airport ?? from) || 'Unknown city'}</p>
-                </div>
-                <div className="rounded-[1.5rem] border bg-background/60 p-3">
-                  <p className="text-[11px] uppercase text-muted-foreground">{isAr ? 'مطار الوصول' : 'Arrival airport'}</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{toAirport?.code ?? 'N/A'}</p>
-                  <p className="text-xs leading-snug text-muted-foreground">{(toAirport?.airport ?? to) || 'Unknown city'}</p>
-                </div>
-              </div>
-              {flightViaCairo && (
-                <p className="rounded-[1.5rem] bg-primary/10 p-3 text-xs leading-relaxed text-muted-foreground">
-                  {isAr
-                    ? 'قد تحتاج الرحلة إلى ترانزيت في القاهرة لأن معظم الرحلات الداخلية تدور حول محور القاهرة.'
-                    : 'This pair may require a Cairo connection because most Egyptian domestic flying is hubbed through Cairo.'}
-                </p>
-              )}
-              {(fromAirport?.notes || toAirport?.notes) && (
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  {[fromAirport?.notes, toAirport?.notes].filter(Boolean).join(' ')}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        )}
 
         <Card className="rounded-[2rem]">
           <CardContent className="space-y-3 p-5">
