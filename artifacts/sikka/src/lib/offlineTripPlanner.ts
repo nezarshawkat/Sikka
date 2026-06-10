@@ -138,7 +138,10 @@ const SNAPSHOT_DB = "sikka-offline";
 const SNAPSHOT_STORE = "snapshots";
 const SNAPSHOT_KEY = "latest";
 const SNAPSHOT_SCHEMA_VERSION = 3;
+const MIN_COMPATIBLE_SNAPSHOT_SCHEMA_VERSION = 2;
 const SNAPSHOT_REFRESH_MS = 10 * 60 * 1000;
+const SNAPSHOT_FETCH_TIMEOUT_MS = 20 * 1000;
+const BUNDLED_SNAPSHOT_URL = "/offline-snapshot.json";
 const WALK_MAX_KM = 0.8;
 const WALK_SPEED_KMH = 4.5;
 const WALK_DETOUR = 1.3;
@@ -664,14 +667,32 @@ async function writeCachedSnapshot(snapshot: OfflineSnapshot): Promise<void> {
   });
 }
 
+function isUsableSnapshot(snapshot: OfflineSnapshot | null | undefined): snapshot is OfflineSnapshot {
+  return Boolean(
+    snapshot &&
+    snapshot.schemaVersion >= MIN_COMPATIBLE_SNAPSHOT_SCHEMA_VERSION &&
+    snapshot.schemaVersion <= SNAPSHOT_SCHEMA_VERSION &&
+    snapshot.lines?.length &&
+    snapshot.types?.length,
+  );
+}
+
+function snapshotStamp(snapshot: OfflineSnapshot): number {
+  const generated = Date.parse(snapshot.generatedAt);
+  if (Number.isFinite(generated)) return generated;
+  const revisionParts = String(snapshot.revision || "").split("-");
+  const revisionStamp = Number(revisionParts[1]);
+  return Number.isFinite(revisionStamp) ? revisionStamp : 0;
+}
+
 async function fetchSnapshot(): Promise<OfflineSnapshot | null> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 6000);
+  const timer = window.setTimeout(() => controller.abort(), SNAPSHOT_FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(`${API_BASE}/offline/snapshot`, { signal: controller.signal, cache: "no-cache" });
     if (!res.ok) return null;
     const snapshot = (await res.json()) as OfflineSnapshot;
-    if (snapshot.schemaVersion !== SNAPSHOT_SCHEMA_VERSION || !snapshot.lines?.length) return null;
+    if (!isUsableSnapshot(snapshot)) return null;
     await writeCachedSnapshot(snapshot);
     return snapshot;
   } catch {
@@ -681,13 +702,36 @@ async function fetchSnapshot(): Promise<OfflineSnapshot | null> {
   }
 }
 
+async function fetchBundledSnapshot(): Promise<OfflineSnapshot | null> {
+  try {
+    const res = await fetch(BUNDLED_SNAPSHOT_URL, { cache: "force-cache" });
+    if (!res.ok) return null;
+    const snapshot = (await res.json()) as OfflineSnapshot;
+    return isUsableSnapshot(snapshot) ? snapshot : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getSnapshot(): Promise<OfflineSnapshot | null> {
   const cached = await readCachedSnapshot().catch(() => null);
-  if (!cached || Date.now() - cached.savedAt > SNAPSHOT_REFRESH_MS) {
-    const fresh = await fetchSnapshot();
-    if (fresh) return fresh;
+  if (cached && Date.now() - cached.savedAt <= SNAPSHOT_REFRESH_MS && isUsableSnapshot(cached.snapshot)) {
+    return cached.snapshot;
   }
-  return cached?.snapshot ?? null;
+
+  const bundled = await fetchBundledSnapshot();
+  if (bundled) {
+    const bestLocal = cached && isUsableSnapshot(cached.snapshot) && snapshotStamp(cached.snapshot) > snapshotStamp(bundled)
+      ? cached.snapshot
+      : bundled;
+    void fetchSnapshot();
+    void writeCachedSnapshot(bestLocal);
+    return bestLocal;
+  }
+
+  const fresh = await fetchSnapshot();
+  if (fresh) return fresh;
+  return cached && isUsableSnapshot(cached.snapshot) ? cached.snapshot : null;
 }
 
 function buildCandidates(snapshot: OfflineSnapshot, point: Coord, planKey: PlanKey, limit: number): Candidate[] {
@@ -734,7 +778,7 @@ function bestTransfer(a: OfflineLine, b: OfflineLine, maxKm: number): { aPoint: 
 }
 
 export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan | null> {
-  if (request.mode && request.mode !== "city") return null;
+  if (request.mode && request.mode === "intercity") return null;
   const planKey: PlanKey = request.tripType === "economic" || request.tripType === "premium" ? request.tripType : "comfortable";
   const isArabic = request.language === "ar";
   const snapshot = await getSnapshot();

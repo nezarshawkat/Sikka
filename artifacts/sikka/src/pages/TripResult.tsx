@@ -115,6 +115,31 @@ const TripResult = () => {
     }
   }, [routeCoords]);
 
+  useEffect(() => {
+    if (!isTracking || !routeCoords.length || !mapRef.current) return;
+    const currentRoute = routeCoords.find((route) => route.segIndex === currentSegIndex);
+    const focusCoords = [
+      ...(currentRoute?.coords ?? []),
+      ...(userPos ? [[userPos.lng, userPos.lat] as [number, number]] : []),
+    ];
+    if (!focusCoords.length) return;
+
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    focusCoords.forEach(([lng, lat]) => {
+      minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
+      minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
+    });
+    if (!Number.isFinite(minLng)) return;
+
+    try {
+      if (minLng === maxLng && minLat === maxLat) {
+        mapRef.current.flyTo({ center: [minLng, minLat], zoom: 15, duration: 650 });
+      } else {
+        mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 72, duration: 650, maxZoom: 16 });
+      }
+    } catch {}
+  }, [currentSegIndex, isTracking, routeCoords, userPos]);
+
   const stopTracking = () => {
     setIsTracking(false);
     if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current);

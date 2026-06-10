@@ -224,6 +224,31 @@ const Index = () => {
     onApproachSegmentEnd,
   });
 
+  useEffect(() => {
+    if (!activeTrip || !routeCoords.length || !mapRef.current) return;
+    const currentRoute = routeCoords.find((route) => route.segIndex === currentSegIdx);
+    const focusCoords = [
+      ...(currentRoute?.coords ?? []),
+      ...(userPos ? [[userPos.lng, userPos.lat] as [number, number]] : []),
+    ];
+    if (!focusCoords.length) return;
+
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    focusCoords.forEach(([lng, lat]) => {
+      minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
+      minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
+    });
+    if (!Number.isFinite(minLng)) return;
+
+    try {
+      if (minLng === maxLng && minLat === maxLat) {
+        mapRef.current.flyTo({ center: [minLng, minLat], zoom: 15, duration: 650 });
+      } else {
+        mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 90, duration: 650, maxZoom: 16 });
+      }
+    } catch {}
+  }, [activeTrip, currentSegIdx, routeCoords, userPos]);
+
   const clearTrip = () => {
     sessionStorage.removeItem('activeTrip');
     sessionStorage.removeItem('tripPlan');

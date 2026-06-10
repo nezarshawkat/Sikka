@@ -22,7 +22,7 @@ const TripPlan = () => {
   const startLng = parseFloat(searchParams.get('lng') || '31.2357');
   const mode = searchParams.get('mode') || undefined;
 
-  const [tripType, setTripType] = useState<TripType>('economic');
+  const [tripType, setTripType] = useState<TripType>('comfortable');
   const [budget, setBudget] = useState('');
 
   const distanceKm = useMemo(() => {
