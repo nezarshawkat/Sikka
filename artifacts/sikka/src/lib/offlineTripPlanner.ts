@@ -115,6 +115,22 @@ type Connector = {
   geometry: LngLat[];
 };
 
+type GraphEdge = {
+  to: string;
+  km: number;
+};
+
+type GraphNode = {
+  id: string;
+  coord: Coord;
+  edges: GraphEdge[];
+};
+
+type ConnectorGraph = {
+  nodes: Map<string, GraphNode>;
+  grid: Map<string, string[]>;
+};
+
 const DEFAULT_API_ORIGIN = "https://sikka-mq6w.onrender.com";
 const API_ORIGIN = ((import.meta.env.VITE_API_URL as string | undefined) || DEFAULT_API_ORIGIN).replace(/\/+$/, "");
 const API_BASE = `${API_ORIGIN}/api`;
@@ -127,6 +143,10 @@ const WALK_MAX_KM = 0.8;
 const WALK_SPEED_KMH = 4.5;
 const WALK_DETOUR = 1.3;
 const FARE_MARKUP = 1.25;
+const GRAPH_CELL_SIZE_DEG = 0.01;
+const GRAPH_MAX_NEAREST_KM = 0.75;
+const GRAPH_MAX_EDGE_KM = 0.5;
+const GRAPH_MAX_EXPANSIONS = 4500;
 
 function modeOfType(nameEn: string): ModeKey {
   const n = nameEn.toLowerCase();
@@ -207,9 +227,146 @@ function connectorModeFromSegment(segment: ApiSegment): ModeKey | null {
   return null;
 }
 
-async function snapConnectorGeometry(mode: ModeKey, geometry: LngLat[]): Promise<LngLat[]> {
+function coordKey(point: LngLat): string {
+  return `${point[0].toFixed(5)},${point[1].toFixed(5)}`;
+}
+
+function graphGridKey(coord: Coord): string {
+  return `${Math.floor(coord.lng / GRAPH_CELL_SIZE_DEG)},${Math.floor(coord.lat / GRAPH_CELL_SIZE_DEG)}`;
+}
+
+function addGraphNode(graph: ConnectorGraph, point: LngLat): GraphNode {
+  const id = coordKey(point);
+  const existing = graph.nodes.get(id);
+  if (existing) return existing;
+  const node: GraphNode = { id, coord: { lng: point[0], lat: point[1] }, edges: [] };
+  graph.nodes.set(id, node);
+  const cell = graphGridKey(node.coord);
+  const bucket = graph.grid.get(cell);
+  if (bucket) bucket.push(id);
+  else graph.grid.set(cell, [id]);
+  return node;
+}
+
+function addGraphEdge(graph: ConnectorGraph, from: LngLat, to: LngLat): void {
+  const km = haversineKm({ lng: from[0], lat: from[1] }, { lng: to[0], lat: to[1] });
+  if (!Number.isFinite(km) || km <= 0 || km > GRAPH_MAX_EDGE_KM) return;
+  const a = addGraphNode(graph, from);
+  const b = addGraphNode(graph, to);
+  a.edges.push({ to: b.id, km });
+  b.edges.push({ to: a.id, km });
+}
+
+function buildConnectorGraph(snapshot: OfflineSnapshot): ConnectorGraph {
+  const graph: ConnectorGraph = { nodes: new Map(), grid: new Map() };
+  for (const line of snapshot.lines) {
+    if (!line.path || line.path.length < 2 || routeQuality(line) === "suspect") continue;
+    for (let i = 1; i < line.path.length; i++) {
+      addGraphEdge(graph, line.path[i - 1], line.path[i]);
+    }
+  }
+  return graph;
+}
+
+function nearestGraphNode(graph: ConnectorGraph, point: Coord): { node: GraphNode; km: number } | null {
+  let best: { node: GraphNode; km: number } | null = null;
+  const baseX = Math.floor(point.lng / GRAPH_CELL_SIZE_DEG);
+  const baseY = Math.floor(point.lat / GRAPH_CELL_SIZE_DEG);
+  for (let radius = 0; radius <= 4; radius++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+        const ids = graph.grid.get(`${baseX + dx},${baseY + dy}`);
+        if (!ids) continue;
+        for (const id of ids) {
+          const node = graph.nodes.get(id);
+          if (!node) continue;
+          const km = haversineKm(point, node.coord);
+          if (km <= GRAPH_MAX_NEAREST_KM && (!best || km < best.km)) best = { node, km };
+        }
+      }
+    }
+    if (best) return best;
+  }
+  return best;
+}
+
+function reconstructGraphPath(cameFrom: Map<string, string>, current: string, graph: ConnectorGraph): LngLat[] {
+  const ids = [current];
+  while (cameFrom.has(current)) {
+    current = cameFrom.get(current)!;
+    ids.push(current);
+  }
+  ids.reverse();
+  return ids
+    .map((id) => graph.nodes.get(id))
+    .filter((node): node is GraphNode => Boolean(node))
+    .map((node) => [node.coord.lng, node.coord.lat] as LngLat);
+}
+
+function routeOnConnectorGraph(graph: ConnectorGraph, from: Coord, to: Coord): LngLat[] | null {
+  if (!graph.nodes.size) return null;
+  const start = nearestGraphNode(graph, from);
+  const end = nearestGraphNode(graph, to);
+  if (!start || !end || start.node.id === end.node.id) return null;
+
+  const open = new Set<string>([start.node.id]);
+  const cameFrom = new Map<string, string>();
+  const gScore = new Map<string, number>([[start.node.id, start.km]]);
+  const fScore = new Map<string, number>([[start.node.id, start.km + haversineKm(start.node.coord, end.node.coord)]]);
+  let expansions = 0;
+
+  while (open.size && expansions < GRAPH_MAX_EXPANSIONS) {
+    let current: string | null = null;
+    let currentScore = Infinity;
+    for (const id of open) {
+      const score = fScore.get(id) ?? Infinity;
+      if (score < currentScore) {
+        current = id;
+        currentScore = score;
+      }
+    }
+    if (!current) break;
+    if (current === end.node.id) {
+      const path = reconstructGraphPath(cameFrom, current, graph);
+      return [[from.lng, from.lat], ...path, [to.lng, to.lat]];
+    }
+
+    open.delete(current);
+    expansions++;
+    const node = graph.nodes.get(current);
+    if (!node) continue;
+    const base = gScore.get(current) ?? Infinity;
+    for (const edge of node.edges) {
+      const next = graph.nodes.get(edge.to);
+      if (!next) continue;
+      const tentative = base + edge.km;
+      if (tentative >= (gScore.get(edge.to) ?? Infinity)) continue;
+      cameFrom.set(edge.to, current);
+      gScore.set(edge.to, tentative);
+      fScore.set(edge.to, tentative + haversineKm(next.coord, end.node.coord) + end.km);
+      open.add(edge.to);
+    }
+  }
+  return null;
+}
+
+async function snapConnectorGeometry(mode: ModeKey, geometry: LngLat[], graph: ConnectorGraph): Promise<LngLat[]> {
   if (geometry.length < 2) return geometry;
   if (mode !== "walk" && mode !== "taxi" && mode !== "tuktuk") return geometry;
+  const graphRoute = routeOnConnectorGraph(
+    graph,
+    { lng: geometry[0][0], lat: geometry[0][1] },
+    { lng: geometry[geometry.length - 1][0], lat: geometry[geometry.length - 1][1] },
+  );
+  if (graphRoute && graphRoute.length >= 2) {
+    const directKm = haversineKm(
+      { lng: geometry[0][0], lat: geometry[0][1] },
+      { lng: geometry[geometry.length - 1][0], lat: geometry[geometry.length - 1][1] },
+    );
+    const maxDetour = directKm * (mode === "walk" ? 2.2 : 3) + 0.4;
+    if (pathLengthKm(graphRoute) <= maxDetour) return graphRoute;
+  }
   const out: LngLat[] = [geometry[0]];
   for (let i = 1; i < geometry.length; i++) {
     const from = geometry[i - 1];
@@ -448,18 +605,18 @@ function scoreSegments(segments: ApiSegment[], planKey: PlanKey): number {
   return totalCost * costWeight + totalTime * timeWeight + transfers * 15 + connectorPenalty;
 }
 
-async function snapConnectorSegments(segments: ApiSegment[]): Promise<ApiSegment[]> {
+async function snapConnectorSegments(segments: ApiSegment[], graph: ConnectorGraph): Promise<ApiSegment[]> {
   return Promise.all(segments.map(async (segment) => {
     const mode = connectorModeFromSegment(segment);
     if (!mode || !segment.route_geometry) return segment;
-    return { ...segment, route_geometry: await snapConnectorGeometry(mode, segment.route_geometry) };
+    return { ...segment, route_geometry: await snapConnectorGeometry(mode, segment.route_geometry, graph) };
   }));
 }
 
-async function makePlan(segments: ApiSegment[], request: PlannerRequest, snapshot: OfflineSnapshot): Promise<ApiPlan> {
+async function makePlan(segments: ApiSegment[], request: PlannerRequest, snapshot: OfflineSnapshot, graph: ConnectorGraph): Promise<ApiPlan> {
   const planKey: PlanKey = request.tripType === "economic" || request.tripType === "premium" ? request.tripType : "comfortable";
   const isArabic = request.language === "ar";
-  const streetSegments = await snapConnectorSegments(segments);
+  const streetSegments = await snapConnectorSegments(segments, graph);
   const enrichedSegments = attachAlternatives(snapshot, streetSegments, planKey, isArabic);
   const cost = enrichedSegments.reduce((sum, s) => sum + s.cost_egp, 0);
   const time = enrichedSegments.reduce((sum, s) => sum + s.duration_minutes, 0);
@@ -582,6 +739,7 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
   const isArabic = request.language === "ar";
   const snapshot = await getSnapshot();
   if (!snapshot) return null;
+  const connectorGraph = buildConnectorGraph(snapshot);
 
   const origin = { lat: request.startLat, lng: request.startLng };
   const dest = { lat: request.endLat, lng: request.endLng };
@@ -589,11 +747,11 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
 
   if (directKm <= WALK_MAX_KM) {
     const walk = connectorFor(directKm, origin, dest, planKey);
-    if (walk) return makePlan([connectorSegment(walk, isArabic ? "موقعك" : "Your location", request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic)], request, snapshot);
+    if (walk) return makePlan([connectorSegment(walk, isArabic ? "موقعك" : "Your location", request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic)], request, snapshot, connectorGraph);
   }
 
   if (planKey === "premium" && directKm <= 18) {
-    return makePlan([connectorSegment(directTaxiConnector(directKm, origin, dest), isArabic ? "موقعك" : "Your location", request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic)], request, snapshot);
+    return makePlan([connectorSegment(directTaxiConnector(directKm, origin, dest), isArabic ? "موقعك" : "Your location", request.destination || (isArabic ? "الوجهة" : "Destination"), isArabic)], request, snapshot, connectorGraph);
   }
 
   const startCandidates = buildCandidates(snapshot, origin, planKey, 36);
@@ -646,5 +804,5 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
     }
   }
 
-  return best ? makePlan(best.segments, request, snapshot) : null;
+  return best ? makePlan(best.segments, request, snapshot, connectorGraph) : null;
 }
