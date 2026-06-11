@@ -826,26 +826,31 @@ async function fetchBundledSnapshot(): Promise<OfflineSnapshot | null> {
 }
 
 async function getSnapshot(): Promise<OfflineSnapshot | null> {
-  const cached = await readCachedSnapshot().catch(() => null);
-  if (cached && Date.now() - cached.savedAt <= SNAPSHOT_REFRESH_MS && isUsableSnapshot(cached.snapshot)) {
-    void fetchSnapshotChanges(cached.snapshot);
-    return cached.snapshot;
+  const [cached, bundled] = await Promise.all([
+    readCachedSnapshot().catch(() => null),
+    fetchBundledSnapshot(),
+  ]);
+  const usableCached = cached && isUsableSnapshot(cached.snapshot) ? cached : null;
+  const cachedIsFresh = usableCached && Date.now() - usableCached.savedAt <= SNAPSHOT_REFRESH_MS;
+
+  if (bundled) {
+    const bestLocal = usableCached && snapshotStamp(usableCached.snapshot) >= snapshotStamp(bundled)
+      ? usableCached.snapshot
+      : bundled;
+    if (!usableCached || usableCached.snapshot.revision !== bestLocal.revision) void writeCachedSnapshot(bestLocal);
+    if (cachedIsFresh) void fetchSnapshotChanges(bestLocal);
+    else void fetchSnapshot();
+    return bestLocal;
   }
 
-  const bundled = await fetchBundledSnapshot();
-  if (bundled) {
-    const bestLocal = cached && isUsableSnapshot(cached.snapshot) && snapshotStamp(cached.snapshot) > snapshotStamp(bundled)
-      ? cached.snapshot
-      : bundled;
-    void fetchSnapshot();
-    if (cached?.snapshot) void fetchSnapshotChanges(bestLocal);
-    void writeCachedSnapshot(bestLocal);
-    return bestLocal;
+  if (cachedIsFresh) {
+    void fetchSnapshotChanges(usableCached.snapshot);
+    return usableCached.snapshot;
   }
 
   const fresh = await fetchSnapshot();
   if (fresh) return fresh;
-  return cached && isUsableSnapshot(cached.snapshot) ? cached.snapshot : null;
+  return usableCached ? usableCached.snapshot : null;
 }
 
 function buildCandidates(snapshot: OfflineSnapshot, point: Coord, planKey: PlanKey, limit: number): Candidate[] {

@@ -1,4 +1,4 @@
-const CACHE_VERSION = "sikka-offline-v1";
+const CACHE_VERSION = "sikka-offline-v2";
 const APP_CACHE = `${CACHE_VERSION}-app`;
 const MAP_CACHE = `${CACHE_VERSION}-maps`;
 
@@ -37,10 +37,28 @@ function isMapRequest(url) {
   ].some((host) => url.hostname === host);
 }
 
+function isRouteDataAsset(url) {
+  return url.origin === self.location.origin
+    && (url.pathname === "/offline-snapshot.json" || url.pathname === "/offline-road-graph.json");
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
+
+  if (isRouteDataAsset(url)) {
+    event.respondWith(
+      fetch(request).then((res) => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(APP_CACHE).then((cache) => cache.put(request, copy));
+        }
+        return res;
+      }).catch(() => caches.match(request)),
+    );
+    return;
+  }
 
   if (isMapRequest(url)) {
     event.respondWith(

@@ -1,115 +1,348 @@
-/**
- * Alexandria APTA (هيئة النقل العام الإسكندرية) bus routes.
- * Source: https://alexapta.gov.eg/خطوط-الأوتوبيس/
- * Alexandria APTA is the government authority (هيئة) equivalent.
- * Routes seeded under "CTA Bus" transport type tagged to Alexandria.
- */
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { transportTypesTable, transitLinesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, transportTypesTable, transitLinesTable } from "@workspace/db";
+import { and, eq, like } from "drizzle-orm";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { requireAdmin } from "../middlewares/requireAdmin";
 import { buildBusRoutePathAI } from "../utils/busPathEnricher";
 
 const router = Router();
 
-interface LineSpec { n: string; r: string }
+const DEFAULT_SNAPSHOT_URL =
+  "https://raw.githubusercontent.com/nezarshawkat/Sikka/codex/on-device-best-snapshot/artifacts/sikka/public/offline-snapshot.json";
 
-// Alexandria APTA routes — areas passengers can board/alight anywhere
-// Format: line number | stops separated by |
-const ALEX_ROUTES: LineSpec[] = [
-  { n: "1",  r: "سموحة|سيدي جابر|محطة مصر|اللبان|السيالة|أبو قير" },
-  { n: "2",  r: "فيكتوريا|السيوف|الإبراهيمية|محطة الرمل|المنشية|محرم بك|الجمرك|المكس" },
-  { n: "3",  r: "محطة مصر|سيدي جابر|العجمي|الهانوفيل|العامرية|برج العرب" },
-  { n: "4",  r: "محطة مصر|كرموز|الدخيلة|المكس|بحري" },
-  { n: "5",  r: "سيدي بشر|سموحة|المطار|نزلة البحر|أبو قير" },
-  { n: "6",  r: "محطة الرمل|اللبان|كوم الدكة|المنشية|الجمرك|مينا البصل|الدخيلة" },
-  { n: "7",  r: "محطة مصر|الإسكندرية الجديدة|بورتو مارينا|برج العرب الجديدة" },
-  { n: "8",  r: "ستانلي|سيدي جابر|محطة مصر|كرموز|العامرية|برج العرب" },
-  { n: "9",  r: "الإسكندرية الجديدة|سيدي بشر|سموحة|سيدي جابر|محطة مصر|المنشية|الجمرك" },
-  { n: "10", r: "محطة مصر|الرمل|الأنفوشي|ستانلي|المنتزه|أبو قير" },
-  { n: "11", r: "محطة مصر|كرموز|المريوطية|برج العرب" },
-  { n: "12", r: "الأندلس|المعمورة|المنتزه|سيدي بشر|الإسكندرية الجديدة|الواجهة البحرية" },
-  { n: "13", r: "سيدي جابر|سموحة|محطة مصر|اللبان|بكوس|كوم الدكة|الجمرك|الدخيلة|المكس" },
-  { n: "14", r: "فيكتوريا|الإبراهيمية|محطة الرمل|المنشية|الجمرك|مينا البصل|دكروري|كفر الدوار" },
-  { n: "15", r: "الأندلس|سيدي بشر|فيكتوريا|الإبراهيمية|محطة مصر|كرموز|العامرية" },
-  { n: "16", r: "محطة مصر|سيدي جابر|المعمورة|المنتزه|أبو قير|الرشيد" },
-  { n: "17", r: "سموحة|ميامي|الأنفوشي|المنشية|الجمرك|المكس|برج العرب" },
-  { n: "18", r: "سيدي بشر|كليوباترا|محطة الرمل|كوم الدكة|الجمرك|الدخيلة" },
-  { n: "19", r: "الأندلس|الإبراهيمية|محطة مصر|كرموز|المريوطية|برج العرب الجديدة" },
-  { n: "20", r: "محطة مصر|اللبان|بكوس|الشاطبي|المنشية|القبارية|المكس" },
-  { n: "21", r: "محطة مصر|سيدي جابر|السيوف|فيكتوريا|ميامي|الأندلس|المنتزه" },
-  { n: "22", r: "سموحة|الإسكندرية الجديدة|سيدي بشر|فيكتوريا|الإبراهيمية|محطة الرمل|المنشية" },
-  { n: "24", r: "محطة مصر|سيدي جابر|أبو قير|الرشيد" },
-  { n: "25", r: "كفر الدوار|دكروري|الجمرك|المنشية|محطة الرمل|الإبراهيمية|سيدي جابر|محطة مصر" },
-  { n: "30", r: "برج العرب|العامرية|كرموز|محطة مصر|سيدي جابر|المعمورة" },
-  { n: "35", r: "محطة مصر|المريوطية|العامرية|برج العرب الجديدة|مطار برج العرب" },
-  { n: "40", r: "سيدي بشر|سموحة|الإسكندرية الجديدة|أبو قير" },
-  { n: "45", r: "المنشية|الشاطبي|محطة الرمل|اللبان|كوم الدكة|كرموز|المريوطية" },
-  { n: "50", r: "محطة مصر|الجمرك|القبارية|بحري" },
-  { n: "55", r: "الأندلس|ميامي|فيكتوريا|الإبراهيمية|محطة الرمل|المنشية|محطة مصر|كرموز|برج العرب" },
-  { n: "60", r: "سموحة|سيدي جابر|محطة مصر|المنشية|الجمرك|المكس|الدخيلة|برج العرب" },
-];
+type LngLat = [number, number];
+
+type SnapshotType = {
+  id: string;
+  nameEn: string;
+  nameAr: string;
+  icon: string;
+  color: string;
+  category?: string;
+  governmentType?: string;
+  averageSpeedKmh?: number;
+  basePriceEgp?: number;
+  pricePerKmEgp?: number;
+};
+
+type SnapshotLine = {
+  id: string;
+  transportTypeId: string;
+  lineNumber: string | null;
+  nameEn: string;
+  nameAr: string;
+  fromArea: string;
+  toArea: string;
+  governorate?: string;
+  cityZone?: string;
+  viaStops?: string[];
+  stops?: { name: string; lat: number; lng: number }[] | null;
+  path?: LngLat[] | null;
+  priceEgp?: number;
+  frequencyMinutes?: number | null;
+  hasFixedStops?: boolean;
+  routeQuality?: string;
+  source?: string;
+};
+
+type OfflineSnapshot = {
+  types: SnapshotType[];
+  lines: SnapshotLine[];
+};
+
+type RoutePath = {
+  type: "LineString";
+  coordinates: LngLat[];
+  source?: string;
+  snapshotLineId?: string;
+  routeQuality?: string;
+};
+
+function localSnapshotPaths(): string[] {
+  return [
+    path.resolve(process.cwd(), "artifacts/sikka/public/offline-snapshot.json"),
+    path.resolve(process.cwd(), "../sikka/public/offline-snapshot.json"),
+    path.resolve(process.cwd(), "../../artifacts/sikka/public/offline-snapshot.json"),
+  ];
+}
+
+async function loadSnapshotFromDisk(): Promise<OfflineSnapshot | null> {
+  for (const filePath of localSnapshotPaths()) {
+    try {
+      return JSON.parse(await readFile(filePath, "utf8")) as OfflineSnapshot;
+    } catch {
+      // Try the next deployment layout.
+    }
+  }
+  return null;
+}
+
+async function loadSnapshot(snapshotUrl?: string): Promise<{ snapshot: OfflineSnapshot; source: string }> {
+  const local = await loadSnapshotFromDisk();
+  if (local?.lines?.length) return { snapshot: local, source: "local offline-snapshot.json" };
+
+  const source = snapshotUrl || process.env.SIKKA_OFFLINE_SNAPSHOT_URL || DEFAULT_SNAPSHOT_URL;
+  const response = await fetch(source);
+  if (!response.ok) {
+    throw new Error(`Could not load offline snapshot: ${response.status} ${response.statusText}`);
+  }
+  const snapshot = (await response.json()) as OfflineSnapshot;
+  if (!snapshot?.lines?.length || !snapshot?.types?.length) {
+    throw new Error("Offline snapshot has no transport lines or types");
+  }
+  return { snapshot, source };
+}
+
+function isAlexandriaLine(line: SnapshotLine): boolean {
+  return line.governorate === "Alexandria"
+    || line.cityZone === "alexandria"
+    || line.id.startsWith("alex-")
+    || line.nameEn.toLowerCase().includes("alexandria");
+}
+
+function typeDefaults(type: SnapshotType): SnapshotType {
+  if (type.nameEn.toLowerCase().includes("tram")) {
+    return {
+      ...type,
+      nameEn: "Tram",
+      nameAr: type.nameAr || "Tram",
+      icon: type.icon || "tram",
+      color: type.color || "#16A34A",
+      category: type.category || "economic",
+      governmentType: type.governmentType || "government",
+      averageSpeedKmh: type.averageSpeedKmh ?? 18,
+      basePriceEgp: type.basePriceEgp ?? 7,
+      pricePerKmEgp: type.pricePerKmEgp ?? 0,
+    };
+  }
+  return {
+    ...type,
+    nameEn: "CTA Bus",
+    nameAr: type.nameAr || "CTA Bus",
+    icon: type.icon || "bus",
+    color: type.color || "#DC2626",
+    category: type.category || "economic",
+    governmentType: type.governmentType || "government",
+    averageSpeedKmh: type.averageSpeedKmh ?? 20,
+    basePriceEgp: type.basePriceEgp ?? 13,
+    pricePerKmEgp: type.pricePerKmEgp ?? 0,
+  };
+}
+
+async function ensureTransportType(type: SnapshotType): Promise<string> {
+  const normalized = typeDefaults(type);
+  const [existing] = await db
+    .select()
+    .from(transportTypesTable)
+    .where(eq(transportTypesTable.nameEn, normalized.nameEn))
+    .limit(1);
+
+  const values = {
+    nameEn: normalized.nameEn,
+    nameAr: normalized.nameAr,
+    icon: normalized.icon,
+    color: normalized.color,
+    category: normalized.category,
+    governmentType: normalized.governmentType,
+    averageSpeedKmh: normalized.averageSpeedKmh,
+    basePriceEgp: normalized.basePriceEgp,
+    pricePerKmEgp: normalized.pricePerKmEgp,
+    foreignerAllowed: true,
+    isActive: true,
+  };
+
+  if (existing) {
+    await db.update(transportTypesTable).set(values).where(eq(transportTypesTable.id, existing.id));
+    return existing.id;
+  }
+
+  const [created] = await db.insert(transportTypesTable).values(values).returning();
+  return created.id;
+}
+
+function routePathFor(line: SnapshotLine): RoutePath | null {
+  if (!line.path || line.path.length < 2) return null;
+  return {
+    type: "LineString",
+    coordinates: line.path,
+    source: line.source || "bundled-city-snapshot",
+    snapshotLineId: line.id,
+    routeQuality: line.routeQuality,
+  };
+}
+
+function haversineKm(a: LngLat, b: LngLat): number {
+  const r = 6371;
+  const dLat = ((b[1] - a[1]) * Math.PI) / 180;
+  const dLng = ((b[0] - a[0]) * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos((a[1] * Math.PI) / 180) * Math.cos((b[1] * Math.PI) / 180)
+    * Math.sin(dLng / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function pathLengthKm(path: LngLat[]): number {
+  let total = 0;
+  for (let i = 1; i < path.length; i++) total += haversineKm(path[i - 1], path[i]);
+  return total;
+}
+
+function maxStepKm(path: LngLat[]): number {
+  let max = 0;
+  for (let i = 1; i < path.length; i++) max = Math.max(max, haversineKm(path[i - 1], path[i]));
+  return max;
+}
+
+function isGoodEnhancedPath(enhanced: LngLat[], fallback: LngLat[]): boolean {
+  if (enhanced.length < 2) return false;
+  if (maxStepKm(enhanced) > 0.45) return false;
+  const enhancedKm = pathLengthKm(enhanced);
+  const fallbackKm = pathLengthKm(fallback);
+  if (!Number.isFinite(enhancedKm) || enhancedKm < 0.5) return false;
+  if (fallbackKm > 0 && (enhancedKm < fallbackKm * 0.35 || enhancedKm > fallbackKm * 2.75)) return false;
+  return true;
+}
+
+async function bestRoutePathFor(line: SnapshotLine, enhance: boolean): Promise<{ routePath: RoutePath | null; enhanced: boolean }> {
+  const fallback = routePathFor(line);
+  if (!enhance || !fallback?.coordinates?.length) return { routePath: fallback, enhanced: false };
+
+  try {
+    const enriched = await buildBusRoutePathAI(
+      line.fromArea,
+      line.toArea,
+      line.viaStops ?? [],
+      "Alexandria",
+    );
+    const coords = enriched.routePath?.coordinates ?? [];
+    if (isGoodEnhancedPath(coords, fallback.coordinates)) {
+      return {
+        routePath: {
+          type: "LineString",
+          coordinates: coords,
+          source: enriched.usedAI ? "openai-mapbox-main-streets" : "mapbox-main-streets",
+          snapshotLineId: line.id,
+          routeQuality: "ai-snapped",
+        },
+        enhanced: true,
+      };
+    }
+  } catch (err) {
+    console.warn("Alexandria route enhancement failed:", line.id, err instanceof Error ? err.message : err);
+  }
+
+  return { routePath: fallback, enhanced: false };
+}
 
 router.post("/", requireAdmin, async (req, res) => {
-  const generatePaths = req.query.generatePaths === "true";
   try {
-    const results: string[] = [];
+    const enhance = req.query.enhance === "true" || req.body?.enhance === true;
+    const { snapshot, source } = await loadSnapshot(
+      typeof req.body?.snapshotUrl === "string" ? req.body.snapshotUrl : undefined,
+    );
+    const typeBySnapshotId = new Map(snapshot.types.map((type) => [type.id, type]));
+    const alexLines = snapshot.lines
+      .filter(isAlexandriaLine)
+      .filter((line) => line.path && line.path.length >= 2);
 
-    // Find or create CTA Bus transport type
-    const existing = await db.select().from(transportTypesTable)
-      .where(eq(transportTypesTable.nameEn, "CTA Bus")).limit(1);
-    let typeId: string;
-    if (existing.length > 0) {
-      typeId = existing[0].id;
-      results.push("Using existing CTA Bus type");
-    } else {
-      const [ins] = await db.insert(transportTypesTable).values({
-        nameEn: "CTA Bus", nameAr: "أتوبيس الهيئة",
-        icon: "bus", color: "#DC2626",
-        basePriceEgp: 13, pricePerKmEgp: 0, averageSpeedKmh: 20,
-        foreignerAllowed: true, isActive: true,
-      }).returning();
-      typeId = ins.id;
-      results.push("Created CTA Bus transport type");
+    if (!alexLines.length) {
+      return res.status(400).json({ error: "No Alexandria lines with geometry found in snapshot" });
     }
 
-    for (const line of ALEX_ROUTES) {
-      const lineNum = `ALEX-${line.n}`;
-      const stops = line.r.split("|").map(s => s.trim()).filter(Boolean);
-      const fromArea = stops[0];
-      const toArea = stops[stops.length - 1];
-      const viaStops = stops.slice(1, -1);
+    const typeIdByName = new Map<string, string>();
+    for (const type of snapshot.types) {
+      const used = alexLines.some((line) => line.transportTypeId === type.id);
+      if (!used) continue;
+      const normalized = typeDefaults(type);
+      typeIdByName.set(normalized.nameEn, await ensureTransportType(normalized));
+    }
 
-      const ex = await db.select().from(transitLinesTable)
-        .where(eq(transitLinesTable.lineNumber, lineNum)).limit(1);
-      if (ex.length > 0) { results.push(`Skip: ${lineNum}`); continue; }
+    const now = new Date();
+    const deactivatedLegacy = await db
+      .update(transitLinesTable)
+      .set({ isActive: false, governorate: "Alexandria", updatedAt: now })
+      .where(like(transitLinesTable.lineNumber, "ALEX-%"))
+      .returning({ id: transitLinesTable.id });
 
-      let routePath = null;
-      if (generatePaths) {
-        try {
-          routePath = (await buildBusRoutePathAI(fromArea, toArea, viaStops, "Alexandria")).routePath;
-        } catch { /* ignore */ }
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
+    let enhanced = 0;
+    let usedSnapshotGeometry = 0;
+
+    for (const line of alexLines) {
+      const snapshotType = typeBySnapshotId.get(line.transportTypeId);
+      if (!snapshotType) {
+        skipped++;
+        continue;
       }
+      const normalizedType = typeDefaults(snapshotType);
+      const transportTypeId = typeIdByName.get(normalizedType.nameEn);
+      const best = await bestRoutePathFor(line, enhance);
+      const routePath = best.routePath;
+      if (!transportTypeId || !routePath) {
+        skipped++;
+        continue;
+      }
+      if (best.enhanced) enhanced++;
+      else usedSnapshotGeometry++;
 
-      await db.insert(transitLinesTable).values({
-        transportTypeId: typeId,
-        lineNumber: lineNum,
-        nameEn: `Alex APTA Line ${line.n}: ${fromArea} → ${toArea}`,
-        nameAr: `خط الإسكندرية ${line.n}: ${fromArea} - ${toArea}`,
-        fromArea, toArea, viaStops,
-        priceEgp: 13, isActive: true,
-        frequencyMinutes: 15, hasFixedStops: false,
-        routePath: routePath,
-      });
-      results.push(`Seeded: Alex Line ${line.n}${generatePaths && routePath ? " (with path)" : ""}`);
+      const lineNumber = line.lineNumber || line.id;
+      const [existing] = await db
+        .select()
+        .from(transitLinesTable)
+        .where(and(
+          eq(transitLinesTable.governorate, "Alexandria"),
+          eq(transitLinesTable.nameEn, line.nameEn),
+          eq(transitLinesTable.lineNumber, lineNumber),
+        ))
+        .limit(1);
+
+      const values = {
+        transportTypeId,
+        lineNumber,
+        nameEn: line.nameEn,
+        nameAr: line.nameAr || line.nameEn,
+        fromArea: line.fromArea,
+        toArea: line.toArea,
+        governorate: "Alexandria",
+        viaStops: line.viaStops ?? [],
+        stops: line.stops ?? null,
+        routePath,
+        priceEgp: line.priceEgp ?? normalizedType.basePriceEgp ?? 5,
+        frequencyMinutes: line.frequencyMinutes ?? null,
+        hasFixedStops: line.hasFixedStops ?? normalizedType.nameEn === "Tram",
+        isActive: true,
+        updatedAt: now,
+      };
+
+      if (existing) {
+        await db.update(transitLinesTable).set(values).where(eq(transitLinesTable.id, existing.id));
+        updated++;
+      } else {
+        await db.insert(transitLinesTable).values(values).returning();
+        inserted++;
+      }
     }
 
-    res.json({ success: true, count: results.filter(r => r.startsWith("Seeded")).length, results });
+    res.json({
+      success: true,
+      source,
+      governorate: "Alexandria",
+      inserted,
+      updated,
+      skipped,
+      enhanced,
+      usedSnapshotGeometry,
+      deactivatedLegacy: deactivatedLegacy.length,
+      totalAlexandriaLines: alexLines.length,
+      message: "Alexandria CTA Bus and Tram routes are now stored in Neon and will be exported through offline snapshots.",
+    });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error("Alex seed error:", err);
-    res.status(500).json({ error: msg });
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Alexandria seed error:", err);
+    res.status(500).json({ error: message });
   }
 });
 
