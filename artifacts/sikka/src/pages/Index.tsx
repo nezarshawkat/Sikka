@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { User, MapPin, Navigation, Square, X } from 'lucide-react';
+import { Crosshair, User, MapPin, Navigation, Square, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -192,23 +192,6 @@ const Index = () => {
     }
   }, [activeTrip, loadRoutes]);
 
-  // Fit map to the route once loaded
-  useEffect(() => {
-    if (!activeTrip || !routeCoords.length || !mapRef.current) return;
-    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-    routeCoords.forEach(({ coords }) =>
-      coords.forEach(([lng, lat]) => {
-        minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
-        minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
-      })
-    );
-    if (Number.isFinite(minLng)) {
-      try {
-        mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 800 });
-      } catch {}
-    }
-  }, [routeCoords, activeTrip]);
-
   const onApproachSegmentEnd = useCallback((segIdx: number) => {
     if (!activeTrip) return;
     if (segIdx < activeTrip.segments.length - 1) {
@@ -224,7 +207,7 @@ const Index = () => {
     onApproachSegmentEnd,
   });
 
-  useEffect(() => {
+  const focusCurrentTrip = useCallback(() => {
     if (!activeTrip || !routeCoords.length || !mapRef.current) return;
     const currentRoute = routeCoords.find((route) => route.segIndex === currentSegIdx);
     const focusCoords = [
@@ -494,6 +477,17 @@ const Index = () => {
                 <div className="absolute inset-0 h-4 w-4 rounded-full bg-blue-500 animate-ping opacity-30" />
               </div>
             </Marker>
+          )}
+          {activeTrip && routeCoords.length > 0 && (
+            <Button
+              type="button"
+              size="icon"
+              className="absolute right-4 top-24 z-10 h-12 w-12 rounded-full shadow-xl bg-background/95 text-foreground hover:bg-background border"
+              onClick={focusCurrentTrip}
+              aria-label="Focus current trip"
+            >
+              <Crosshair className="h-5 w-5" />
+            </Button>
           )}
         </Map>
 

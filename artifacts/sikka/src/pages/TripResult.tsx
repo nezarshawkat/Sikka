@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight, Crosshair } from 'lucide-react';
 import { toast } from 'sonner';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -103,20 +103,8 @@ const TripResult = () => {
     return () => { if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current); };
   }, []);
 
-  useEffect(() => {
+  const focusCurrentSegment = useCallback(() => {
     if (!routeCoords.length || !mapRef.current) return;
-    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-    routeCoords.forEach(({ coords }) => coords.forEach(([lng, lat]) => {
-      minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
-      minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
-    }));
-    if (Number.isFinite(minLng)) {
-      try { mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 48, duration: 600 }); } catch {}
-    }
-  }, [routeCoords]);
-
-  useEffect(() => {
-    if (!isTracking || !routeCoords.length || !mapRef.current) return;
     const currentRoute = routeCoords.find((route) => route.segIndex === currentSegIndex);
     const focusCoords = [
       ...(currentRoute?.coords ?? []),
@@ -138,7 +126,7 @@ const TripResult = () => {
         mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 72, duration: 650, maxZoom: 16 });
       }
     } catch {}
-  }, [currentSegIndex, isTracking, routeCoords, userPos]);
+  }, [currentSegIndex, routeCoords, userPos]);
 
   const stopTracking = () => {
     setIsTracking(false);
@@ -267,6 +255,17 @@ const TripResult = () => {
                 <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
                   <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                 </div>
+              )}
+              {routeCoords.length > 0 && (
+                <Button
+                  type="button"
+                  size="icon"
+                  className="absolute right-3 top-3 z-10 h-11 w-11 rounded-full shadow-xl bg-background/95 text-foreground hover:bg-background border"
+                  onClick={focusCurrentSegment}
+                  aria-label="Focus current segment"
+                >
+                  <Crosshair className="h-5 w-5" />
+                </Button>
               )}
               <RouteLayers id="route" data={routeGeoJSON} />
 
