@@ -482,7 +482,7 @@ const Index = () => {
             <Button
               type="button"
               size="icon"
-              className="absolute right-4 top-24 z-10 h-12 w-12 rounded-full shadow-xl bg-background/95 text-foreground hover:bg-background border"
+              className="absolute right-4 bottom-36 z-20 h-12 w-12 rounded-full border border-white/20 text-foreground shadow-xl glass-panel hover:bg-background/70 dark:hover:bg-background/55"
               onClick={focusCurrentTrip}
               aria-label="Focus current trip"
             >
