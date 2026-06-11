@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Star, Trash2, Check, X } from 'lucide-react';
+import { Star, Trash2, Check, X, Bus } from 'lucide-react';
 
 const FACES = ['😞', '😐', '🙂', '😊', '🤩'];
 
@@ -21,6 +21,9 @@ interface Review {
   qualityGood: boolean | null;
   stationInfoCorrect: boolean | null;
   transportTypeId: string | null;
+  transportNameEn: string | null;
+  transportNameAr: string | null;
+  meta: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -74,6 +77,14 @@ const AdminReviews = () => {
               </div>
 
               {review.comment && <p className="text-sm text-foreground">{review.comment}</p>}
+              {(review.transportNameEn || review.meta?.transportName) && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Bus className="h-3 w-3" />
+                  {language === 'ar'
+                    ? review.transportNameAr || review.transportNameEn || String(review.meta?.transportName ?? '')
+                    : review.transportNameEn || review.transportNameAr || String(review.meta?.transportName ?? '')}
+                </p>
+              )}
 
               {review.reviewType !== 'trip' && (
                 <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -93,6 +104,11 @@ const AdminReviews = () => {
               <p className="text-xs text-muted-foreground">
                 {new Date(review.createdAt).toLocaleDateString()}
               </p>
+              {review.meta && Object.keys(review.meta).length > 0 && (
+                <pre className="text-[10px] text-muted-foreground bg-background/40 rounded-xl p-2 overflow-x-auto">
+                  {JSON.stringify(review.meta, null, 2)}
+                </pre>
+              )}
             </div>
             <Button variant="ghost" size="icon" onClick={() => deleteReview(review.id)}>
               <Trash2 className="h-4 w-4 text-destructive" />

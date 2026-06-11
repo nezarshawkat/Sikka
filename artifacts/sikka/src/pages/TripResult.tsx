@@ -260,7 +260,7 @@ const TripResult = () => {
                 <Button
                   type="button"
                   size="icon"
-                  className="absolute right-3 bottom-3 z-20 h-11 w-11 rounded-full border border-white/20 text-foreground shadow-xl glass-panel hover:bg-background/70 dark:hover:bg-background/55"
+                  className="absolute right-3 bottom-3 z-20 h-14 w-14 rounded-full border border-white/20 text-foreground shadow-xl glass-panel hover:bg-background/70 dark:hover:bg-background/55"
                   onClick={focusCurrentSegment}
                   aria-label="Focus current segment"
                 >

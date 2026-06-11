@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { MapPin } from 'lucide-react';
+import { Bus, MapPin, Route } from 'lucide-react';
 
 interface Report {
   id: string;
@@ -17,6 +17,17 @@ interface Report {
   longitude: number | null;
   status: string;
   createdAt: string;
+  resolvedAt: string | null;
+  transitLineId: string | null;
+  transportTypeId: string | null;
+  routeLineNumber: string | null;
+  routeNameEn: string | null;
+  routeNameAr: string | null;
+  routeFromArea: string | null;
+  routeToArea: string | null;
+  routeGovernorate: string | null;
+  transportNameEn: string | null;
+  transportNameAr: string | null;
 }
 
 const STATUS_FILTERS = ['all', 'open', 'resolved', 'rejected'];
@@ -84,6 +95,25 @@ const AdminReports = () => {
                 {t(report.status, language)}
               </span>
             </div>
+            {(report.routeNameEn || report.routeFromArea || report.transportNameEn) && (
+              <div className="rounded-2xl border bg-background/40 p-3 space-y-1">
+                <p className="text-xs font-semibold text-foreground flex items-center gap-1">
+                  <Route className="h-3 w-3" />
+                  {report.routeLineNumber ? `${report.routeLineNumber} · ` : ''}
+                  {language === 'ar' ? report.routeNameAr || report.routeNameEn : report.routeNameEn || report.routeNameAr || 'Route'}
+                </p>
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Bus className="h-3 w-3" />
+                  {language === 'ar' ? report.transportNameAr || report.transportNameEn : report.transportNameEn || report.transportNameAr}
+                  {report.routeGovernorate ? ` · ${report.routeGovernorate}` : ''}
+                </p>
+                {(report.routeFromArea || report.routeToArea) && (
+                  <p className="text-xs text-muted-foreground">
+                    {report.routeFromArea || '?'} → {report.routeToArea || '?'}
+                  </p>
+                )}
+              </div>
+            )}
             {report.description && <p className="text-sm text-foreground">{report.description}</p>}
             {report.latitude != null && report.longitude != null && (
               <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -92,6 +122,7 @@ const AdminReports = () => {
               </p>
             )}
             <p className="text-xs text-muted-foreground">{new Date(report.createdAt).toLocaleString()}</p>
+            {report.resolvedAt && <p className="text-xs text-muted-foreground">Resolved: {new Date(report.resolvedAt).toLocaleString()}</p>}
             {report.status === 'open' && (
               <div className="flex gap-2 pt-1">
                 <Button size="sm" className="h-8" onClick={() => updateStatus(report.id, 'resolved')}>

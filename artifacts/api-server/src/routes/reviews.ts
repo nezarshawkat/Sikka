@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { reviewsTable } from "@workspace/db";
+import { reviewsTable, transportTypesTable } from "@workspace/db";
 import { eq, desc, and, type SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
@@ -19,8 +19,29 @@ router.get("/", async (req, res) => {
     filters.push(eq(reviewsTable.reviewType, reviewType));
   }
   const rows = await db
-    .select()
+    .select({
+      id: reviewsTable.id,
+      userId: reviewsTable.userId,
+      rating: reviewsTable.rating,
+      comment: reviewsTable.comment,
+      transportTypeId: reviewsTable.transportTypeId,
+      tripSegmentId: reviewsTable.tripSegmentId,
+      tripId: reviewsTable.tripId,
+      reviewType: reviewsTable.reviewType,
+      faceReaction: reviewsTable.faceReaction,
+      routeAccurate: reviewsTable.routeAccurate,
+      timingAccurate: reviewsTable.timingAccurate,
+      qualityGood: reviewsTable.qualityGood,
+      stationInfoCorrect: reviewsTable.stationInfoCorrect,
+      meta: reviewsTable.meta,
+      createdAt: reviewsTable.createdAt,
+      transportNameEn: transportTypesTable.nameEn,
+      transportNameAr: transportTypesTable.nameAr,
+      transportIcon: transportTypesTable.icon,
+      transportColor: transportTypesTable.color,
+    })
     .from(reviewsTable)
+    .leftJoin(transportTypesTable, eq(reviewsTable.transportTypeId, transportTypesTable.id))
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(desc(reviewsTable.createdAt));
   res.json(rows);

@@ -1,7 +1,7 @@
 type LngLat = [number, number];
 type Coord = { lat: number; lng: number };
 type PlanKey = "economic" | "comfortable" | "premium";
-type ModeKey = "metro" | "monorail" | "train" | "bus" | "serfis" | "microbus" | "taxi" | "tuktuk" | "walk";
+type ModeKey = "metro" | "monorail" | "train" | "tram" | "bus" | "serfis" | "microbus" | "taxi" | "tuktuk" | "walk";
 
 type OfflineType = {
   id: string;
@@ -31,7 +31,9 @@ type OfflineLine = {
   snapshotPointCount?: number;
   maxStepMeters?: number;
   pathSuspect?: boolean;
-  routeQuality?: "gtfs" | "recorded" | "standard" | "rough" | "suspect";
+  routeQuality?: "gtfs" | "discovered" | "recorded" | "standard" | "rough" | "suspect";
+  updatedAt?: string;
+  deleted?: boolean;
   priceEgp: number;
   frequencyMinutes: number | null;
   hasFixedStops: boolean;
@@ -115,6 +117,15 @@ type Connector = {
   geometry: LngLat[];
 };
 
+type OfflineChanges = {
+  schemaVersion: number;
+  generatedAt: string;
+  revision: string;
+  latestStamp?: number;
+  types: OfflineType[];
+  lines: OfflineLine[];
+};
+
 type GraphEdge = {
   to: string;
   km: number;
@@ -163,10 +174,18 @@ type RoadGraphJson = {
 
 let roadGraphPromise: Promise<ConnectorGraph | null> | null = null;
 
+export class OfflineRouteError extends Error {
+  constructor(public code: string, message: string) {
+    super(message);
+    this.name = "OfflineRouteError";
+  }
+}
+
 function modeOfType(nameEn: string): ModeKey {
   const n = nameEn.toLowerCase();
   if (n.includes("metro")) return "metro";
   if (n.includes("monorail")) return "monorail";
+  if (n.includes("tram")) return "tram";
   if (n.includes("train")) return "train";
   if (n.includes("serfis")) return "serfis";
   if (n.includes("microbus")) return "microbus";
@@ -177,9 +196,9 @@ function modeOfType(nameEn: string): ModeKey {
 }
 
 function allowedModes(planKey: PlanKey): Set<ModeKey> {
-  if (planKey === "economic") return new Set(["metro", "monorail", "train", "bus", "serfis", "microbus", "tuktuk"]);
-  if (planKey === "comfortable") return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
-  return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
+  if (planKey === "economic") return new Set(["metro", "monorail", "train", "tram", "bus", "serfis", "microbus", "tuktuk"]);
+  if (planKey === "comfortable") return new Set(["metro", "monorail", "train", "tram", "bus", "serfis", "taxi", "tuktuk"]);
+  return new Set(["metro", "monorail", "train", "tram", "bus", "serfis", "taxi", "tuktuk"]);
 }
 
 function haversineKm(a: Coord, b: Coord): number {
@@ -209,6 +228,7 @@ function routeQuality(line: OfflineLine): NonNullable<OfflineLine["routeQuality"
 function routeQualityPenalty(line: OfflineLine): number {
   const quality = routeQuality(line);
   if (quality === "gtfs") return -45;
+  if (quality === "discovered") return -60;
   if (quality === "recorded") return -35;
   if (quality === "rough") return 35;
   if (quality === "suspect") return 70;
@@ -526,7 +546,7 @@ function lineFare(type: OfflineType, line: OfflineLine, km: number): number {
 }
 
 function waitMinutes(line: OfflineLine, mode: ModeKey): number {
-  const defaults: Record<ModeKey, number> = { metro: 6, monorail: 8, train: 30, bus: 18, serfis: 10, microbus: 10, taxi: 6, tuktuk: 5, walk: 0 };
+  const defaults: Record<ModeKey, number> = { metro: 6, monorail: 8, train: 30, tram: 8, bus: 18, serfis: 10, microbus: 10, taxi: 6, tuktuk: 5, walk: 0 };
   return Math.max(0, (line.frequencyMinutes ?? defaults[mode]) / 2);
 }
 
@@ -750,6 +770,50 @@ async function fetchSnapshot(): Promise<OfflineSnapshot | null> {
   }
 }
 
+function mergeSnapshotChanges(snapshot: OfflineSnapshot, changes: OfflineChanges): OfflineSnapshot {
+  const typeMap = new Map(snapshot.types.map((type) => [type.id, type]));
+  for (const type of changes.types ?? []) typeMap.set(type.id, type);
+
+  const lineMap = new Map(snapshot.lines.map((line) => [line.id, line]));
+  for (const line of changes.lines ?? []) {
+    if (line.deleted) lineMap.delete(line.id);
+    else if (line.path?.length >= 2) lineMap.set(line.id, line);
+  }
+
+  return {
+    ...snapshot,
+    schemaVersion: Math.max(snapshot.schemaVersion, changes.schemaVersion),
+    generatedAt: changes.generatedAt,
+    revision: changes.revision,
+    types: [...typeMap.values()],
+    lines: [...lineMap.values()],
+  };
+}
+
+async function fetchSnapshotChanges(snapshot: OfflineSnapshot): Promise<OfflineSnapshot | null> {
+  const since = snapshotStamp(snapshot);
+  if (!since) return null;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), SNAPSHOT_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/offline/changes?since=${encodeURIComponent(String(since))}`, {
+      signal: controller.signal,
+      cache: "no-cache",
+    });
+    if (!res.ok) return null;
+    const changes = (await res.json()) as OfflineChanges;
+    if (!changes?.lines || snapshotStamp(changes as unknown as OfflineSnapshot) <= since) return null;
+    const merged = mergeSnapshotChanges(snapshot, changes);
+    if (!isUsableSnapshot(merged)) return null;
+    await writeCachedSnapshot(merged);
+    return merged;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 async function fetchBundledSnapshot(): Promise<OfflineSnapshot | null> {
   try {
     const res = await fetch(BUNDLED_SNAPSHOT_URL, { cache: "force-cache" });
@@ -764,6 +828,7 @@ async function fetchBundledSnapshot(): Promise<OfflineSnapshot | null> {
 async function getSnapshot(): Promise<OfflineSnapshot | null> {
   const cached = await readCachedSnapshot().catch(() => null);
   if (cached && Date.now() - cached.savedAt <= SNAPSHOT_REFRESH_MS && isUsableSnapshot(cached.snapshot)) {
+    void fetchSnapshotChanges(cached.snapshot);
     return cached.snapshot;
   }
 
@@ -773,6 +838,7 @@ async function getSnapshot(): Promise<OfflineSnapshot | null> {
       ? cached.snapshot
       : bundled;
     void fetchSnapshot();
+    if (cached?.snapshot) void fetchSnapshotChanges(bestLocal);
     void writeCachedSnapshot(bestLocal);
     return bestLocal;
   }
@@ -830,7 +896,9 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
   const planKey: PlanKey = request.tripType === "economic" || request.tripType === "premium" ? request.tripType : "comfortable";
   const isArabic = request.language === "ar";
   const [snapshot, roadGraph] = await Promise.all([getSnapshot(), getRoadConnectorGraph()]);
-  if (!snapshot) return null;
+  if (!snapshot) {
+    throw new OfflineRouteError("offline_data_missing", "Offline route data is not available on this device yet.");
+  }
   const connectorGraph = roadGraph ?? buildConnectorGraph(snapshot);
 
   const origin = { lat: request.startLat, lng: request.startLng };
@@ -848,6 +916,15 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
 
   const startCandidates = buildCandidates(snapshot, origin, planKey, 36);
   const endCandidates = buildCandidates(snapshot, dest, planKey, 36);
+  if (!startCandidates.length && !endCandidates.length) {
+    throw new OfflineRouteError("no_nearby_route_data", "No saved route geometry is near the start or destination.");
+  }
+  if (!startCandidates.length) {
+    throw new OfflineRouteError("no_boarding_route_near_start", "No saved route geometry is close enough to the start point.");
+  }
+  if (!endCandidates.length) {
+    throw new OfflineRouteError("no_route_near_destination", "No saved route geometry reaches close enough to the destination.");
+  }
   let best: { score: number; segments: ApiSegment[] } | null = null;
 
   for (const start of startCandidates) {
@@ -896,5 +973,8 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
     }
   }
 
-  return best ? makePlan(best.segments, request, snapshot, connectorGraph) : null;
+  if (!best) {
+    throw new OfflineRouteError("no_connected_route", "Saved route geometries exist nearby, but no connected trip was found between them.");
+  }
+  return makePlan(best.segments, request, snapshot, connectorGraph);
 }

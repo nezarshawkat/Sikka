@@ -30,6 +30,11 @@ public class SikkaTripNotificationPlugin extends Plugin {
     private static final int NOTIFICATION_ID = 3107;
     private static final int REQUEST_NOTIFICATIONS = 3108;
     private static final int SIKKA_BLUE = Color.rgb(37, 141, 255);
+    private static boolean activeTrip = false;
+
+    public static boolean hasActiveTrip() {
+        return activeTrip;
+    }
 
     @PluginMethod
     public void show(PluginCall call) {
@@ -63,8 +68,9 @@ public class SikkaTripNotificationPlugin extends Plugin {
         );
 
         Bitmap largeIcon = buildTransportIcon(icon, color);
-        String title = from + " -> " + to + " right now";
-        String text = icon.isEmpty() ? transportName : icon + "  " + transportName;
+        String title = from + " -> " + to;
+        String text = transportName;
+        activeTrip = true;
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.sikka_app_icon)
@@ -89,6 +95,7 @@ public class SikkaTripNotificationPlugin extends Plugin {
 
     @PluginMethod
     public void clear(PluginCall call) {
+        activeTrip = false;
         NotificationManagerCompat.from(getContext()).cancel(NOTIFICATION_ID);
         call.resolve();
     }

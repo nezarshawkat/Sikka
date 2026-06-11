@@ -22,6 +22,15 @@ function repairTextArray(value) {
   return Array.isArray(value) ? value.map((item) => repairText(item)) : [];
 }
 
+function cityZone(governorate) {
+  const value = String(governorate || "").toLowerCase();
+  if (value.includes("alex") || value.includes("اسك") || value.includes("إسك")) return "alexandria";
+  if (value.includes("giza") || value.includes("cairo") || value.includes("qalyub") || value.includes("القاهرة") || value.includes("الجيزة") || value.includes("القليوبية")) {
+    return "greater-cairo";
+  }
+  return value.trim() || "greater-cairo";
+}
+
 function maxStepMeters(path) {
   let max = 0;
   for (let i = 1; i < path.length; i++) {
@@ -55,6 +64,7 @@ const lines = (exportData.transitLines ?? [])
   .map((line) => {
     const path = line.routePath?.coordinates ?? [];
     const step = maxStepMeters(path);
+    const governorate = repairText(line.governorate ?? "Cairo");
     return {
       id: line.id,
       transportTypeId: line.transportTypeId,
@@ -63,7 +73,8 @@ const lines = (exportData.transitLines ?? [])
       nameAr: repairText(line.nameAr ?? ""),
       fromArea: repairText(line.fromArea ?? ""),
       toArea: repairText(line.toArea ?? ""),
-      governorate: repairText(line.governorate ?? "Cairo"),
+      governorate,
+      cityZone: cityZone(governorate),
       viaStops: repairTextArray(line.viaStops),
       stops: Array.isArray(line.stops) ? line.stops : null,
       path,

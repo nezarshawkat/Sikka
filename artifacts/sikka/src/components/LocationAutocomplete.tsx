@@ -33,6 +33,65 @@ const langForSearch = (language?: Language) => {
 };
 
 const EGYPT_VIEWBOX = '24.7,31.9,36.9,21.6';
+const SAVED_PLACES_KEY = 'sikka_saved_places';
+
+const LOCAL_LANDMARKS: Suggestion[] = [
+  { id: 'local.cairo.ramses', text: 'Ramses Station', place_name: 'Ramses Station, Cairo', center: [31.2461, 30.0626] },
+  { id: 'local.cairo.tahrir', text: 'Tahrir Square', place_name: 'Tahrir Square, Downtown Cairo', center: [31.2357, 30.0444] },
+  { id: 'local.cairo.stadium', text: 'Cairo Stadium', place_name: 'Cairo International Stadium, Nasr City', center: [31.3123, 30.0691] },
+  { id: 'local.alex.raml', text: 'محطة الرمل', place_name: 'محطة الرمل, الإسكندرية', center: [29.9012, 31.2001] },
+  { id: 'local.alex.sidigaber', text: 'سيدي جابر', place_name: 'سيدي جابر, الإسكندرية', center: [29.9426, 31.2181] },
+  { id: 'local.alex.victoria', text: 'فيكتوريا', place_name: 'فيكتوريا, الإسكندرية', center: [29.9668, 31.2442] },
+  { id: 'local.alex.mandara', text: 'المندرة', place_name: 'المندرة, الإسكندرية', center: [30.0211, 31.2826] },
+];
+
+const ARABIC_ALIASES: Record<string, string[]> = {
+  'محطة الرمل': ['الرمل', 'mahattet el raml', 'raml station'],
+  'سيدي جابر': ['سيدى جابر', 'sidi gaber', 'sidi gabr'],
+  'رمسيس': ['ramses', 'ramsis', 'محطة مصر'],
+  'التحرير': ['tahrir', 'tahreer'],
+  'المندرة': ['mandara', 'el mandara'],
+};
+
+function normalizeSearch(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function readSavedPlaces(): Suggestion[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SAVED_PLACES_KEY) || '[]') as Suggestion[];
+    return Array.isArray(parsed) ? parsed.filter((s) => s?.id && Array.isArray(s.center)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberPlace(suggestion: Suggestion) {
+  try {
+    const current = readSavedPlaces().filter((s) => s.id !== suggestion.id && s.place_name !== suggestion.place_name);
+    localStorage.setItem(SAVED_PLACES_KEY, JSON.stringify([suggestion, ...current].slice(0, 20)));
+  } catch {}
+}
+
+function localMatches(query: string): Suggestion[] {
+  const q = normalizeSearch(query);
+  if (q.length < 2) return [];
+  const saved = readSavedPlaces().map((s) => ({ ...s, id: `saved.${s.id}` }));
+  return [...saved, ...LOCAL_LANDMARKS].filter((s) => {
+    const haystack = normalizeSearch(`${s.text} ${s.place_name}`);
+    if (haystack.includes(q)) return true;
+    return Object.entries(ARABIC_ALIASES).some(([name, aliases]) =>
+      normalizeSearch(name).includes(q) && normalizeSearch(s.place_name).includes(normalizeSearch(name))
+      || aliases.some((alias) => normalizeSearch(alias).includes(q) || q.includes(normalizeSearch(alias))));
+  }).slice(0, 5);
+}
 
 const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, className, trailingAction, onTrailingAction, trailingLabel, readOnlyDisplay, language }: LocationAutocompleteProps) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -63,6 +122,7 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
     debounceRef.current = setTimeout(async () => {
       setIsLoading(true);
       try {
+        const local = localMatches(value);
         const searchLanguage = langForSearch(language);
         const mapboxUrl =
           `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(value)}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=${encodeURIComponent(searchLanguage)}&limit=10&autocomplete=true&fuzzyMatch=true&types=country,region,district,postcode,place,locality,neighborhood,address,poi`;
@@ -119,6 +179,7 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
           };
         });
         const merged = [
+          ...local,
           ...(mapboxData.features ?? []).map((f) => ({
             id: f.id,
             place_name: f.place_name,
@@ -194,7 +255,8 @@ const LocationAutocomplete = ({ value, onChange, onSelect, placeholder, classNam
           {suggestions.map((s) => (
             <button
               key={s.id}
-              onClick={() => {
+            onClick={() => {
+                rememberPlace(s);
                 onSelect(s);
                 onChange(s.place_name);
                 setIsOpen(false);

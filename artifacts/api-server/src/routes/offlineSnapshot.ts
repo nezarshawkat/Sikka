@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, transportTypesTable, transitLinesTable } from "@workspace/db";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, gt } from "drizzle-orm";
 
 const router = Router();
 const SNAPSHOT_VERSION = 3;
@@ -89,11 +89,12 @@ function maxConsecutiveStepKm(path: [number, number][] | null | undefined): numb
   return max;
 }
 
-function routeQuality(path: [number, number][] | null | undefined, hasFixedStops: boolean): "gtfs" | "recorded" | "standard" | "rough" | "suspect" {
+function routeQuality(path: [number, number][] | null | undefined, hasFixedStops: boolean, source?: string | null): "gtfs" | "discovered" | "recorded" | "standard" | "rough" | "suspect" {
   if (!path || path.length < 2) return "suspect";
   const maxStepKm = maxConsecutiveStepKm(path);
   if (maxStepKm > PATH_SUSPECT_STEP_KM) return "suspect";
   if (maxStepKm > PATH_POOR_STEP_KM) return "rough";
+  if (source === "discovered") return "discovered";
   if (hasFixedStops) return "gtfs";
   return path.length >= 50 ? "recorded" : "standard";
 }
@@ -131,6 +132,7 @@ router.get("/snapshot", async (_req, res) => {
   const lines = lineRows
     .map((l) => {
       const rawPath = l.routePath?.coordinates ?? null;
+      const source = (l.routePath as { source?: string } | null | undefined)?.source ?? null;
       const path = compactPath(rawPath);
       const maxStepKm = maxConsecutiveStepKm(path);
       return {
@@ -149,7 +151,8 @@ router.get("/snapshot", async (_req, res) => {
         snapshotPointCount: path?.length ?? 0,
         maxStepMeters: Math.round(maxStepKm * 1000),
         pathSuspect: maxStepKm > PATH_SUSPECT_STEP_KM,
-        routeQuality: routeQuality(path, l.hasFixedStops),
+        routeQuality: routeQuality(path, l.hasFixedStops, source),
+        source,
         priceEgp: l.priceEgp,
         frequencyMinutes: l.frequencyMinutes,
         hasFixedStops: l.hasFixedStops,
@@ -169,6 +172,92 @@ router.get("/snapshot", async (_req, res) => {
     schemaVersion: SNAPSHOT_VERSION,
     generatedAt: new Date().toISOString(),
     revision: `${SNAPSHOT_VERSION}-${newest}-${types.length}-${lines.length}`,
+    types,
+    lines,
+  });
+});
+
+router.get("/manifest", async (_req, res) => {
+  const [typeRows, lineRows] = await Promise.all([
+    db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true)),
+    db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true)),
+  ]);
+  const newest = Math.max(
+    0,
+    ...typeRows.map((t) => stampOf(t.createdAt)),
+    ...lineRows.map((l) => stampOf(l.updatedAt)),
+  );
+  res.setHeader("Cache-Control", "public, max-age=120, stale-while-revalidate=3600");
+  res.json({
+    schemaVersion: SNAPSHOT_VERSION,
+    generatedAt: new Date().toISOString(),
+    revision: `${SNAPSHOT_VERSION}-${newest}-${typeRows.length}-${lineRows.length}`,
+    latestStamp: newest,
+    counts: { types: typeRows.length, lines: lineRows.length },
+  });
+});
+
+router.get("/changes", async (req, res) => {
+  const since = Number(req.query.since ?? 0);
+  const sinceDate = Number.isFinite(since) && since > 0 ? new Date(since) : new Date(0);
+  const [typeRows, lineRows] = await Promise.all([
+    db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true)).orderBy(asc(transportTypesTable.nameEn)),
+    db.select().from(transitLinesTable).where(gt(transitLinesTable.updatedAt, sinceDate)).orderBy(asc(transitLinesTable.updatedAt)),
+  ]);
+
+  const types = typeRows.map((t) => ({
+    id: t.id,
+    nameEn: t.nameEn,
+    nameAr: t.nameAr,
+    icon: t.icon,
+    color: t.color,
+    category: t.category,
+    governmentType: t.governmentType,
+    averageSpeedKmh: t.averageSpeedKmh,
+    basePriceEgp: t.basePriceEgp,
+    pricePerKmEgp: t.pricePerKmEgp,
+  }));
+
+  const lines = lineRows
+    .map((l) => {
+      const rawPath = l.routePath?.coordinates ?? null;
+      const source = (l.routePath as { source?: string } | null | undefined)?.source ?? null;
+      const path = compactPath(rawPath);
+      const maxStepKm = maxConsecutiveStepKm(path);
+      return {
+        id: l.id,
+        transportTypeId: l.transportTypeId,
+        lineNumber: l.lineNumber,
+        nameEn: l.nameEn,
+        nameAr: l.nameAr,
+        fromArea: l.fromArea,
+        toArea: l.toArea,
+        governorate: l.governorate,
+        viaStops: l.viaStops ?? [],
+        stops: l.stops ?? null,
+        path,
+        pathPointCount: rawPath?.length ?? 0,
+        snapshotPointCount: path?.length ?? 0,
+        maxStepMeters: Math.round(maxStepKm * 1000),
+        pathSuspect: maxStepKm > PATH_SUSPECT_STEP_KM,
+        routeQuality: routeQuality(path, l.hasFixedStops, source),
+        source,
+        priceEgp: l.priceEgp,
+        frequencyMinutes: l.frequencyMinutes,
+        hasFixedStops: l.hasFixedStops,
+        updatedAt: l.updatedAt,
+        deleted: !l.isActive,
+      };
+    })
+    .filter((l) => l.deleted || (l.path && l.path.length >= 2));
+
+  const newest = Math.max(since, ...lineRows.map((l) => stampOf(l.updatedAt)));
+  res.setHeader("Cache-Control", "no-cache");
+  res.json({
+    schemaVersion: SNAPSHOT_VERSION,
+    generatedAt: new Date().toISOString(),
+    revision: `${SNAPSHOT_VERSION}-${newest}-${types.length}-${lines.length}`,
+    latestStamp: newest,
     types,
     lines,
   });

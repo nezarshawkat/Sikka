@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { reportsTable } from "@workspace/db";
+import { reportsTable, transitLinesTable, transportTypesTable } from "@workspace/db";
 import { eq, desc, and, type SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
@@ -29,8 +29,32 @@ router.get("/", requireAdmin, async (req, res) => {
     filters.push(eq(reportsTable.status, status));
   }
   const rows = await db
-    .select()
+    .select({
+      id: reportsTable.id,
+      userId: reportsTable.userId,
+      reportType: reportsTable.reportType,
+      transitLineId: reportsTable.transitLineId,
+      transportTypeId: reportsTable.transportTypeId,
+      description: reportsTable.description,
+      latitude: reportsTable.latitude,
+      longitude: reportsTable.longitude,
+      status: reportsTable.status,
+      createdAt: reportsTable.createdAt,
+      resolvedAt: reportsTable.resolvedAt,
+      routeLineNumber: transitLinesTable.lineNumber,
+      routeNameEn: transitLinesTable.nameEn,
+      routeNameAr: transitLinesTable.nameAr,
+      routeFromArea: transitLinesTable.fromArea,
+      routeToArea: transitLinesTable.toArea,
+      routeGovernorate: transitLinesTable.governorate,
+      transportNameEn: transportTypesTable.nameEn,
+      transportNameAr: transportTypesTable.nameAr,
+      transportIcon: transportTypesTable.icon,
+      transportColor: transportTypesTable.color,
+    })
     .from(reportsTable)
+    .leftJoin(transitLinesTable, eq(reportsTable.transitLineId, transitLinesTable.id))
+    .leftJoin(transportTypesTable, eq(reportsTable.transportTypeId, transportTypesTable.id))
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(desc(reportsTable.createdAt));
   res.json(rows);

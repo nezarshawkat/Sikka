@@ -18,6 +18,7 @@ import IntercityChoiceDialog from '@/components/trip/IntercityChoiceDialog';
 import ReportDialog from '@/components/ReportDialog';
 import ContributeTransportDialog from '@/components/ContributeTransportDialog';
 import { api } from '@/lib/api';
+import { clearTripNotification, showTripNotification } from '@/lib/nativeTripNotification';
 import { toast } from 'sonner';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -192,6 +193,21 @@ const Index = () => {
     }
   }, [activeTrip, loadRoutes]);
 
+  useEffect(() => {
+    if (!activeTrip) {
+      void clearTripNotification();
+      return;
+    }
+    const segment = activeTrip.segments[currentSegIdx] ?? activeTrip.segments[0];
+    void showTripNotification({
+      from: segment?.start_name || 'Start',
+      to: segment?.end_name || activeTrip.destination || 'Destination',
+      transportName: segment?.transport_name || 'Sikka',
+      icon: segment?.icon || '●',
+      color: segment?.color || '#258DFF',
+    });
+  }, [activeTrip, currentSegIdx]);
+
   const onApproachSegmentEnd = useCallback((segIdx: number) => {
     if (!activeTrip) return;
     if (segIdx < activeTrip.segments.length - 1) {
@@ -235,6 +251,7 @@ const Index = () => {
   const clearTrip = () => {
     sessionStorage.removeItem('activeTrip');
     sessionStorage.removeItem('tripPlan');
+    void clearTripNotification();
     setActiveTrip(null);
     setCurrentSegIdx(0);
     setExpanded(false);
@@ -482,7 +499,7 @@ const Index = () => {
             <Button
               type="button"
               size="icon"
-              className="absolute right-4 bottom-36 z-20 h-12 w-12 rounded-full border border-white/20 text-foreground shadow-xl glass-panel hover:bg-background/70 dark:hover:bg-background/55"
+              className="absolute right-4 bottom-36 z-20 h-14 w-14 rounded-full border border-white/20 text-foreground shadow-xl glass-panel hover:bg-background/70 dark:hover:bg-background/55"
               onClick={focusCurrentTrip}
               aria-label="Focus current trip"
             >

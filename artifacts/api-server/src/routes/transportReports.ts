@@ -5,6 +5,7 @@ import { eq, desc, and, inArray, sql, type SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
 import { invalidateGraph } from "../engine/graph.js";
+import { snapToRoadsStrict } from "../utils/busPathEnricher.js";
 
 const router = Router();
 
@@ -16,6 +17,7 @@ const MIN_TRACE_POINTS = 6;
 const TRACE_JOIN_KM = 0.35;
 const SAME_PATH_KM = 0.22;
 const NUMBER_REFRESH_DAYS = 122; // about four months
+const MAX_ACCEPTED_STEP_KM = 0.5;
 
 type TracePoint = [number, number];
 type ReportClusterRow = {
@@ -73,6 +75,12 @@ function traceKm(trace: TracePoint[]): number {
   let km = 0;
   for (let i = 1; i < trace.length; i++) km += pointKm(trace[i - 1], trace[i]);
   return km;
+}
+
+function maxStepKm(trace: TracePoint[]): number {
+  let max = 0;
+  for (let i = 1; i < trace.length; i++) max = Math.max(max, pointKm(trace[i - 1], trace[i]));
+  return max;
 }
 
 function nearestIndex(path: TracePoint[], p: TracePoint): { index: number; km: number } {
@@ -288,15 +296,19 @@ async function promoteDiscoveredRoute(params: {
   const traces = candidates.map((row) => sanitizeTrace(row.gpsTrace)).filter((trace): trace is TracePoint[] => !!trace);
   const path = stitchPartialTraces(traces);
   if (!path || traceKm(path) < 0.5) return;
+  const snapped = await snapToRoadsStrict(path);
+  const acceptedPath = snapped.length >= MIN_TRACE_POINTS && maxStepKm(snapped) <= Math.max(MAX_ACCEPTED_STEP_KM, maxStepKm(path))
+    ? simplifyTrace(snapped)
+    : simplifyTrace(path);
 
   const fromArea =
-    labelClosestToPathEnd(candidates, path, "fromArea", "start")
+    labelClosestToPathEnd(candidates, acceptedPath, "fromArea", "start")
     ?? consensusText(candidates, "fromArea")
     ?? params.fromArea
     ?? "Discovered start";
   const toArea =
     consensusText(candidates, "toArea")
-    ?? labelClosestToPathEnd(candidates, path, "toArea", "finish")
+    ?? labelClosestToPathEnd(candidates, acceptedPath, "toArea", "finish")
     ?? params.toArea
     ?? "Discovered end";
   const avgPrice = candidates
@@ -317,12 +329,12 @@ async function promoteDiscoveredRoute(params: {
 
   const samePathReports = (rows as ReportClusterRow[]).filter((row) => {
     const trace = sanitizeTrace(row.gpsTrace);
-    return !!trace && samePath(path, trace);
+    return !!trace && samePath(acceptedPath, trace);
   });
 
   const match = existingLines.find((line) => {
     const coords = (line.routePath?.coordinates ?? null) as TracePoint[] | null;
-    return !!coords && samePath(path, coords);
+    return !!coords && samePath(acceptedPath, coords);
   });
 
   const lineNumber = (() => {
@@ -339,7 +351,7 @@ async function promoteDiscoveredRoute(params: {
   const routeName = isMicrobus
     ? `${fromArea} → ${toArea}`
     : `${params.transportName}${lineNumber ? ` ${lineNumber}` : ""}: ${fromArea} → ${toArea}`;
-  const routePath = { type: "LineString", coordinates: path };
+  const routePath = { type: "LineString", coordinates: acceptedPath, source: "discovered", snapped: acceptedPath !== path };
   const priceEgp = Number.isFinite(avgPrice) && avgPrice > 0 ? avgPrice : isMicrobus ? 5 : 10;
 
   if (match) {
@@ -352,7 +364,7 @@ async function promoteDiscoveredRoute(params: {
         nameAr: routeName,
         fromArea,
         toArea,
-        routePath: path.length > existingCoords.length ? routePath : match.routePath,
+        routePath: acceptedPath.length > existingCoords.length ? routePath : match.routePath,
         priceEgp,
         hasFixedStops: false,
         isActive: true,
