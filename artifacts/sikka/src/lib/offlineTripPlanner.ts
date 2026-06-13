@@ -126,6 +126,11 @@ const API_ORIGIN = ((import.meta.env.VITE_API_URL as string | undefined) || DEFA
 const API_BASE = `${API_ORIGIN}/api`;
 const SNAPSHOT_DB = "sikka-offline";
 const SNAPSHOT_STORE = "snapshots";
+// Shared with the offline queue (offlineQueue.ts): same DB name, version, and
+// the union of object stores. Both modules must open at the same version or
+// whichever opens at the lower version throws a VersionError.
+const OFFLINE_DB_VERSION = 2;
+const QUEUE_STORE = "outbox";
 const SNAPSHOT_KEY = "latest";
 const SNAPSHOT_SCHEMA_VERSION = 3;
 const SNAPSHOT_REFRESH_MS = 10 * 60 * 1000;
@@ -951,8 +956,12 @@ function finalizePlan(segments: ApiSegment[], request: PlannerRequest, graph: De
 // ── IndexedDB snapshot storage with delta sync ──────────────────────────────
 function openSnapshotDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(SNAPSHOT_DB, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(SNAPSHOT_STORE);
+    const request = indexedDB.open(SNAPSHOT_DB, OFFLINE_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(SNAPSHOT_STORE)) db.createObjectStore(SNAPSHOT_STORE);
+      if (!db.objectStoreNames.contains(QUEUE_STORE)) db.createObjectStore(QUEUE_STORE, { keyPath: "id" });
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
