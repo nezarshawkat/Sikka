@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
+import { submitOrQueue } from '@/lib/offlineQueue';
 import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import { toast } from 'sonner';
@@ -74,7 +75,7 @@ export default function BusUsedDialog({
     try {
       const transportTypeId =
         transportTypes.find((tt) => tt.nameEn === OPERATOR_TYPE_NAME[operator])?.id ?? null;
-      await api.post('/transport-reports', {
+      const { queued } = await submitOrQueue('bus_confirmation', '/transport-reports', {
         transportName: transportName || OPERATOR_TYPE_NAME[operator],
         transportNumber: busNumber.trim(),
         transportTypeId,
@@ -83,7 +84,7 @@ export default function BusUsedDialog({
         priceEgp: null,
         gpsTrace: null,
       });
-      toast.success(t('busUsedThanks', language));
+      toast.success(queued ? t('queuedOffline', language) : t('busUsedThanks', language));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('contributeFailed', language));
     } finally {

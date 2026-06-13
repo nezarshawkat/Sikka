@@ -94,6 +94,8 @@ async function insertLine(opts: {
       priceEgp: opts.priceEgp,
       hasFixedStops: false,
       isActive: true,
+      dataSource: "csv",
+      sourcePriority: 1,
     });
     return "seeded";
   } catch (e: unknown) {

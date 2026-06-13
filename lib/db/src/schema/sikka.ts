@@ -56,6 +56,27 @@ export const transitLinesTable = pgTable("transit_lines", {
   frequencyMinutes: integer("frequency_minutes"),
   hasFixedStops: boolean("has_fixed_stops").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
+  // ── Route-quality metadata (drives on-device planner trust/scoring) ──
+  // Where this route's geometry originally came from. Trust priority is
+  // discovery > gtfs > admin > csv/seed (see lib/routeQuality).
+  dataSource: text("data_source").notNull().default("seed"),
+  // Cached numeric trust priority for the data source (higher = more trusted),
+  // stored so the offline snapshot can sort/score without re-deriving rules.
+  sourcePriority: integer("source_priority").notNull().default(1),
+  // 0..1 overall confidence in this route (geometry density, verification age,
+  // report history). Recomputed by enrichment / AI re-snap.
+  confidenceScore: real("confidence_score").notNull().default(0.6),
+  // active | needs_review | inactive | pending_discovery
+  routeStatus: text("route_status").notNull().default("active"),
+  // Last time an admin / AI re-snap verified this route's geometry.
+  verifiedAt: timestamp("verified_at"),
+  // Last time a rider confirmed the route is still running (bus confirmation).
+  lastConfirmedAt: timestamp("last_confirmed_at"),
+  // Human/AI explanation when routeStatus = needs_review.
+  needsReviewReason: text("needs_review_reason"),
+  // Count of accepted serious reports against this route. Repeated reports flip
+  // routeStatus to needs_review and lower the device-planning score.
+  reviewReportCount: integer("review_report_count").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -160,6 +181,15 @@ export const transportReportsTable = pgTable("transport_reports", {
   gpsTrace: jsonb("gps_trace").$type<[number, number][]>(),
   stopsVisited: jsonb("stops_visited").$type<string[]>(),
   priceEgp: real("price_egp"),
+  // ── Guided discovery fields (help the backend cluster/merge traces) ──
+  mode: text("mode"), // bus | serfis | microbus | metro | ...
+  routeNumber: text("route_number"),
+  // full | partial — does the trace cover the whole route or one segment?
+  routeCoverage: text("route_coverage"),
+  // forward | backward | loop — direction confirmation from the submitter.
+  direction: text("direction"),
+  // good | fair | poor — submitter-reported GPS quality during recording.
+  gpsQuality: text("gps_quality"),
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

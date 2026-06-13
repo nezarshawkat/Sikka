@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
-import { planTripOnDevice } from '@/lib/offlineTripPlanner';
+import { planTripsOnDevice } from '@/lib/offlineTripPlanner';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 
@@ -62,7 +62,7 @@ export default function PlanSetup() {
     let cancelled = false;
     const plan = async () => {
       try {
-        const data = await planTripOnDevice({
+        const plans = await planTripsOnDevice({
           destination: request.destination,
           startLat: request.startLat,
           startLng: request.startLng,
@@ -74,28 +74,33 @@ export default function PlanSetup() {
           mode: request.mode,
         });
         if (cancelled) return;
-        if (!data?.segments?.length) throw new Error(t('noRouteTitle', language));
+        if (!plans.length || !plans[0]?.segments?.length) throw new Error(t('noRouteTitle', language));
 
         const originName = await reverseGeocode(request.startLat, request.startLng, language);
-        if (Array.isArray(data.segments) && data.segments.length > 0) {
-          const segs = [...data.segments];
-          if (originName) segs[0] = { ...segs[0], start_name: originName };
-          if (request.destination) {
-            const last = segs.length - 1;
-            segs[last] = { ...segs[last], end_name: request.destination };
-          }
-          data.segments = segs;
-        }
-
-        sessionStorage.setItem('tripPlan', JSON.stringify({
-          ...data,
+        const meta = {
           destination: request.destination,
           tripType: request.tripType,
           startLat: request.startLat,
           startLng: request.startLng,
           destLat: request.destLat,
           destLng: request.destLng,
-        }));
+        };
+        const decorated = plans.map((data) => {
+          const segs = [...data.segments];
+          if (segs.length > 0) {
+            if (originName) segs[0] = { ...segs[0], start_name: originName };
+            if (request.destination) {
+              const last = segs.length - 1;
+              segs[last] = { ...segs[last], end_name: request.destination };
+            }
+          }
+          return { ...data, segments: segs, ...meta };
+        });
+
+        // Persist all route cards for the swipeable selector, plus the first one
+        // under the legacy key so any older reader keeps working.
+        sessionStorage.setItem('tripPlans', JSON.stringify(decorated));
+        sessionStorage.setItem('tripPlan', JSON.stringify(decorated[0]));
         navigate('/trip-result', { replace: true });
       } catch (err) {
         if (cancelled) return;
