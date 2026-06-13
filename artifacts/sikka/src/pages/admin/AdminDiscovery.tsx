@@ -17,6 +17,8 @@ interface DiscoveryRow {
   avgPrice: number | null;
   gpsTraceCount?: number;
   avgGpsPoints?: number | null;
+  fullTraceCount?: number;
+  goodGpsCount?: number;
   confidenceScore?: number;
 }
 
@@ -27,6 +29,11 @@ interface TransportReport {
   fromArea: string | null;
   toArea: string | null;
   priceEgp: number | null;
+  discoveryMeta?: {
+    routeCompleteness?: 'full' | 'partial';
+    directionConfirmed?: boolean;
+    gpsQuality?: 'good' | 'ok' | 'poor';
+  } | null;
   status: string;
   createdAt: string;
 }
@@ -137,7 +144,10 @@ const AdminDiscovery = () => {
                 </p>
               )}
               <p className="text-xs text-muted-foreground">
-                GPS traces: {d.gpsTraceCount ?? 0} · avg points: {Math.round(d.avgGpsPoints ?? 0)}
+                GPS traces: {d.gpsTraceCount ?? 0} · full: {d.fullTraceCount ?? 0} · good GPS: {d.goodGpsCount ?? 0} · avg points: {Math.round(d.avgGpsPoints ?? 0)}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Approve only clusters whose merged trace follows one real route, not merely routes sharing the same streets.
               </p>
             </CardContent>
           </Card>
@@ -160,6 +170,15 @@ const AdminDiscovery = () => {
               )}
               {r.priceEgp != null && (
                 <p className="text-xs text-muted-foreground">{Math.round(r.priceEgp)} {t('egp', language)}</p>
+              )}
+              {r.discoveryMeta && (
+                <div className="flex flex-wrap gap-1">
+                  <Badge variant="secondary">{r.discoveryMeta.routeCompleteness ?? 'full'}</Badge>
+                  <Badge variant="secondary">{r.discoveryMeta.gpsQuality ?? 'good'} GPS</Badge>
+                  <Badge variant={r.discoveryMeta.directionConfirmed ? 'secondary' : 'outline'}>
+                    {r.discoveryMeta.directionConfirmed ? 'direction confirmed' : 'direction uncertain'}
+                  </Badge>
+                </div>
               )}
               <p className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</p>
               <div className="flex gap-2 pt-1">

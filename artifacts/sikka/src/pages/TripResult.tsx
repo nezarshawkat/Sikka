@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -19,7 +19,14 @@ interface Segment {
   cost_egp: number; duration_minutes: number; color: string; icon: string;
   alternatives: Alternative[];
   line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[];
+  route_status?: 'active' | 'needs_review' | 'inactive' | 'pending_discovery';
+  trust_badge?: string;
   route_geometry?: [number, number][] | null;
+}
+interface RouteOption {
+  segments: Segment[]; total_cost_egp: number; total_duration_minutes: number;
+  budget_range: { min: number; max: number }; distance_km: number;
+  route_variant?: string; route_label?: string; route_description?: string;
 }
 interface Alternative {
   transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number; color: string; icon: string; line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[]; route_geometry?: [number, number][] | null;
@@ -28,7 +35,15 @@ interface TripPlanData {
   segments: Segment[]; total_cost_egp: number; total_duration_minutes: number;
   budget_range: { min: number; max: number }; distance_km: number; destination: string;
   tripType: string; startLat: number; startLng: number; destLat: number; destLng: number;
+  route_variant?: string; route_label?: string; route_description?: string; route_options?: RouteOption[];
 }
+
+const OPTION_COLORS: Record<string, string> = {
+  recommended: '#2563EB',
+  cheapest: '#16A34A',
+  fastest: '#DC2626',
+  fewest_transfers: '#7C3AED',
+};
 
 const ICONS: Record<string, string> = {
   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
@@ -38,6 +53,7 @@ const TripResult = () => {
   const navigate = useNavigate();
   const { language } = useAuth();
   const [plan, setPlan] = useState<TripPlanData | null>(null);
+  const [activeOptionIndex, setActiveOptionIndex] = useState(0);
   const [swapIndex, setSwapIndex] = useState<number | null>(null);
   const [showMap, setShowMap] = useState(true);
   const [isTracking, setIsTracking] = useState(false);
@@ -52,7 +68,12 @@ const TripResult = () => {
 
   useEffect(() => {
     const stored = sessionStorage.getItem('tripPlan');
-    if (stored) setPlan(JSON.parse(stored));
+    if (stored) {
+      const parsed = JSON.parse(stored) as TripPlanData;
+      const optionIndex = parsed.route_options?.findIndex((option) => option.route_variant === parsed.route_variant) ?? -1;
+      setActiveOptionIndex(optionIndex >= 0 ? optionIndex : 0);
+      setPlan(parsed);
+    }
     else navigate('/');
   }, [navigate]);
 
@@ -149,6 +170,26 @@ const TripResult = () => {
     toast.success(t('planUpdated', language));
   };
 
+  const handleSelectOption = (option: RouteOption, index: number) => {
+    if (!plan) return;
+    const updated: TripPlanData = {
+      ...plan,
+      ...option,
+      destination: plan.destination,
+      tripType: plan.tripType,
+      startLat: plan.startLat,
+      startLng: plan.startLng,
+      destLat: plan.destLat,
+      destLng: plan.destLng,
+      route_options: plan.route_options,
+    };
+    setActiveOptionIndex(index);
+    setCurrentSegIndex(0);
+    setPopupSegIndex(null);
+    setPlan(updated);
+    sessionStorage.setItem('tripPlan', JSON.stringify(updated));
+  };
+
   if (!plan) return null;
 
   const getIcon = (icon: string) => ICONS[icon] || '🚌';
@@ -173,6 +214,7 @@ const TripResult = () => {
   const popupSeg = popupSegIndex != null ? plan.segments[popupSegIndex] : null;
   const popupCoords = popupSegIndex != null ? routeCoords.find(r => r.segIndex === popupSegIndex)?.coords : null;
   const popupMid = popupCoords?.[Math.floor(popupCoords.length / 2)];
+  const routeOptions = plan.route_options?.length ? plan.route_options : [plan];
 
   return (
     <div className="min-h-screen bg-background">
@@ -279,6 +321,11 @@ const TripResult = () => {
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground mt-2">{popupSeg.start_name} → {popupSeg.end_name}</p>
+                    {popupSeg.trust_badge && (
+                      <Badge variant={popupSeg.route_status === 'needs_review' ? 'destructive' : 'outline'} className="mt-2 gap-1 text-[10px]">
+                        <ShieldCheck className="h-3 w-3" /> {popupSeg.trust_badge}
+                      </Badge>
+                    )}
                     <div className="flex items-center gap-3 text-xs mt-1">
                       <span>⏱ {Math.round(popupSeg.duration_minutes)} min</span>
                       <span>💰 {Math.round(popupSeg.cost_egp)} EGP</span>
@@ -316,6 +363,65 @@ const TripResult = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {routeOptions.length > 1 && (
+        <div className="px-4 pt-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-semibold text-foreground">Choose your route</p>
+            <p className="text-[11px] text-muted-foreground">Swipe cards left/right</p>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
+            {routeOptions.map((option, index) => {
+              const selected = index === activeOptionIndex || option.route_variant === plan.route_variant;
+              const color = OPTION_COLORS[option.route_variant || 'recommended'] || '#2563EB';
+              const transfers = Math.max(0, option.segments.filter((seg) => seg.line_id).length - 1);
+              const taxiHeavy = option.segments.some((seg) => seg.icon === 'car' || /taxi|uber|careem/i.test(seg.transport_name));
+              return (
+                <button
+                  key={`${option.route_variant || 'route'}-${index}`}
+                  onClick={() => handleSelectOption(option, index)}
+                  className={`min-w-[78%] snap-center rounded-[2rem] border p-4 text-left transition-all ${selected ? 'bg-background shadow-lg' : 'bg-background/50 opacity-80'}`}
+                  style={{ borderColor: selected ? color : 'hsl(var(--border))' }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge className="rounded-full" style={{ backgroundColor: color }}>
+                      {option.route_label || 'Route'}
+                    </Badge>
+                    {selected && <Check className="h-4 w-4" style={{ color }} />}
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{option.route_description}</p>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-2xl bg-muted/50 p-2">
+                      <p className="text-sm font-bold">{Math.round(option.total_cost_egp)}</p>
+                      <p className="text-[10px] text-muted-foreground">EGP</p>
+                    </div>
+                    <div className="rounded-2xl bg-muted/50 p-2">
+                      <p className="text-sm font-bold">{Math.round(option.total_duration_minutes)}</p>
+                      <p className="text-[10px] text-muted-foreground">min</p>
+                    </div>
+                    <div className="rounded-2xl bg-muted/50 p-2">
+                      <p className="text-sm font-bold">{transfers}</p>
+                      <p className="text-[10px] text-muted-foreground">transfers</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-1 overflow-hidden">
+                    {option.segments.map((seg, segIndex) => (
+                      <span
+                        key={`${seg.transport_type_id}-${segIndex}`}
+                        className="h-7 min-w-7 rounded-full flex items-center justify-center text-xs"
+                        style={{ backgroundColor: `${seg.color}22` }}
+                      >
+                        {getIcon(seg.icon)}
+                      </span>
+                    ))}
+                    {taxiHeavy && <Badge variant="outline" className="ml-auto text-[10px]">Taxi used</Badge>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Summary */}
       <div className="p-4 grid grid-cols-3 gap-3">
@@ -376,6 +482,11 @@ const TripResult = () => {
                                   <p className="text-muted-foreground">{seg.info}</p>
                                 </PopoverContent>
                               </Popover>
+                            )}
+                            {seg.trust_badge && (
+                              <Badge variant={seg.route_status === 'needs_review' ? 'destructive' : 'secondary'} className="text-[10px] px-1.5 py-0 h-4">
+                                {seg.trust_badge}
+                              </Badge>
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground">

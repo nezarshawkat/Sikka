@@ -93,7 +93,7 @@ export default function BusUsedDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && finish()}>
+    <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>{t('busUsedTitle', language)}</DialogTitle>
@@ -130,9 +130,6 @@ export default function BusUsedDialog({
           </div>
 
           <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1" onClick={finish} disabled={submitting}>
-              {t('skip', language)}
-            </Button>
             <Button className="flex-1" onClick={handleSubmit} disabled={submitting}>
               {t('submit', language)}
             </Button>

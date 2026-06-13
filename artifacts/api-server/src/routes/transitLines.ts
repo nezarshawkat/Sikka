@@ -13,12 +13,20 @@ interface TransitLineUpdate {
   fromArea?: string;
   toArea?: string;
   viaStops?: string[];
-  routePath?: unknown;
+  routePath?: { type: string; coordinates: [number, number][] } | null;
   priceEgp?: number;
   frequencyMinutes?: number | null;
   hasFixedStops?: boolean;
   isActive?: boolean;
   transportTypeId?: string;
+  dataSource?: string;
+  sourcePriority?: number;
+  confidenceScore?: number;
+  routeStatus?: "active" | "needs_review" | "inactive" | "pending_discovery";
+  verifiedAt?: Date | string | null;
+  lastConfirmedAt?: Date | string | null;
+  needsReviewReason?: string | null;
+  reviewReportCount?: number;
   updatedAt?: Date;
 }
 
@@ -28,7 +36,7 @@ router.get("/", async (req, res) => {
     return res.json(rows);
   }
   const rows = await db.select().from(transitLinesTable).orderBy(asc(transitLinesTable.lineNumber));
-  res.json(rows);
+  return res.json(rows);
 });
 
 router.post("/", requireAdmin, async (req, res) => {
@@ -45,6 +53,12 @@ router.post("/", requireAdmin, async (req, res) => {
     priceEgp: priceEgp ?? 5,
     frequencyMinutes: frequencyMinutes ?? null,
     hasFixedStops: hasFixedStops ?? false,
+    dataSource: "admin",
+    sourcePriority: 20,
+    confidenceScore: routePath ? 0.75 : 0.55,
+    routeStatus: routePath ? "active" : "needs_review",
+    verifiedAt: routePath ? new Date() : null,
+    needsReviewReason: routePath ? null : "missing route geometry",
   }).returning();
   res.json(row);
 });
@@ -53,19 +67,25 @@ router.put("/:id", requireAdmin, async (req, res) => {
   const allowed: (keyof TransitLineUpdate)[] = [
     "lineNumber", "nameEn", "nameAr", "fromArea", "toArea", "viaStops",
     "routePath", "priceEgp", "frequencyMinutes", "hasFixedStops", "isActive", "transportTypeId",
+    "dataSource", "sourcePriority", "confidenceScore", "routeStatus", "verifiedAt", "lastConfirmedAt", "needsReviewReason", "reviewReportCount",
   ];
   const updates: TransitLineUpdate = { updatedAt: new Date() };
   for (const key of allowed) {
     if (req.body[key] !== undefined) {
-      (updates as Record<keyof TransitLineUpdate, unknown>)[key] = req.body[key];
+      const value = req.body[key];
+      if ((key === "verifiedAt" || key === "lastConfirmedAt") && typeof value === "string") {
+        (updates as Record<keyof TransitLineUpdate, unknown>)[key] = value ? new Date(value) : null;
+      } else {
+        (updates as Record<keyof TransitLineUpdate, unknown>)[key] = value;
+      }
     }
   }
-  const [row] = await db.update(transitLinesTable).set(updates).where(eq(transitLinesTable.id, req.params.id)).returning();
+  const [row] = await db.update(transitLinesTable).set(updates).where(eq(transitLinesTable.id, req.params.id as string)).returning();
   res.json(row);
 });
 
 router.delete("/:id", requireAdmin, async (req, res) => {
-  await db.delete(transitLinesTable).where(eq(transitLinesTable.id, req.params.id));
+  await db.delete(transitLinesTable).where(eq(transitLinesTable.id, req.params.id as string));
   res.json({ success: true });
 });
 

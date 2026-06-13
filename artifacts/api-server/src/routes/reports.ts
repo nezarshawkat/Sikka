@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { reportsTable } from "@workspace/db";
-import { eq, desc, and, type SQL } from "drizzle-orm";
+import { reportsTable, transitLinesTable } from "@workspace/db";
+import { eq, desc, and, sql, type SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
 
@@ -21,6 +21,7 @@ const REPORT_TYPES = [
 ];
 
 const STATUSES = ["open", "resolved", "rejected"];
+const SERIOUS_ROUTE_REPORTS = new Set(["wrong_route", "wrong_station", "closed_station", "timing_error"]);
 
 router.get("/", requireAdmin, async (req, res) => {
   const { status } = req.query as { status?: string };
@@ -69,6 +70,28 @@ router.post("/", requireAuth, async (req, res) => {
     longitude: Number.isFinite(lng) ? lng : null,
     status: "open",
   }).returning();
+  if (resolvedTransitLineId) {
+    const shouldReview = SERIOUS_ROUTE_REPORTS.has(reportType);
+    if (shouldReview) {
+      await db
+        .update(transitLinesTable)
+        .set({
+          reviewReportCount: sql`${transitLinesTable.reviewReportCount} + 1`,
+          routeStatus: sql`case when ${transitLinesTable.reviewReportCount} + 1 >= 3 then 'needs_review'::route_status else ${transitLinesTable.routeStatus} end`,
+          needsReviewReason: sql`case when ${transitLinesTable.reviewReportCount} + 1 >= 3 then ${`repeated ${reportType} reports`} else ${transitLinesTable.needsReviewReason} end`,
+          updatedAt: new Date(),
+        })
+        .where(eq(transitLinesTable.id, resolvedTransitLineId));
+    } else {
+      await db
+        .update(transitLinesTable)
+        .set({
+          reviewReportCount: sql`${transitLinesTable.reviewReportCount} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(transitLinesTable.id, resolvedTransitLineId));
+    }
+  }
   return res.json(row);
 });
 

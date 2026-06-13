@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { transportTypesTable, transitLinesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
+import { requireAdmin } from "../middlewares/requireAdmin";
 import { EGYPT_CITIES } from "../lib/intercitySearch.js";
 import { runIntercitySearch } from "../lib/intercitySearch.js";
 import { planTripApi } from "../engine/planner.js";
@@ -88,7 +89,7 @@ router.get("/intercity-check", async (req, res) => {
   });
 });
 
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, requireAdmin, async (req, res) => {
   const { startLat, startLng, endLat, endLng, tripType, language, mode } = req.body;
 
   const distanceKm = haversineKm(startLat, startLng, endLat, endLng);

@@ -1,13 +1,19 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { reviewsTable } from "@workspace/db";
-import { eq, desc, and, type SQL } from "drizzle-orm";
+import { reviewsTable, transitLinesTable } from "@workspace/db";
+import { eq, desc, and, sql, type SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function metaTransitLineId(meta: unknown): string | null {
+  if (!meta || typeof meta !== "object") return null;
+  const value = (meta as { transitLineId?: unknown }).transitLineId;
+  return typeof value === "string" && UUID_RE.test(value) ? value : null;
+}
 
 router.get("/", async (req, res) => {
   const filters: SQL[] = [];
@@ -60,6 +66,18 @@ router.post("/", requireAuth, async (req, res) => {
     stationInfoCorrect: typeof stationInfoCorrect === "boolean" ? stationInfoCorrect : null,
     meta: meta ?? null,
   }).returning();
+  const transitLineId = metaTransitLineId(meta);
+  if (transitLineId && (routeAccurate === false || qualityGood === false)) {
+    await db
+      .update(transitLinesTable)
+      .set({
+        reviewReportCount: sql`${transitLinesTable.reviewReportCount} + 1`,
+        routeStatus: sql`case when ${transitLinesTable.reviewReportCount} + 1 >= 3 then 'needs_review'::route_status else ${transitLinesTable.routeStatus} end`,
+        needsReviewReason: sql`case when ${transitLinesTable.reviewReportCount} + 1 >= 3 then 'repeated low route reviews' else ${transitLinesTable.needsReviewReason} end`,
+        updatedAt: new Date(),
+      })
+      .where(eq(transitLinesTable.id, transitLineId));
+  }
   return res.json(row);
 });
 

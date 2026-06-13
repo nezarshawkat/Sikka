@@ -26,8 +26,32 @@ import { invalidateGraph } from "../engine/graph";
 const MIN_COORDS = 10;        // never overwrite a good path with a sparse new one
 const DEFAULT_LIMIT = 5;      // keep batches short to dodge proxy timeouts
 const MAX_LIMIT = 25;
+const MAX_STEP_KM = 0.75;
+const ENDPOINT_TOLERANCE_KM = 1.2;
 
 const router = Router();
+
+function haversineKm(a: [number, number], b: [number, number]): number {
+  const r = 6371;
+  const dLat = ((b[1] - a[1]) * Math.PI) / 180;
+  const dLng = ((b[0] - a[0]) * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos((a[1] * Math.PI) / 180) * Math.cos((b[1] * Math.PI) / 180)
+    * Math.sin(dLng / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function validateSnappedPath(oldPath: [number, number][] | null | undefined, path: [number, number][] | null | undefined): string | null {
+  if (!path || path.length < MIN_COORDS) return "too_few_points";
+  for (let i = 1; i < path.length; i++) {
+    if (haversineKm(path[i - 1], path[i]) > MAX_STEP_KM) return "large_geometry_jump";
+  }
+  if (oldPath && oldPath.length >= 2) {
+    if (haversineKm(oldPath[0], path[0]) > ENDPOINT_TOLERANCE_KM) return "start_endpoint_shifted";
+    if (haversineKm(oldPath[oldPath.length - 1], path[path.length - 1]) > ENDPOINT_TOLERANCE_KM) return "end_endpoint_shifted";
+  }
+  return null;
+}
 
 router.post("/", requireAdmin, async (req, res) => {
   const transportMode =
@@ -76,20 +100,46 @@ router.post("/", requireAdmin, async (req, res) => {
         gov,
       );
       const coords = result.routePath?.coordinates.length ?? 0;
-      if (result.routePath && coords >= MIN_COORDS) {
+      const reason = validateSnappedPath(line.routePath?.coordinates, result.routePath?.coordinates);
+      if (result.routePath && !reason) {
         await db
           .update(transitLinesTable)
-          .set({ routePath: result.routePath })
+          .set({
+            routePath: result.routePath,
+            dataSource: line.dataSource === "discovery" ? line.dataSource : "admin",
+            sourcePriority: line.dataSource === "discovery" ? line.sourcePriority : 20,
+            confidenceScore: result.usedAI ? 0.78 : 0.7,
+            routeStatus: "active",
+            needsReviewReason: null,
+            verifiedAt: new Date(),
+            updatedAt: new Date(),
+          })
           .where(eq(transitLinesTable.id, line.id));
         updated++;
         results.push({ id: line.id, line: line.lineNumber, status: "updated", coords });
         console.log(`[re-enrich] ✓ ${label} — ${coords} pts (AI=${result.usedAI})`);
       } else {
+        await db
+          .update(transitLinesTable)
+          .set({
+            routeStatus: "needs_review",
+            needsReviewReason: reason ?? "uncertain_resnap",
+            updatedAt: new Date(),
+          })
+          .where(eq(transitLinesTable.id, line.id));
         skipped++;
-        results.push({ id: line.id, line: line.lineNumber, status: "skipped", coords });
-        console.log(`[re-enrich] ↷ ${label} — kept old path (new=${coords} pts)`);
+        results.push({ id: line.id, line: line.lineNumber, status: reason ?? "skipped", coords });
+        console.log(`[re-enrich] ↷ ${label} — marked needs_review (${reason ?? "new=" + coords + " pts"})`);
       }
     } catch (err) {
+      await db
+        .update(transitLinesTable)
+        .set({
+          routeStatus: "needs_review",
+          needsReviewReason: "resnap_failed",
+          updatedAt: new Date(),
+        })
+        .where(eq(transitLinesTable.id, line.id));
       failed++;
       results.push({ id: line.id, line: line.lineNumber, status: "failed" });
       console.log(`[re-enrich] ✗ ${label} — ${err instanceof Error ? err.message : err}`);

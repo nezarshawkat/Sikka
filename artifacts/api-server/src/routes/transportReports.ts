@@ -27,6 +27,11 @@ type ReportClusterRow = {
   toArea: string | null;
   gpsTrace: TracePoint[] | null;
   priceEgp: number | null;
+  discoveryMeta?: {
+    routeCompleteness?: "full" | "partial";
+    directionConfirmed?: boolean;
+    gpsQuality?: "good" | "ok" | "poor";
+  } | null;
   createdAt: Date;
 };
 
@@ -56,6 +61,24 @@ function sanitizeTrace(input: unknown): TracePoint[] | null {
     if (!prev || pointKm(prev, pt) >= 0.02) out.push(pt);
   }
   return out.length >= MIN_TRACE_POINTS ? out : null;
+}
+
+function sanitizeDiscoveryMeta(input: {
+  routeCompleteness?: unknown;
+  directionConfirmed?: unknown;
+  gpsQuality?: unknown;
+}): {
+  routeCompleteness: "full" | "partial";
+  directionConfirmed: boolean;
+  gpsQuality: "good" | "ok" | "poor";
+} {
+  const routeCompleteness = input.routeCompleteness === "partial" ? "partial" : "full";
+  const gpsQuality = input.gpsQuality === "poor" || input.gpsQuality === "ok" ? input.gpsQuality : "good";
+  return {
+    routeCompleteness,
+    directionConfirmed: input.directionConfirmed === true,
+    gpsQuality,
+  };
 }
 
 function pointKm(a: TracePoint, b: TracePoint): number {
@@ -258,6 +281,7 @@ async function promoteDiscoveredRoute(params: {
       toArea: transportReportsTable.toArea,
       gpsTrace: transportReportsTable.gpsTrace,
       priceEgp: transportReportsTable.priceEgp,
+      discoveryMeta: transportReportsTable.discoveryMeta,
       createdAt: transportReportsTable.createdAt,
     })
     .from(transportReportsTable)
@@ -286,7 +310,10 @@ async function promoteDiscoveredRoute(params: {
   if (candidates.length < MIN_DISCOVERY_REPORTS || !params.transportTypeId) return;
 
   const traces = candidates.map((row) => sanitizeTrace(row.gpsTrace)).filter((trace): trace is TracePoint[] => !!trace);
-  const path = stitchPartialTraces(traces);
+  const completeTraces = candidates.filter((row) => row.discoveryMeta?.routeCompleteness !== "partial");
+  const path = stitchPartialTraces((completeTraces.length >= 2 ? completeTraces : candidates)
+    .map((row) => sanitizeTrace(row.gpsTrace))
+    .filter((trace): trace is TracePoint[] => !!trace));
   if (!path || traceKm(path) < 0.5) return;
 
   const fromArea =
@@ -356,6 +383,12 @@ async function promoteDiscoveredRoute(params: {
         priceEgp,
         hasFixedStops: false,
         isActive: true,
+        dataSource: "discovery",
+        sourcePriority: 40,
+        confidenceScore: Math.min(0.95, 0.65 + samePathReports.length * 0.05 + completeTraces.length * 0.03),
+        routeStatus: "active",
+        lastConfirmedAt: new Date(),
+        needsReviewReason: null,
         updatedAt: new Date(),
       })
       .where(eq(transitLinesTable.id, match.id));
@@ -374,6 +407,11 @@ async function promoteDiscoveredRoute(params: {
       frequencyMinutes: isMicrobus ? 12 : 18,
       hasFixedStops: false,
       isActive: true,
+      dataSource: "discovery",
+      sourcePriority: 40,
+      confidenceScore: Math.min(0.9, 0.6 + samePathReports.length * 0.05 + completeTraces.length * 0.03),
+      routeStatus: "active",
+      lastConfirmedAt: new Date(),
     });
   }
 
@@ -398,6 +436,8 @@ router.get("/", requireAdmin, async (req, res) => {
         avgPrice: sql<number | null>`avg(${transportReportsTable.priceEgp})`,
         gpsTraceCount: sql<number>`cast(sum(case when ${transportReportsTable.gpsTrace} is not null then 1 else 0 end) as int)`,
         avgGpsPoints: sql<number | null>`avg(jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)))`,
+        fullTraceCount: sql<number>`cast(sum(case when ${transportReportsTable.discoveryMeta}->>'routeCompleteness' = 'full' then 1 else 0 end) as int)`,
+        goodGpsCount: sql<number>`cast(sum(case when ${transportReportsTable.discoveryMeta}->>'gpsQuality' = 'good' then 1 else 0 end) as int)`,
         confidenceScore: sql<number>`least(5, greatest(1, round((1 + least(count(*), 12) / 3.0 + least(avg(jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb))), 120) / 60.0)::numeric, 1)))`,
         recommendationScore: sql<number>`cast(count(*) as int)`,
       })
@@ -431,7 +471,7 @@ router.get("/", requireAdmin, async (req, res) => {
 router.post("/", requireAuth, async (req, res) => {
   const {
     transportName, transportNumber, transportTypeId, fromArea, toArea,
-    gpsTrace, stopsVisited, priceEgp,
+    gpsTrace, stopsVisited, priceEgp, routeCompleteness, directionConfirmed, gpsQuality,
   } = req.body;
 
   if (typeof transportName !== "string" || !transportName.trim()) {
@@ -446,6 +486,7 @@ router.post("/", requireAuth, async (req, res) => {
   const cleanFromArea = typeof fromArea === "string" && fromArea.trim().length ? fromArea.trim() : null;
   const cleanToArea = typeof toArea === "string" && toArea.trim().length ? toArea.trim() : null;
   const cleanGpsTrace = sanitizeTrace(gpsTrace);
+  const discoveryMeta = sanitizeDiscoveryMeta({ routeCompleteness, directionConfirmed, gpsQuality });
   const routeName = cleanTransportName.toLowerCase();
   const routeNumber = cleanTransportNumber ?? "";
   const routeFrom = (cleanFromArea ?? "").toLowerCase();
@@ -471,6 +512,7 @@ router.post("/", requireAuth, async (req, res) => {
     toArea: cleanToArea,
     gpsTrace: cleanGpsTrace,
     stopsVisited: Array.isArray(stopsVisited) ? stopsVisited : null,
+    discoveryMeta,
     priceEgp: Number.isFinite(price) ? price : null,
     status: shouldAutoApprove ? "approved" : "pending",
   }).returning();
@@ -500,6 +542,15 @@ router.put("/:id", requireAdmin, async (req, res) => {
     .where(eq(transportReportsTable.id, req.params.id as string))
     .returning();
   if (!row) return res.status(404).json({ error: "transport report not found" });
+  if (status === "approved" && row.gpsTrace) {
+    await promoteDiscoveredRoute({
+      transportName: row.transportName,
+      transportNumber: row.transportNumber,
+      transportTypeId: row.transportTypeId,
+      fromArea: row.fromArea,
+      toArea: row.toArea,
+    });
+  }
   return res.json(row);
 });
 

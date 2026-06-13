@@ -3,6 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const appRoleEnum = pgEnum("app_role", ["admin", "user"]);
+export const routeStatusEnum = pgEnum("route_status", ["active", "needs_review", "inactive", "pending_discovery"]);
 
 export const profilesTable = pgTable("profiles", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -52,6 +53,14 @@ export const transitLinesTable = pgTable("transit_lines", {
   viaStops: text("via_stops").array().notNull().default([]),
   stops: jsonb("stops").$type<{ name: string; lat: number; lng: number }[]>(),
   routePath: jsonb("route_path").$type<{ type: string; coordinates: [number, number][] } | null>(),
+  dataSource: text("data_source").notNull().default("seed"),
+  sourcePriority: integer("source_priority").notNull().default(10),
+  confidenceScore: real("confidence_score").notNull().default(0.6),
+  routeStatus: routeStatusEnum("route_status").notNull().default("active"),
+  verifiedAt: timestamp("verified_at"),
+  lastConfirmedAt: timestamp("last_confirmed_at"),
+  needsReviewReason: text("needs_review_reason"),
+  reviewReportCount: integer("review_report_count").notNull().default(0),
   priceEgp: real("price_egp").notNull().default(5),
   frequencyMinutes: integer("frequency_minutes"),
   hasFixedStops: boolean("has_fixed_stops").notNull().default(false),
@@ -159,6 +168,11 @@ export const transportReportsTable = pgTable("transport_reports", {
   toArea: text("to_area"),
   gpsTrace: jsonb("gps_trace").$type<[number, number][]>(),
   stopsVisited: jsonb("stops_visited").$type<string[]>(),
+  discoveryMeta: jsonb("discovery_meta").$type<{
+    routeCompleteness?: "full" | "partial";
+    directionConfirmed?: boolean;
+    gpsQuality?: "good" | "ok" | "poor";
+  }>(),
   priceEgp: real("price_egp"),
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

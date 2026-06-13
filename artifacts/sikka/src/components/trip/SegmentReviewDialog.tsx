@@ -13,6 +13,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export interface ReviewSegment {
   transport_type_id?: string;
   transport_name?: string;
+  line_id?: string | null;
+  line_number?: string | null;
 }
 
 interface SegmentReviewDialogProps {
@@ -59,17 +61,6 @@ export default function SegmentReviewDialog({
     setAccRating(null);
   };
 
-  const handleClose = () => {
-    reset();
-    onClose();
-  };
-
-  const handleSkip = () => {
-    reset();
-    onSubmitted?.();
-    onClose();
-  };
-
   const resolveTransportTypeId = (): string | null => {
     const id = segment?.transport_type_id;
     return id && UUID_RE.test(id) ? id : null;
@@ -109,6 +100,8 @@ export default function SegmentReviewDialog({
           meta: {
             transportName: segment?.transport_name ?? null,
             transportSlug: segment?.transport_type_id ?? null,
+            transitLineId: segment?.line_id ?? null,
+            lineNumber: segment?.line_number ?? null,
           },
         });
       }
@@ -139,7 +132,7 @@ export default function SegmentReviewDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
+    <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>
@@ -222,9 +215,6 @@ export default function SegmentReviewDialog({
           />
 
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1 h-11 rounded-[2rem]" onClick={handleSkip} disabled={submitting}>
-              {t('skip', language)}
-            </Button>
             <Button className="flex-1 h-11 rounded-[2rem]" onClick={handleSubmit} disabled={submitting}>
               {t('submit', language)}
             </Button>

@@ -43,6 +43,9 @@ export default function ContributeTransportDialog({
   const [fromArea, setFromArea] = useState('');
   const [toArea, setToArea] = useState('');
   const [price, setPrice] = useState('');
+  const [routeCompleteness, setRouteCompleteness] = useState<'full' | 'partial'>('full');
+  const [directionConfirmed, setDirectionConfirmed] = useState(true);
+  const [gpsQuality, setGpsQuality] = useState<'good' | 'ok' | 'poor'>('good');
   const [trace, setTrace] = useState<[number, number][]>([]);
   const [recording, setRecording] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -71,6 +74,9 @@ export default function ContributeTransportDialog({
     setFromArea('');
     setToArea('');
     setPrice('');
+    setRouteCompleteness('full');
+    setDirectionConfirmed(true);
+    setGpsQuality('good');
     setTrace([]);
     stopRecording();
   };
@@ -129,6 +135,9 @@ export default function ContributeTransportDialog({
         toArea: toArea || null,
         priceEgp: Number.isFinite(priceNum) && price !== '' ? priceNum : null,
         gpsTrace: (initialTrace?.length ? initialTrace : trace).length ? (initialTrace?.length ? initialTrace : trace) : null,
+        routeCompleteness,
+        directionConfirmed,
+        gpsQuality,
       });
       toast.success(t('contributeSubmitted', language));
       reset();
@@ -212,6 +221,51 @@ export default function ContributeTransportDialog({
             <label className="text-xs text-muted-foreground">{t('priceLabel', language)}</label>
             <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="text-sm rounded-[2rem]" />
           </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={routeCompleteness === 'full' ? 'default' : 'outline'}
+              className="h-10 rounded-[2rem] text-xs"
+              onClick={() => setRouteCompleteness('full')}
+            >
+              Full route
+            </Button>
+            <Button
+              type="button"
+              variant={routeCompleteness === 'partial' ? 'default' : 'outline'}
+              className="h-10 rounded-[2rem] text-xs"
+              onClick={() => setRouteCompleteness('partial')}
+            >
+              Partial route
+            </Button>
+          </div>
+
+          <div>
+            <label className="text-xs text-muted-foreground">GPS quality</label>
+            <div className="grid grid-cols-3 gap-2 mt-1">
+              {(['good', 'ok', 'poor'] as const).map((quality) => (
+                <Button
+                  key={quality}
+                  type="button"
+                  variant={gpsQuality === quality ? 'default' : 'outline'}
+                  className="h-9 rounded-[2rem] text-xs capitalize"
+                  onClick={() => setGpsQuality(quality)}
+                >
+                  {quality}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            variant={directionConfirmed ? 'default' : 'outline'}
+            className="w-full h-10 rounded-[2rem] text-xs"
+            onClick={() => setDirectionConfirmed((value) => !value)}
+          >
+            {directionConfirmed ? 'Direction confirmed' : 'Direction not confirmed'}
+          </Button>
 
           {!isTraceSubmit && (
             <Button

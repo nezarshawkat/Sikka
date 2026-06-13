@@ -1,11 +1,12 @@
 import { Router } from "express";
-import { db, transportTypesTable, transitLinesTable } from "@workspace/db";
+import { db, transportHeatmapsTable, transportTypesTable, transitLinesTable } from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
 
 const router = Router();
-const SNAPSHOT_VERSION = 2;
+const SNAPSHOT_VERSION = 3;
 const MAX_ROUTE_POINTS = 120;
 const PATH_SUSPECT_STEP_KM = 0.5;
+const ACCEPTED_ROUTE_STATUSES = new Set(["active", "needs_review"]);
 
 function roundCoord(value: number): number {
   return Math.round(value * 100000) / 100000;
@@ -58,13 +59,42 @@ function stampOf(value: unknown): number {
   return 0;
 }
 
-// Public route-data snapshot for the mobile on-device planner. This contains no
-// secrets and no user data: only active transport types and active line geometry.
-router.get("/snapshot", async (_req, res) => {
-  const [typeRows, lineRows] = await Promise.all([
+function sourcePriority(source: string | null | undefined, stored: number | null | undefined): number {
+  const normalized = (source || "").toLowerCase();
+  if (normalized === "discovery") return 40;
+  if (normalized === "gtfs") return 30;
+  if (normalized === "admin") return 20;
+  if (normalized === "csv" || normalized === "seed") return 10;
+  return stored ?? 10;
+}
+
+function revisionOf(typeRows: { createdAt: unknown }[], lineRows: { updatedAt: unknown }[], heatRows: { createdAt: unknown }[]): string {
+  const newest = Math.max(
+    0,
+    ...typeRows.map((t) => stampOf(t.createdAt)),
+    ...lineRows.map((l) => stampOf(l.updatedAt)),
+    ...heatRows.map((h) => stampOf(h.createdAt)),
+  );
+  return `${SNAPSHOT_VERSION}-${newest}-${typeRows.length}-${lineRows.length}-${heatRows.length}`;
+}
+
+function revisionStamp(revision: unknown): number {
+  if (typeof revision !== "string") return 0;
+  const stamp = Number(revision.split("-")[1]);
+  return Number.isFinite(stamp) ? stamp : 0;
+}
+
+async function buildOfflinePayload(sinceRevision?: string) {
+  const sinceMs = revisionStamp(sinceRevision);
+  const [typeRows, allLineRows, heatRows] = await Promise.all([
     db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true)).orderBy(asc(transportTypesTable.nameEn)),
     db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true)).orderBy(asc(transitLinesTable.lineNumber)),
+    db.select().from(transportHeatmapsTable).orderBy(asc(transportHeatmapsTable.transportTypeId)),
   ]);
+  const acceptedLineRows = allLineRows.filter((l) => ACCEPTED_ROUTE_STATUSES.has(l.routeStatus ?? "active"));
+  const lineRows = sinceMs > 0
+    ? acceptedLineRows.filter((l) => stampOf(l.updatedAt) > sinceMs)
+    : acceptedLineRows;
 
   const types = typeRows.map((t) => ({
     id: t.id,
@@ -82,6 +112,9 @@ router.get("/snapshot", async (_req, res) => {
   const lines = lineRows
     .map((l) => {
       const path = l.routePath?.coordinates ?? null;
+      const compactedPath = compactPath(path);
+      const status = l.routeStatus ?? "active";
+      const dataSource = l.dataSource ?? (l.hasFixedStops ? "gtfs" : "seed");
       return {
         id: l.id,
         transportTypeId: l.transportTypeId,
@@ -93,10 +126,18 @@ router.get("/snapshot", async (_req, res) => {
         governorate: l.governorate,
         viaStops: l.viaStops ?? [],
         stops: l.stops ?? null,
-        path: compactPath(path),
+        path: compactedPath,
         pathPointCount: path?.length ?? 0,
         pathSuspect: maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM,
         routeQuality: routeQuality(path, l.hasFixedStops),
+        dataSource,
+        sourcePriority: sourcePriority(dataSource, l.sourcePriority),
+        confidenceScore: l.confidenceScore ?? (status === "needs_review" ? 0.45 : 0.7),
+        routeStatus: status,
+        verifiedAt: l.verifiedAt,
+        lastConfirmedAt: l.lastConfirmedAt,
+        needsReviewReason: l.needsReviewReason,
+        reviewReportCount: l.reviewReportCount ?? 0,
         priceEgp: l.priceEgp,
         frequencyMinutes: l.frequencyMinutes,
         hasFixedStops: l.hasFixedStops,
@@ -105,20 +146,55 @@ router.get("/snapshot", async (_req, res) => {
     })
     .filter((l) => l.path && l.path.length >= 2);
 
-  const newest = Math.max(
-    0,
-    ...typeRows.map((t) => stampOf(t.createdAt)),
-    ...lineRows.map((l) => stampOf(l.updatedAt)),
-  );
+  const heatmaps = heatRows.map((h) => ({
+    id: h.id,
+    transportTypeId: h.transportTypeId,
+    latitude: h.latitude,
+    longitude: h.longitude,
+    intensity: h.intensity,
+    radiusKm: h.radiusKm,
+    createdAt: h.createdAt,
+  }));
 
-  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=86400");
-  res.json({
+  return {
     schemaVersion: SNAPSHOT_VERSION,
     generatedAt: new Date().toISOString(),
-    revision: `${SNAPSHOT_VERSION}-${newest}-${types.length}-${lines.length}`,
+    revision: revisionOf(typeRows, acceptedLineRows, heatRows),
     types,
     lines,
+    heatmaps,
+  };
+}
+
+// Manifest is intentionally tiny: the app uses it to decide whether it needs a delta.
+router.get("/manifest", async (_req, res) => {
+  const payload = await buildOfflinePayload();
+  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=86400");
+  res.json({
+    schemaVersion: payload.schemaVersion,
+    generatedAt: payload.generatedAt,
+    revision: payload.revision,
+    counts: {
+      types: payload.types.length,
+      lines: payload.lines.length,
+      heatmaps: payload.heatmaps.length,
+    },
+    deltaUrl: "/api/offline/delta",
   });
+});
+
+router.get("/delta", async (req, res) => {
+  const sinceRevision = typeof req.query.sinceRevision === "string" ? req.query.sinceRevision : undefined;
+  const payload = await buildOfflinePayload(sinceRevision);
+  res.setHeader("Cache-Control", "public, max-age=120, stale-while-revalidate=86400");
+  res.json(payload);
+});
+
+// Backwards-compatible full snapshot for older mobile builds.
+router.get("/snapshot", async (_req, res) => {
+  const payload = await buildOfflinePayload();
+  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=86400");
+  res.json(payload);
 });
 
 export default router;

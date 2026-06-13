@@ -77,14 +77,22 @@ export default function PlanSetup() {
         if (!data?.segments?.length) throw new Error(t('noRouteTitle', language));
 
         const originName = await reverseGeocode(request.startLat, request.startLng, language);
-        if (Array.isArray(data.segments) && data.segments.length > 0) {
-          const segs = [...data.segments];
+        const applyNames = <T extends { segments?: typeof data.segments }>(plan: T): T => {
+          if (!Array.isArray(plan.segments) || plan.segments.length === 0) return plan;
+          const segs = [...plan.segments];
           if (originName) segs[0] = { ...segs[0], start_name: originName };
           if (request.destination) {
             const last = segs.length - 1;
             segs[last] = { ...segs[last], end_name: request.destination };
           }
-          data.segments = segs;
+          return { ...plan, segments: segs };
+        };
+        if (Array.isArray(data.segments) && data.segments.length > 0) {
+          const named = applyNames(data);
+          data.segments = named.segments;
+          if (Array.isArray(data.route_options)) {
+            data.route_options = data.route_options.map((option) => applyNames(option));
+          }
         }
 
         sessionStorage.setItem('tripPlan', JSON.stringify({

@@ -172,6 +172,11 @@ export async function runGtfsImport(dryRun: boolean) {
           frequencyMinutes: 5,
           hasFixedStops: true,
           isActive: true,
+          dataSource: "gtfs",
+          sourcePriority: 30,
+          confidenceScore: 0.92,
+          routeStatus: "active",
+          verifiedAt: new Date(),
         });
         for (const st of stations) {
           if (stationNames.has(st.name.toLowerCase())) continue;
@@ -257,6 +262,12 @@ export async function runGtfsImport(dryRun: boolean) {
               frequencyMinutes: map.freq,
               hasFixedStops: false,
               isActive: true,
+              dataSource: "gtfs",
+              sourcePriority: 30,
+              confidenceScore: 0.88,
+              routeStatus: "active",
+              verifiedAt: new Date(),
+              needsReviewReason: null,
               updatedAt: new Date(),
             })
             .where(eq(transitLinesTable.id, match.id));
@@ -282,6 +293,11 @@ export async function runGtfsImport(dryRun: boolean) {
             frequencyMinutes: map.freq,
             hasFixedStops: false,
             isActive: true,
+            dataSource: "gtfs",
+            sourcePriority: 30,
+            confidenceScore: 0.88,
+            routeStatus: "active",
+            verifiedAt: new Date(),
           });
         }
         summary.buses.inserted++;

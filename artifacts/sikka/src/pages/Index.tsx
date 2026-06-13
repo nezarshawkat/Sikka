@@ -28,6 +28,7 @@ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc2
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
 const FLIGHT_CITY_IDS = new Set(['cairo', 'alexandria', 'luxor', 'aswan', 'hurghada', 'sharm']);
 const NILE_CITY_IDS = new Set(['cairo', 'giza', 'luxor', 'aswan']);
+const PENDING_FEEDBACK_KEY = 'sikkaPendingTripFeedback';
 
 const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
 
@@ -44,7 +45,7 @@ const reverseGeocode = async (lat: number, lng: number, language: string): Promi
 };
 
 interface ActiveTripPlan extends GuidePlan {
-  segments: (GuideSegment & { route_geometry?: [number, number][] | null; line_id?: string | null })[];
+  segments: (GuideSegment & { route_geometry?: [number, number][] | null; line_id?: string | null; line_number?: string | null })[];
   startLat: number; startLng: number; destLat: number; destLng: number;
   destination: string;
 }
@@ -125,7 +126,9 @@ const Index = () => {
         const plan = JSON.parse(stored);
         if (plan?.segments?.length) {
           setActiveTrip(plan);
-          setCurrentSegIdx(0);
+          const pending = sessionStorage.getItem(PENDING_FEEDBACK_KEY);
+          const pendingIndex = pending ? Number(JSON.parse(pending).segmentIndex) : 0;
+          setCurrentSegIdx(Number.isFinite(pendingIndex) ? pendingIndex : 0);
         }
       } catch {}
     }
@@ -227,6 +230,7 @@ const Index = () => {
   const clearTrip = () => {
     sessionStorage.removeItem('activeTrip');
     sessionStorage.removeItem('tripPlan');
+    sessionStorage.removeItem(PENDING_FEEDBACK_KEY);
     setActiveTrip(null);
     setCurrentSegIdx(0);
     setExpanded(false);
@@ -274,16 +278,48 @@ const Index = () => {
   };
   const handleBack = () => setCurrentSegIdx((i) => Math.max(i - 1, 0));
 
-  const openSegmentReview = () => {
+  const openSegmentReview = (segmentIndex = currentSegIdx) => {
     if (!activeTrip) return;
-    const seg = activeTrip.segments[currentSegIdx];
-    setReviewSeg({ transport_type_id: seg.transport_type_id, transport_name: seg.transport_name });
+    const seg = activeTrip.segments[segmentIndex];
+    if (!seg) return;
+    setReviewSeg({
+      transport_type_id: seg.transport_type_id,
+      transport_name: seg.transport_name,
+      line_id: seg.line_id ?? null,
+      line_number: seg.line_number ?? null,
+    });
     setReviewOpen(true);
   };
+
+  useEffect(() => {
+    if (!activeTrip || reviewOpen || busUsedOpen || tripReviewOpen) return;
+    const pending = sessionStorage.getItem(PENDING_FEEDBACK_KEY);
+    if (!pending) return;
+    try {
+      const parsed = JSON.parse(pending) as { type?: string; segmentIndex?: number };
+      const segmentIndex = Number(parsed.segmentIndex);
+      const seg = activeTrip.segments[Number.isFinite(segmentIndex) ? segmentIndex : currentSegIdx];
+      if (Number.isFinite(segmentIndex)) setCurrentSegIdx(segmentIndex);
+      if (parsed.type === 'bus') {
+        setBusUsedName(seg?.transport_name);
+        setBusUsedFrom(seg?.start_name);
+        setBusUsedTo(seg?.end_name);
+        setBusUsedOpen(true);
+      } else if (parsed.type === 'segment') {
+        openSegmentReview(Number.isFinite(segmentIndex) ? segmentIndex : currentSegIdx);
+      } else if (parsed.type === 'trip') {
+        setTripReviewOpen(true);
+      }
+    } catch {}
+  }, [activeTrip, busUsedOpen, currentSegIdx, reviewOpen, tripReviewOpen]);
 
   const handleDone = () => {
     if (!activeTrip) return;
     const seg = activeTrip.segments[currentSegIdx];
+    sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({
+      type: seg.icon === 'bus' ? 'bus' : 'segment',
+      segmentIndex: currentSegIdx,
+    }));
     // #6 — after finishing a bus leg, ask which bus number + operator was used.
     if (seg.icon === 'bus') {
       setBusUsedName(seg.transport_name);
@@ -369,8 +405,10 @@ const Index = () => {
   const handleSegmentReviewDone = () => {
     if (!activeTrip) return;
     if (currentSegIdx >= activeTrip.segments.length - 1) {
+      sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({ type: 'trip', segmentIndex: currentSegIdx }));
       setTripReviewOpen(true);
     } else {
+      sessionStorage.removeItem(PENDING_FEEDBACK_KEY);
       setCurrentSegIdx((i) => i + 1);
     }
   };
@@ -646,6 +684,13 @@ const Index = () => {
         open={reportOpen}
         onClose={() => setReportOpen(false)}
         transportTypeId={activeTrip?.segments[currentSegIdx]?.transport_type_id}
+        transitLineId={activeTrip?.segments[currentSegIdx]?.line_id ?? undefined}
+        segments={activeTrip?.segments.map((seg, index) => ({
+          index,
+          label: `${seg.line_number ? `${seg.line_number} · ` : ''}${seg.transport_name}: ${seg.start_name} → ${seg.end_name}`,
+          transportTypeId: seg.transport_type_id,
+          transitLineId: seg.line_id ?? null,
+        })) ?? []}
         language={language}
       />
 
@@ -662,7 +707,10 @@ const Index = () => {
       <BusUsedDialog
         open={busUsedOpen}
         onClose={() => setBusUsedOpen(false)}
-        onDone={openSegmentReview}
+        onDone={() => {
+          sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({ type: 'segment', segmentIndex: currentSegIdx }));
+          openSegmentReview();
+        }}
         transportName={busUsedName}
         fromArea={busUsedFrom}
         toArea={busUsedTo}
