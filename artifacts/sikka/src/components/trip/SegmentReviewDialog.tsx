@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { api } from '@/lib/api';
+import { submitOrQueue } from '@/lib/offlineQueue';
 import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import { toast } from 'sonner';
@@ -83,8 +83,9 @@ export default function SegmentReviewDialog({
     setSubmitting(true);
     try {
       const rating = face + 1;
+      let queued = false;
       if (tripLevel) {
-        await api.post('/reviews', {
+        ({ queued } = await submitOrQueue('review', '/reviews', {
           reviewType: 'trip',
           transportTypeId: null,
           tripSegmentId: null,
@@ -93,9 +94,9 @@ export default function SegmentReviewDialog({
           rating,
           comment: comment || null,
           meta: { appRating, navigationRating: navRating, accuracyRating: accRating },
-        });
+        }));
       } else {
-        await api.post('/reviews', {
+        ({ queued } = await submitOrQueue('review', '/reviews', {
           reviewType: 'segment',
           transportTypeId: resolveTransportTypeId(),
           tripSegmentId: null,
@@ -110,9 +111,9 @@ export default function SegmentReviewDialog({
             transportName: segment?.transport_name ?? null,
             transportSlug: segment?.transport_type_id ?? null,
           },
-        });
+        }));
       }
-      toast.success(t('reviewThanks', language));
+      toast.success(queued ? t('queuedOffline', language) : t('reviewThanks', language));
       reset();
       onSubmitted?.();
       onClose();

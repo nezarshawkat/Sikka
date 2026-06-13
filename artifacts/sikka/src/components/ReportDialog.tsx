@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { api } from '@/lib/api';
+import { submitOrQueue } from '@/lib/offlineQueue';
 import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import { toast } from 'sonner';
@@ -85,7 +85,7 @@ export default function ReportDialog({
       const selectedSegment = segmentValue === 'trip'
         ? null
         : segments.find((seg) => String(seg.index) === segmentValue) ?? null;
-      await api.post('/reports', {
+      const { queued } = await submitOrQueue('report', '/reports', {
         reportType,
         description: description || null,
         routeLabel: selectedSegment?.label ?? t('reportWholeTrip', language),
@@ -99,7 +99,7 @@ export default function ReportDialog({
         latitude: loc?.latitude ?? null,
         longitude: loc?.longitude ?? null,
       });
-      toast.success(t('reportSubmitted', language));
+      toast.success(queued ? t('queuedOffline', language) : t('reportSubmitted', language));
       reset();
       onClose();
     } catch (err) {

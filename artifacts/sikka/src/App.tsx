@@ -30,6 +30,7 @@ import AdminDiscovery from "./pages/admin/AdminDiscovery";
 import AdminAnalytics from "./pages/admin/AdminAnalytics";
 import AdminMap from "./pages/admin/AdminMap";
 import NotFound from "./pages/NotFound";
+import { initOfflineSync } from "@/lib/offlineQueue";
 import "./mobile-shell.css";
 
 const queryClient = new QueryClient();
@@ -129,6 +130,10 @@ function MapLibreRtlPluginLoader() {
 
 function AppRoutes() {
   const navigate = useNavigate();
+
+  // Flush queued offline submissions (reports/reviews/confirmations/discovery)
+  // on startup and whenever connectivity returns.
+  useEffect(() => { initOfflineSync(); }, []);
 
   return (
     <ClerkProvider

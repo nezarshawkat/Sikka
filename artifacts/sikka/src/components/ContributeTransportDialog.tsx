@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
+import { submitOrQueue } from '@/lib/offlineQueue';
 import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import { toast } from 'sonner';
@@ -121,16 +122,19 @@ export default function ContributeTransportDialog({
           const name = operator === 'bus' ? (busOperator === 'cta' ? 'CTA Bus' : 'NTA Bus') : OPERATOR_TYPE_NAME[operator];
           return tt.nameEn.toLowerCase() === name.toLowerCase() || tt.nameEn.toLowerCase() === OPERATOR_TYPE_NAME[operator].toLowerCase();
         })?.id ?? null;
-      await api.post('/transport-reports', {
+      const gpsTrace = (initialTrace?.length ? initialTrace : trace).length ? (initialTrace?.length ? initialTrace : trace) : null;
+      const { queued } = await submitOrQueue('discovery_trace', '/transport-reports', {
         transportName: operator === 'microbus' ? 'Microbus' : (busOperator === 'cta' ? 'CTA Bus' : 'NTA Bus'),
         transportNumber: transportNumber || null,
         transportTypeId,
         fromArea: fromArea || null,
         toArea: toArea || null,
         priceEgp: Number.isFinite(priceNum) && price !== '' ? priceNum : null,
-        gpsTrace: (initialTrace?.length ? initialTrace : trace).length ? (initialTrace?.length ? initialTrace : trace) : null,
+        gpsTrace,
+        mode: operator === 'microbus' ? 'microbus' : 'bus',
+        routeCoverage: gpsTrace && gpsTrace.length > 1 ? 'full' : 'partial',
       });
-      toast.success(t('contributeSubmitted', language));
+      toast.success(queued ? t('queuedOffline', language) : t('contributeSubmitted', language));
       reset();
       onSubmitted?.();
       onClose();

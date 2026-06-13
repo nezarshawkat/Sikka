@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { db, transportTypesTable, transitLinesTable } from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
+import { deriveRouteQuality } from "../engine/routeQuality";
 
 const router = Router();
-const SNAPSHOT_VERSION = 2;
+// v3 adds route-quality metadata (dataSource/sourcePriority/confidenceScore/
+// routeStatus/...) and the manifest+delta sync model.
+const SNAPSHOT_VERSION = 3;
 const MAX_ROUTE_POINTS = 120;
-const PATH_SUSPECT_STEP_KM = 0.5;
 
 function roundCoord(value: number): number {
   return Math.round(value * 100000) / 100000;
@@ -26,29 +28,6 @@ function compactPath(path: [number, number][] | null | undefined): [number, numb
   return out.length >= 2 ? out : null;
 }
 
-function haversineKm(a: [number, number], b: [number, number]): number {
-  const r = 6371;
-  const dLat = ((b[1] - a[1]) * Math.PI) / 180;
-  const dLng = ((b[0] - a[0]) * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2
-    + Math.cos((a[1] * Math.PI) / 180) * Math.cos((b[1] * Math.PI) / 180)
-    * Math.sin(dLng / 2) ** 2;
-  return r * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-function maxConsecutiveStepKm(path: [number, number][] | null | undefined): number {
-  if (!path || path.length < 2) return 0;
-  let max = 0;
-  for (let i = 1; i < path.length; i++) max = Math.max(max, haversineKm(path[i - 1], path[i]));
-  return max;
-}
-
-function routeQuality(path: [number, number][] | null | undefined, hasFixedStops: boolean): "gtfs" | "standard" | "suspect" {
-  if (!path || path.length < 2) return "suspect";
-  if (maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM) return "suspect";
-  return hasFixedStops || path.length >= 50 ? "gtfs" : "standard";
-}
-
 function stampOf(value: unknown): number {
   if (value instanceof Date) return value.getTime();
   if (typeof value === "string") {
@@ -58,15 +37,20 @@ function stampOf(value: unknown): number {
   return 0;
 }
 
-// Public route-data snapshot for the mobile on-device planner. This contains no
-// secrets and no user data: only active transport types and active line geometry.
-router.get("/snapshot", async (_req, res) => {
-  const [typeRows, lineRows] = await Promise.all([
-    db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true)).orderBy(asc(transportTypesTable.nameEn)),
-    db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true)).orderBy(asc(transitLinesTable.lineNumber)),
-  ]);
+type LineRow = typeof transitLinesTable.$inferSelect;
+type TypeRow = typeof transportTypesTable.$inferSelect;
 
-  const types = typeRows.map((t) => ({
+// A route is publishable to devices when it is active OR explicitly flagged
+// needs_review (still shown, but ranked lower with a trust badge). Inactive /
+// pending_discovery routes never reach the rider planner.
+function isPublishable(line: LineRow): boolean {
+  if (!line.isActive) return false;
+  const status = line.routeStatus ?? "active";
+  return status === "active" || status === "needs_review";
+}
+
+function toSnapshotType(t: TypeRow) {
+  return {
     id: t.id,
     nameEn: t.nameEn,
     nameAr: t.nameAr,
@@ -77,47 +61,152 @@ router.get("/snapshot", async (_req, res) => {
     averageSpeedKmh: t.averageSpeedKmh,
     basePriceEgp: t.basePriceEgp,
     pricePerKmEgp: t.pricePerKmEgp,
-  }));
+  };
+}
 
-  const lines = lineRows
-    .map((l) => {
-      const path = l.routePath?.coordinates ?? null;
-      return {
-        id: l.id,
-        transportTypeId: l.transportTypeId,
-        lineNumber: l.lineNumber,
-        nameEn: l.nameEn,
-        nameAr: l.nameAr,
-        fromArea: l.fromArea,
-        toArea: l.toArea,
-        governorate: l.governorate,
-        viaStops: l.viaStops ?? [],
-        stops: l.stops ?? null,
-        path: compactPath(path),
-        pathPointCount: path?.length ?? 0,
-        pathSuspect: maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM,
-        routeQuality: routeQuality(path, l.hasFixedStops),
-        priceEgp: l.priceEgp,
-        frequencyMinutes: l.frequencyMinutes,
-        hasFixedStops: l.hasFixedStops,
-        updatedAt: l.updatedAt,
-      };
-    })
-    .filter((l) => l.path && l.path.length >= 2);
+function toSnapshotLine(l: LineRow) {
+  const path = l.routePath?.coordinates ?? null;
+  const quality = deriveRouteQuality({
+    dataSource: l.dataSource,
+    routeStatus: l.routeStatus,
+    confidenceScore: l.confidenceScore,
+    reviewReportCount: l.reviewReportCount,
+    verifiedAt: l.verifiedAt,
+    lastConfirmedAt: l.lastConfirmedAt,
+    hasFixedStops: l.hasFixedStops,
+    lineNumber: l.lineNumber,
+    path,
+    pathPointCount: path?.length ?? 0,
+  });
+  return {
+    id: l.id,
+    transportTypeId: l.transportTypeId,
+    lineNumber: l.lineNumber,
+    nameEn: l.nameEn,
+    nameAr: l.nameAr,
+    fromArea: l.fromArea,
+    toArea: l.toArea,
+    governorate: l.governorate,
+    viaStops: l.viaStops ?? [],
+    stops: l.stops ?? null,
+    path: compactPath(path),
+    pathPointCount: path?.length ?? 0,
+    priceEgp: l.priceEgp,
+    frequencyMinutes: l.frequencyMinutes,
+    hasFixedStops: l.hasFixedStops,
+    // Route-quality metadata consumed by the on-device planner scoring.
+    dataSource: quality.dataSource,
+    sourcePriority: quality.sourcePriority,
+    confidenceScore: quality.confidenceScore,
+    routeStatus: quality.routeStatus,
+    pathSuspect: quality.pathSuspect,
+    verifiedAt: quality.verifiedAt,
+    lastConfirmedAt: quality.lastConfirmedAt,
+    reviewReportCount: quality.reviewReportCount,
+    qualityAgeDays: quality.ageDays,
+    updatedAt: l.updatedAt,
+    revision: stampOf(l.updatedAt),
+  };
+}
 
+function revisionOf(typeRows: TypeRow[], lineRows: LineRow[]): { revision: string; newest: number } {
   const newest = Math.max(
     0,
     ...typeRows.map((t) => stampOf(t.createdAt)),
     ...lineRows.map((l) => stampOf(l.updatedAt)),
   );
+  return { revision: `${SNAPSHOT_VERSION}-${newest}`, newest };
+}
+
+async function loadRows(): Promise<{ typeRows: TypeRow[]; lineRows: LineRow[] }> {
+  const [typeRows, lineRows] = await Promise.all([
+    db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true)).orderBy(asc(transportTypesTable.nameEn)),
+    db.select().from(transitLinesTable).orderBy(asc(transitLinesTable.lineNumber)),
+  ]);
+  return { typeRows, lineRows };
+}
+
+// Full route-data snapshot for the mobile on-device planner. Contains no secrets
+// and no user data: only active transport types and publishable line geometry +
+// route-quality metadata. Kept for back-compat with installed clients.
+router.get("/snapshot", async (_req, res) => {
+  const { typeRows, lineRows } = await loadRows();
+  const types = typeRows.map(toSnapshotType);
+  const lines = lineRows
+    .filter(isPublishable)
+    .map(toSnapshotLine)
+    .filter((l) => l.path && l.path.length >= 2);
+  const { revision } = revisionOf(typeRows, lineRows);
 
   res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=86400");
   res.json({
     schemaVersion: SNAPSHOT_VERSION,
     generatedAt: new Date().toISOString(),
-    revision: `${SNAPSHOT_VERSION}-${newest}-${types.length}-${lines.length}`,
+    revision,
     types,
     lines,
+  });
+});
+
+// Lightweight manifest: revision + transport types (small, always sent) + a
+// per-line revision index so a device can decide exactly which lines changed and
+// request only those via /delta. No geometry is included here.
+router.get("/manifest", async (_req, res) => {
+  const { typeRows, lineRows } = await loadRows();
+  const types = typeRows.map(toSnapshotType);
+  const publishable = lineRows.filter(isPublishable);
+  const { revision, newest } = revisionOf(typeRows, lineRows);
+
+  res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=86400");
+  res.json({
+    schemaVersion: SNAPSHOT_VERSION,
+    generatedAt: new Date().toISOString(),
+    revision,
+    newestRevision: newest,
+    typeCount: types.length,
+    lineCount: publishable.length,
+    types,
+    // Index used for delta planning: [lineId, lineRevision] for every publishable line.
+    lineIndex: publishable.map((l) => [l.id, stampOf(l.updatedAt)] as [string, number]),
+  });
+});
+
+// Delta sync: returns lines changed since the supplied revision plus the ids of
+// lines that should be removed locally (deactivated or no longer publishable).
+// `sinceRevision` accepts a raw millisecond timestamp or a `${version}-${ms}`
+// revision string. A device with no/older schema gets a full payload.
+router.get("/delta", async (req, res) => {
+  const raw = String(req.query.sinceRevision ?? "").trim();
+  const parsedMs = raw.includes("-") ? Number(raw.split("-").slice(-1)[0]) : Number(raw);
+  const sinceVersion = raw.includes("-") ? Number(raw.split("-")[0]) : SNAPSHOT_VERSION;
+  // Force a full resync when the schema version changed or the marker is unusable.
+  const since = sinceVersion === SNAPSHOT_VERSION && Number.isFinite(parsedMs) ? parsedMs : 0;
+
+  const { typeRows, lineRows } = await loadRows();
+  const types = typeRows.map(toSnapshotType);
+  const { revision, newest } = revisionOf(typeRows, lineRows);
+
+  const changedLines = lineRows
+    .filter(isPublishable)
+    .filter((l) => stampOf(l.updatedAt) > since)
+    .map(toSnapshotLine)
+    .filter((l) => l.path && l.path.length >= 2);
+
+  const removedLineIds = lineRows
+    .filter((l) => !isPublishable(l) && stampOf(l.updatedAt) > since)
+    .map((l) => l.id);
+
+  res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=86400");
+  res.json({
+    schemaVersion: SNAPSHOT_VERSION,
+    generatedAt: new Date().toISOString(),
+    revision,
+    newestRevision: newest,
+    since,
+    full: since === 0,
+    types,
+    changedLines,
+    removedLineIds,
   });
 });
 

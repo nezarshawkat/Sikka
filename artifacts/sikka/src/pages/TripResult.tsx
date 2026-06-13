@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight, ChevronLeft, ShieldAlert, Footprints } from 'lucide-react';
 import { toast } from 'sonner';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -20,7 +20,10 @@ interface Segment {
   alternatives: Alternative[];
   line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[];
   route_geometry?: [number, number][] | null;
+  route_status?: 'active' | 'needs_review' | 'inactive' | 'pending_discovery' | null;
+  data_source?: string | null;
 }
+interface RouteCardLabel { key: string; en: string; ar: string; color: string; }
 interface Alternative {
   transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number; color: string; icon: string; line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[]; route_geometry?: [number, number][] | null;
 }
@@ -28,6 +31,8 @@ interface TripPlanData {
   segments: Segment[]; total_cost_egp: number; total_duration_minutes: number;
   budget_range: { min: number; max: number }; distance_km: number; destination: string;
   tripType: string; startLat: number; startLng: number; destLat: number; destLng: number;
+  card?: RouteCardLabel; transfers?: number; total_walk_km?: number;
+  quality_score?: number; needs_review?: boolean;
 }
 
 const ICONS: Record<string, string> = {
@@ -37,6 +42,9 @@ const ICONS: Record<string, string> = {
 const TripResult = () => {
   const navigate = useNavigate();
   const { language } = useAuth();
+  const isArabic = language === 'ar';
+  const [plans, setPlans] = useState<TripPlanData[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [plan, setPlan] = useState<TripPlanData | null>(null);
   const [swapIndex, setSwapIndex] = useState<number | null>(null);
   const [showMap, setShowMap] = useState(true);
@@ -51,10 +59,37 @@ const TripResult = () => {
   const isDark = useIsDark();
 
   useEffect(() => {
+    const storedPlans = sessionStorage.getItem('tripPlans');
+    if (storedPlans) {
+      const parsed = JSON.parse(storedPlans) as TripPlanData[];
+      if (Array.isArray(parsed) && parsed.length) {
+        setPlans(parsed);
+        setActiveIndex(0);
+        setPlan(parsed[0]);
+        return;
+      }
+    }
     const stored = sessionStorage.getItem('tripPlan');
-    if (stored) setPlan(JSON.parse(stored));
-    else navigate('/');
+    if (stored) {
+      const single = JSON.parse(stored) as TripPlanData;
+      setPlans([single]);
+      setPlan(single);
+    } else navigate('/');
   }, [navigate]);
+
+  // Switch the visible route card (swipe / arrow). Resets tracking and route
+  // geometry so the map redraws for the selected option.
+  const selectCard = useCallback((idx: number) => {
+    setPlans((curr) => {
+      if (idx < 0 || idx >= curr.length) return curr;
+      setActiveIndex(idx);
+      setPlan(curr[idx]);
+      setCurrentSegIndex(0);
+      setPopupSegIndex(null);
+      sessionStorage.setItem('tripPlan', JSON.stringify(curr[idx]));
+      return curr;
+    });
+  }, []);
 
   // Render the route geometry supplied by the backend directly — no client-side
   // road snapping. Segments without geometry fall back to a straight line.
@@ -142,6 +177,11 @@ const TripResult = () => {
     const newTime = newSegments.reduce((s, seg) => s + seg.duration_minutes, 0);
     const updated = { ...plan, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime };
     setPlan(updated);
+    setPlans((curr) => {
+      const next = curr.map((p, i) => (i === activeIndex ? updated : p));
+      sessionStorage.setItem('tripPlans', JSON.stringify(next));
+      return next;
+    });
     sessionStorage.setItem('tripPlan', JSON.stringify(updated));
     setRouteCoords((prev) => prev.map((r) => r.segIndex === segIndex && alt.route_geometry?.length ? { ...r, coords: alt.route_geometry! } : r));
     setSwapIndex(null);
@@ -188,6 +228,57 @@ const TripResult = () => {
           <p className="text-xs text-muted-foreground truncate">{plan.destination}</p>
         </div>
       </div>
+
+      {/* Swipeable route-option cards (Recommended / Cheapest / Fastest / Fewest) */}
+      {plans.length > 1 && !isTracking && (
+        <div className="relative border-b bg-background/60">
+          <div className="flex gap-2 overflow-x-auto px-3 py-3 snap-x snap-mandatory scrollbar-none">
+            {plans.map((p, idx) => {
+              const active = idx === activeIndex;
+              const label = p.card ? (isArabic ? p.card.ar : p.card.en) : `Option ${idx + 1}`;
+              const accent = p.card?.color || '#3B82F6';
+              return (
+                <button
+                  key={p.card?.key || idx}
+                  onClick={() => selectCard(idx)}
+                  className={`snap-center shrink-0 w-44 text-start rounded-2xl border p-3 transition-all ${active ? 'ring-2 shadow-md' : 'opacity-70 hover:opacity-100'}`}
+                  style={{ borderColor: accent, ...(active ? { boxShadow: `0 0 0 2px ${accent}` } : {}) }}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: accent }}>{label}</span>
+                    {p.needs_review && <ShieldAlert className="h-3.5 w-3.5 text-amber-500" />}
+                  </div>
+                  <div className="mt-2 flex items-center gap-3 text-xs text-foreground">
+                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{Math.round(p.total_duration_minutes)}m</span>
+                    <span className="flex items-center gap-1"><Wallet className="h-3 w-3" />{Math.round(p.total_cost_egp)}</span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-3 text-[11px] text-muted-foreground">
+                    <span className="flex items-center gap-1"><RefreshCw className="h-3 w-3" />{p.transfers ?? Math.max(0, p.segments.filter(s => s.line_id).length - 1)}</span>
+                    {typeof p.total_walk_km === 'number' && <span className="flex items-center gap-1"><Footprints className="h-3 w-3" />{p.total_walk_km.toFixed(1)}km</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between px-3 pb-2 -mt-1">
+            <button onClick={() => selectCard(activeIndex - 1)} disabled={activeIndex === 0} className="p-1 disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
+            <div className="flex gap-1">
+              {plans.map((_, idx) => (
+                <span key={idx} className={`h-1.5 rounded-full transition-all ${idx === activeIndex ? 'w-4 bg-primary' : 'w-1.5 bg-muted-foreground/40'}`} />
+              ))}
+            </div>
+            <button onClick={() => selectCard(activeIndex + 1)} disabled={activeIndex === plans.length - 1} className="p-1 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
+          </div>
+        </div>
+      )}
+
+      {/* needs_review trust badge for the active plan */}
+      {plan.needs_review && (
+        <div className="flex items-center gap-2 px-4 py-2 text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-b border-amber-500/20">
+          <ShieldAlert className="h-4 w-4 shrink-0" />
+          <span>{isArabic ? 'هذا المسار يحتوي على خط قيد المراجعة — تأكد قبل الركوب.' : 'This route includes a line under review — confirm before boarding.'}</span>
+        </div>
+      )}
 
       {/* Sticky tracking notification with Next/Check buttons */}
       {isTracking && currentSeg && (

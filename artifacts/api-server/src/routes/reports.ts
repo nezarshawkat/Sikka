@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { reportsTable } from "@workspace/db";
-import { eq, desc, and, type SQL } from "drizzle-orm";
+import { reportsTable, transitLinesTable } from "@workspace/db";
+import { eq, desc, and, sql, type SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
+import { NEEDS_REVIEW_REPORT_THRESHOLD, SERIOUS_REPORT_TYPES } from "../engine/routeQuality";
 
 const router = Router();
 
@@ -69,6 +70,23 @@ router.post("/", requireAuth, async (req, res) => {
     longitude: Number.isFinite(lng) ? lng : null,
     status: "open",
   }).returning();
+
+  // Serious reports against a known route bump its review counter and, once the
+  // threshold is crossed, flag the route needs_review so the on-device planner
+  // ranks it lower (it stays published with a trust badge — never deleted).
+  if (resolvedTransitLineId && SERIOUS_REPORT_TYPES.has(reportType)) {
+    const reason = `Auto-flagged after repeated reports (latest: ${reportType})`;
+    await db
+      .update(transitLinesTable)
+      .set({
+        reviewReportCount: sql`${transitLinesTable.reviewReportCount} + 1`,
+        routeStatus: sql`CASE WHEN ${transitLinesTable.reviewReportCount} + 1 >= ${NEEDS_REVIEW_REPORT_THRESHOLD} AND ${transitLinesTable.routeStatus} = 'active' THEN 'needs_review' ELSE ${transitLinesTable.routeStatus} END`,
+        needsReviewReason: sql`CASE WHEN ${transitLinesTable.reviewReportCount} + 1 >= ${NEEDS_REVIEW_REPORT_THRESHOLD} AND ${transitLinesTable.routeStatus} = 'active' THEN ${reason} ELSE ${transitLinesTable.needsReviewReason} END`,
+        updatedAt: new Date(),
+      })
+      .where(eq(transitLinesTable.id, resolvedTransitLineId));
+  }
+
   return res.json(row);
 });
 
