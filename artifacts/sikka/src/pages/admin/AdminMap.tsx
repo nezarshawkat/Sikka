@@ -188,6 +188,9 @@ const AdminMap = () => {
   }, [geocodeStop]);
 
   const filteredLines = useMemo(() => {
+    // If no transportation type selected, return empty array (don't show routes)
+    if (activeTypeId === 'all') return [];
+
     return transitLines.filter(line => {
       const typeMatch = activeTypeId === 'all' || line.transportTypeId === activeTypeId;
       const govMatch = activeGovernorate === 'all' || (line.governorate || '').toLowerCase() === activeGovernorate;
@@ -561,16 +564,7 @@ const AdminMap = () => {
             </Marker>
           ))}
 
-          {mawaqef.map(station => (
-            <Marker key={station.id} latitude={station.latitude} longitude={station.longitude}>
-              <button
-                onClick={e => { e.stopPropagation(); setViewState(v => ({ ...v, latitude: station.latitude, longitude: station.longitude, zoom: 13 })); }}
-                className="h-2.5 w-2.5 rounded-full bg-primary border-2 border-background shadow"
-                title={station.nameEn || station.nameAr || 'Station'}
-                aria-label={station.nameEn || station.nameAr || 'Station'}
-              />
-            </Marker>
-          ))}
+          {/* Terminal blue dots removed - only show stops for selected lines */}
 
           {visibleLines.map((line, idx) => {
             const coords = getLineGeometry(line)?.coordinates;

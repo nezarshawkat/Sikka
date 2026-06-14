@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Clock, Wallet, MapPin, RefreshCw, Check, Navigation, X, Info, ChevronRight, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Clock, Wallet, MapPin, Check, Navigation, X, Info, ChevronRight, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -54,7 +54,6 @@ const TripResult = () => {
   const { language } = useAuth();
   const [plan, setPlan] = useState<TripPlanData | null>(null);
   const [activeOptionIndex, setActiveOptionIndex] = useState(0);
-  const [swapIndex, setSwapIndex] = useState<number | null>(null);
   const [showMap, setShowMap] = useState(true);
   const [isTracking, setIsTracking] = useState(false);
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
@@ -139,35 +138,6 @@ const TripResult = () => {
   const stopTracking = () => {
     setIsTracking(false);
     if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current);
-  };
-
-  const handleSwap = (segIndex: number, alt: Alternative) => {
-    if (!plan) return;
-    const newSegments = [...plan.segments];
-    const oldSeg = newSegments[segIndex];
-    newSegments[segIndex] = {
-      ...oldSeg,
-      transport_type_id: alt.transport_type_id,
-      transport_name: alt.transport_name,
-      cost_egp: alt.cost_egp,
-      duration_minutes: alt.duration_minutes,
-      color: alt.color,
-      icon: alt.icon,
-      line_id: alt.line_id ?? null,
-      line_number: alt.line_number || '',
-      info: alt.info ?? oldSeg.info,
-      instructions: alt.instructions ?? oldSeg.instructions,
-      route_geometry: alt.route_geometry && alt.route_geometry.length >= 2 ? alt.route_geometry : oldSeg.route_geometry,
-    };
-    const newTotal = newSegments.reduce((s, seg) => s + seg.cost_egp, 0);
-    const newTime = newSegments.reduce((s, seg) => s + seg.duration_minutes, 0);
-    const updated = { ...plan, segments: newSegments, total_cost_egp: newTotal, total_duration_minutes: newTime };
-    setPlan(updated);
-    sessionStorage.setItem('tripPlan', JSON.stringify(updated));
-    setRouteCoords((prev) => prev.map((r) => r.segIndex === segIndex && alt.route_geometry?.length ? { ...r, coords: alt.route_geometry! } : r));
-    setSwapIndex(null);
-    setPopupSegIndex(segIndex);
-    toast.success(t('planUpdated', language));
   };
 
   const handleSelectOption = (option: RouteOption, index: number) => {
@@ -374,42 +344,43 @@ const TripResult = () => {
             {routeOptions.map((option, index) => {
               const selected = index === activeOptionIndex || option.route_variant === plan.route_variant;
               const color = OPTION_COLORS[option.route_variant || 'recommended'] || '#2563EB';
+              const bgGradient = selected ? `linear-gradient(135deg, ${color}15, ${color}08)` : 'transparent';
               const transfers = Math.max(0, option.segments.filter((seg) => seg.line_id).length - 1);
               const taxiHeavy = option.segments.some((seg) => seg.icon === 'car' || /taxi|uber|careem/i.test(seg.transport_name));
               return (
                 <button
                   key={`${option.route_variant || 'route'}-${index}`}
                   onClick={() => handleSelectOption(option, index)}
-                  className={`min-w-[78%] snap-center rounded-[2rem] border p-4 text-left transition-all ${selected ? 'bg-background shadow-lg' : 'bg-background/50 opacity-80'}`}
-                  style={{ borderColor: selected ? color : 'hsl(var(--border))' }}
+                  className={`min-w-[90%] snap-center rounded-[2rem] border-2 p-6 text-left transition-all transform hover:scale-[1.02] ${selected ? 'shadow-xl' : 'opacity-70 hover:opacity-100'}`}
+                  style={{ borderColor: color, background: bgGradient }}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <Badge className="rounded-full" style={{ backgroundColor: color }}>
+                    <Badge className="rounded-full text-sm px-3 py-1" style={{ backgroundColor: color, color: 'white' }}>
                       {option.route_label || 'Route'}
                     </Badge>
-                    {selected && <Check className="h-4 w-4" style={{ color }} />}
+                    {selected && <Check className="h-5 w-5" style={{ color }} />}
                   </div>
-                  <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{option.route_description}</p>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                    <div className="rounded-2xl bg-muted/50 p-2">
-                      <p className="text-sm font-bold">{Math.round(option.total_cost_egp)}</p>
-                      <p className="text-[10px] text-muted-foreground">EGP</p>
+                  <p className="mt-3 text-sm font-medium text-foreground line-clamp-2">{option.route_description}</p>
+                  <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+                    <div className="rounded-2xl p-3" style={{ backgroundColor: `${color}15` }}>
+                      <p className="text-lg font-bold" style={{ color }}>{Math.round(option.total_cost_egp)}</p>
+                      <p className="text-[11px] text-muted-foreground">EGP</p>
                     </div>
-                    <div className="rounded-2xl bg-muted/50 p-2">
-                      <p className="text-sm font-bold">{Math.round(option.total_duration_minutes)}</p>
-                      <p className="text-[10px] text-muted-foreground">min</p>
+                    <div className="rounded-2xl p-3 bg-blue-500/15">
+                      <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{Math.round(option.total_duration_minutes)}</p>
+                      <p className="text-[11px] text-muted-foreground">min</p>
                     </div>
-                    <div className="rounded-2xl bg-muted/50 p-2">
-                      <p className="text-sm font-bold">{transfers}</p>
-                      <p className="text-[10px] text-muted-foreground">transfers</p>
+                    <div className="rounded-2xl p-3 bg-purple-500/15">
+                      <p className="text-lg font-bold text-purple-600 dark:text-purple-400">{transfers}</p>
+                      <p className="text-[11px] text-muted-foreground">transfers</p>
                     </div>
                   </div>
-                  <div className="mt-3 flex items-center gap-1 overflow-hidden">
+                  <div className="mt-4 flex items-center gap-2 overflow-hidden">
                     {option.segments.map((seg, segIndex) => (
                       <span
                         key={`${seg.transport_type_id}-${segIndex}`}
-                        className="h-7 min-w-7 rounded-full flex items-center justify-center text-xs"
-                        style={{ backgroundColor: `${seg.color}22` }}
+                        className="h-9 min-w-9 rounded-full flex items-center justify-center text-lg border"
+                        style={{ backgroundColor: `${seg.color}30`, borderColor: `${seg.color}60` }}
                       >
                         {getIcon(seg.icon)}
                       </span>
@@ -494,34 +465,9 @@ const TripResult = () => {
                           </p>
                         </div>
                       </div>
-                      {seg.alternatives?.length > 0 && (
-                        <Button variant="ghost" size="sm" onClick={() => setSwapIndex(swapIndex === i ? null : i)} className="gap-1 text-xs shrink-0">
-                          <RefreshCw className="h-3 w-3" /> {t('swap', language)}
-                        </Button>
-                      )}
+                      {/* Swap option removed - users can only swap between full plans */}
                     </div>
-                    <AnimatePresence>
-                      {swapIndex === i && (
-                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                          <div className="mt-3 pt-3 border-t space-y-2">
-                            <p className="text-xs text-muted-foreground font-medium">{t('alternativeOptions', language)}:</p>
-                            {seg.alternatives.map((alt, j) => (
-                              <button key={j} onClick={() => handleSwap(i, alt)}
-                                className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-background/45 hover:bg-accent/20 backdrop-blur transition-colors">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-lg">{getIcon(alt.icon)}</span>
-                                  {alt.line_number && <Badge variant="outline" className="text-[10px] h-4 px-1">{alt.line_number}</Badge>}
-                                  <span className="text-sm">{alt.transport_name}</span>
-                                </div>
-                                <span className="text-xs text-muted-foreground">
-                                  {Math.round(alt.duration_minutes)} {t('minutes', language)} · {Math.round(alt.cost_egp)} {t('egp', language)}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    {/* Alternatives section removed - users can only swap between full plans */}
                   </CardContent>
                 </Card>
               </div>

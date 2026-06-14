@@ -29,6 +29,7 @@ import AdminReports from "./pages/admin/AdminReports";
 import AdminDiscovery from "./pages/admin/AdminDiscovery";
 import AdminAnalytics from "./pages/admin/AdminAnalytics";
 import AdminMap from "./pages/admin/AdminMap";
+import RouteDetail from "./pages/RouteDetail";
 import NotFound from "./pages/NotFound";
 import "./mobile-shell.css";
 
@@ -158,6 +159,7 @@ function AppRoutes() {
           <Route path="/trip-result" element={<TripResult />} />
           <Route path="/intercity" element={<Intercity />} />
           <Route path="/travel/:mode" element={<TravelMode />} />
+          <Route path="/route/:id" element={<RouteDetail />} />
           <Route path="/admin" element={<AdminDashboard />}>
             <Route index element={<AdminMap />} />
             <Route path="map" element={<AdminMap />} />

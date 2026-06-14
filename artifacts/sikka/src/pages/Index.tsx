@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { User, MapPin, Navigation, Square, X } from 'lucide-react';
+import { User, MapPin, Navigation, Square, X, Focus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -23,6 +23,14 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { 
+  saveOfflineTrip, 
+  getOfflineTrip, 
+  clearOfflineTrip, 
+  saveOfflineData, 
+  setupOfflineListeners,
+  isOnline 
+} from '@/lib/offline';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
@@ -129,8 +137,16 @@ const Index = () => {
           const pending = sessionStorage.getItem(PENDING_FEEDBACK_KEY);
           const pendingIndex = pending ? Number(JSON.parse(pending).segmentIndex) : 0;
           setCurrentSegIdx(Number.isFinite(pendingIndex) ? pendingIndex : 0);
+          // Save to offline storage for persistence
+          saveOfflineTrip(plan);
         }
       } catch {}
+    } else {
+      // Try to restore from offline storage if no active session
+      const offlineTrip = getOfflineTrip();
+      if (offlineTrip?.segments?.length) {
+        setActiveTrip(offlineTrip);
+      }
     }
   }, []);
 
@@ -212,6 +228,29 @@ const Index = () => {
     }
   }, [routeCoords, activeTrip]);
 
+  // Setup offline listeners and save trip periodically
+  useEffect(() => {
+    setupOfflineListeners(
+      () => {
+        // On online: try to sync any pending requests
+        toast(t('backOnline', language) || 'Back online');
+      },
+      () => {
+        // On offline: notify user
+        toast(t('noInternet', language) || 'You are offline');
+      }
+    );
+
+    // Save trip data whenever it changes
+    if (activeTrip) {
+      saveOfflineTrip(activeTrip);
+    }
+
+    return () => {
+      // Cleanup not needed as setupOfflineListeners uses addEventListener
+    };
+  }, [activeTrip, language]);
+
   const onApproachSegmentEnd = useCallback((segIdx: number) => {
     if (!activeTrip) return;
     if (segIdx < activeTrip.segments.length - 1) {
@@ -231,6 +270,7 @@ const Index = () => {
     sessionStorage.removeItem('activeTrip');
     sessionStorage.removeItem('tripPlan');
     sessionStorage.removeItem(PENDING_FEEDBACK_KEY);
+    clearOfflineTrip(); // Clear offline trip data
     setActiveTrip(null);
     setCurrentSegIdx(0);
     setExpanded(false);
@@ -541,22 +581,46 @@ const Index = () => {
         </motion.div>
       </div>
 
-      {/* Active trip guide sheet OR location info */}
+      {/* Active trip guide sheet with auto-focus button */}
       {activeTrip ? (
-        <TripGuideSheet
-          plan={activeTrip}
-          currentSegIdx={currentSegIdx}
-          progress={progress}
-          remainingMinutes={remainingMinutes || activeTrip.total_duration_minutes}
-          expanded={expanded}
-          onToggleExpand={() => setExpanded((e) => !e)}
-          onNext={handleNext}
-          onBack={handleBack}
-          onDone={handleDone}
-          onSwap={handleSwap}
-          onReport={() => setReportOpen(true)}
-          language={language}
-        />
+        <>
+          {/* Auto-focus button on bottom right above trip popup */}
+          {userPos && (
+            <motion.div
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              className="absolute bottom-80 right-4 z-20"
+            >
+              <Button
+                size="icon"
+                className="h-14 w-14 rounded-full shadow-xl border border-white/20 glass-panel"
+                onClick={() => {
+                  if (mapRef.current && userPos) {
+                    setViewState(v => ({ ...v, latitude: userPos.lat, longitude: userPos.lng, zoom: 15 }));
+                  }
+                }}
+                title={t('focusOnLocation', language) || 'Focus on my location'}
+              >
+                <Focus className="h-5 w-5" />
+              </Button>
+            </motion.div>
+          )}
+          <TripGuideSheet
+            plan={activeTrip}
+            currentSegIdx={currentSegIdx}
+            progress={progress}
+            remainingMinutes={remainingMinutes || activeTrip.total_duration_minutes}
+            expanded={expanded}
+            onToggleExpand={() => setExpanded((e) => !e)}
+            onNext={handleNext}
+            onBack={handleBack}
+            onDone={handleDone}
+            onSwap={handleSwap}
+            onReport={() => setReportOpen(true)}
+            language={language}
+          />
+        </>
       ) : (
         <div className="absolute bottom-6 left-4 right-4">
           <AnimatePresence mode="wait">
