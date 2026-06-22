@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
@@ -6,8 +6,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Users, ArrowRight, Star, Brain, Route, MapPinned, X, Maximize2 } from 'lucide-react';
-import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
+import { Users, ArrowRight, Star, Brain, Route, MapPinned, Maximize2 } from 'lucide-react';
+import Map, { Source, Layer, type MapRef } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MAP_STYLE_DARK } from '@/hooks/useIsDark';
@@ -25,8 +25,8 @@ interface DiscoveryRow {
   goodGpsCount?: number;
   confidenceScore?: number;
   routeGeometry?: [number, number][] | null;
-  centerLat?: number;
-  centerLng?: number;
+  centerLat?: number | null;
+  centerLng?: number | null;
 }
 
 interface TransportReport {
@@ -40,31 +40,53 @@ interface TransportReport {
     routeCompleteness?: 'full' | 'partial';
     directionConfirmed?: boolean;
     gpsQuality?: 'good' | 'ok' | 'poor';
+    direction?: string | null;
   } | null;
   status: string;
   createdAt: string;
 }
+
+type GeoJSONLine = {
+  type: 'FeatureCollection';
+  features: { type: 'Feature'; geometry: { type: 'LineString'; coordinates: [number, number][] }; properties: Record<string, never> }[];
+};
+
+const lineToGeoJSON = (coords: [number, number][] | null | undefined): GeoJSONLine | null => {
+  if (!coords || coords.length < 2) return null;
+  return {
+    type: 'FeatureCollection',
+    features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }],
+  };
+};
 
 const AdminDiscovery = () => {
   const { language } = useAuth();
   const [discovery, setDiscovery] = useState<DiscoveryRow[]>([]);
   const [pending, setPending] = useState<TransportReport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedDiscovery, setSelectedDiscovery] = useState<DiscoveryRow | null>(null);
   const [showFullMap, setShowFullMap] = useState(false);
   const mapRef = useRef<MapRef | null>(null);
 
   const fetchData = () => {
     setIsLoading(true);
+    setLoadError(null);
     Promise.all([
       api.get<DiscoveryRow[]>('/transport-reports?discovery=true'),
       api.get<TransportReport[]>('/transport-reports?status=pending'),
     ])
       .then(([disc, pend]) => {
-        setDiscovery(disc ?? []);
-        setPending(pend ?? []);
+        setDiscovery(Array.isArray(disc) ? disc : []);
+        setPending(Array.isArray(pend) ? pend : []);
       })
-      .catch((err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to load'))
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : 'Failed to load';
+        setLoadError(message);
+        toast.error(message);
+        setDiscovery([]);
+        setPending([]);
+      })
       .finally(() => setIsLoading(false));
   };
 
@@ -81,16 +103,14 @@ const AdminDiscovery = () => {
     }
   };
 
-  if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;
+  // Single source of truth for the selected cluster's route geometry — used by both
+  // the inline preview map and the full-screen map, so neither ever references an
+  // undefined variable.
+  const routeGeoJSON = useMemo(() => lineToGeoJSON(selectedDiscovery?.routeGeometry), [selectedDiscovery]);
 
-  const routeGeoJSON = selectedDiscovery?.routeGeometry ? {
-    type: 'FeatureCollection' as const,
-    features: [{
-      type: 'Feature' as const,
-      properties: { name: `${selectedDiscovery.transportNumber || selectedDiscovery.transportName}` },
-      geometry: { type: 'LineString' as const, coordinates: selectedDiscovery.routeGeometry },
-    }],
-  } : null;
+  if (isLoading) {
+    return <p className="text-muted-foreground text-sm">Loading discovery data...</p>;
+  }
 
   return (
     <div className="space-y-6">
@@ -128,88 +148,97 @@ const AdminDiscovery = () => {
         </CardContent>
       </Card>
 
+      {loadError && (
+        <Card className="border-destructive/40">
+          <CardContent className="p-4 text-sm text-destructive">
+            Could not load discovery data: {loadError}
+            <Button size="sm" variant="outline" className="ml-3 h-7" onClick={fetchData}>Retry</Button>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-foreground">{t('routeDiscovery', language)}</h3>
-        {discovery.length === 0 && <p className="text-muted-foreground text-sm">{t('noDiscovery', language)}</p>}
-        {discovery.map((d, i) => (
-          <Card key={`${d.transportName}-${d.transportNumber}-${i}`} className="cursor-pointer hover:bg-accent/20 transition-colors">
-            <CardContent 
-              className="p-4 space-y-3"
-              onClick={() => setSelectedDiscovery(d)}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium text-foreground">
-                  {d.transportNumber ? `${d.transportNumber} · ` : ''}{d.transportName}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="gap-1">
-                    <Star className="h-3 w-3 fill-current" />
-                    {(d.confidenceScore ?? 1).toFixed(1)}/5
-                  </Badge>
-                  <Badge variant="secondary" className="gap-1">
-                    <Users className="h-3 w-3" />
-                    {d.reportCount}
-                  </Badge>
+        {discovery.length === 0 && !loadError && <p className="text-muted-foreground text-sm">{t('noDiscovery', language)}</p>}
+        {discovery.map((d, i) => {
+          const isSelected = selectedDiscovery?.transportNumber === d.transportNumber && selectedDiscovery?.transportName === d.transportName;
+          const previewGeoJSON = isSelected ? routeGeoJSON : lineToGeoJSON(d.routeGeometry);
+          return (
+            <Card key={`${d.transportName}-${d.transportNumber}-${i}`} className="cursor-pointer hover:bg-accent/20 transition-colors">
+              <CardContent
+                className="p-4 space-y-3"
+                onClick={() => setSelectedDiscovery((prev) => (isSelected ? null : d))}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-foreground">
+                    {d.transportNumber ? `${d.transportNumber} · ` : ''}{d.transportName}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="gap-1">
+                      <Star className="h-3 w-3 fill-current" />
+                      {(d.confidenceScore ?? 1).toFixed(1)}/5
+                    </Badge>
+                    <Badge variant="secondary" className="gap-1">
+                      <Users className="h-3 w-3" />
+                      {d.reportCount}
+                    </Badge>
+                  </div>
                 </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {d.reportCount} {t('usersReported', language)}
-              </p>
-              {(d.sampleFromArea || d.sampleToArea) && (
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  {d.sampleFromArea || '?'} <ArrowRight className="h-3 w-3" /> {d.sampleToArea || '?'}
-                </p>
-              )}
-              {d.avgPrice != null && (
                 <p className="text-xs text-muted-foreground">
-                  {t('avgPrice', language)}: {Math.round(d.avgPrice)} {t('egp', language)}
+                  {d.reportCount} {t('usersReported', language)}
                 </p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                GPS traces: {d.gpsTraceCount ?? 0} · full: {d.fullTraceCount ?? 0} · good GPS: {d.goodGpsCount ?? 0} · avg points: {Math.round(d.avgGpsPoints ?? 0)}
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                Approve only clusters whose merged trace follows one real route, not merely routes sharing the same streets.
-              </p>
+                {(d.sampleFromArea || d.sampleToArea) && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    {d.sampleFromArea || '?'} <ArrowRight className="h-3 w-3" /> {d.sampleToArea || '?'}
+                  </p>
+                )}
+                {d.avgPrice != null && (
+                  <p className="text-xs text-muted-foreground">
+                    {t('avgPrice', language)}: {Math.round(d.avgPrice)} {t('egp', language)}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  GPS traces: {d.gpsTraceCount ?? 0} · full: {d.fullTraceCount ?? 0} · good GPS: {d.goodGpsCount ?? 0} · avg points: {Math.round(d.avgGpsPoints ?? 0)}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Approve only clusters whose merged trace follows one real route, not merely routes sharing the same streets.
+                </p>
 
-              {/* Route map preview rectangle - shown when selected */}
-              {selectedDiscovery?.transportNumber === d.transportNumber && selectedDiscovery?.transportName === d.transportName && d.routeGeometry && (
-                <div className="relative rounded-2xl overflow-hidden border-2 border-primary/30 mt-3 cursor-pointer group"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowFullMap(true);
-                  }}>
-                  <div className="h-40 w-full bg-background/50 relative">
-                    <Map
-                      initialViewState={{
-                        latitude: d.centerLat || 30.0444,
-                        longitude: d.centerLng || 31.2357,
-                        zoom: 12
-                      }}
-                      mapStyle={MAP_STYLE_DARK}
-                      style={{ width: '100%', height: '100%' }}
-                      attributionControl={false}
-                      interactive={false}
-                    >
-                      {routeGeoJSON && (
-                        <Source id="route" type="geojson" data={routeGeoJSON}>
-                          <Layer id="route-line" type="line" paint={{
+                {/* Small embedded route map preview — shown only when this card is selected */}
+                {isSelected && previewGeoJSON && (
+                  <div
+                    className="relative rounded-2xl overflow-hidden border-2 border-primary/30 mt-3 cursor-pointer group"
+                    onClick={(e) => { e.stopPropagation(); setShowFullMap(true); }}
+                  >
+                    <div className="h-40 w-full bg-background/50 relative">
+                      <Map
+                        initialViewState={{ latitude: d.centerLat ?? 30.0444, longitude: d.centerLng ?? 31.2357, zoom: 12 }}
+                        mapStyle={MAP_STYLE_DARK}
+                        style={{ width: '100%', height: '100%' }}
+                        attributionControl={false}
+                        interactive={false}
+                      >
+                        <Source id={`route-preview-${i}`} type="geojson" data={previewGeoJSON}>
+                          <Layer id={`route-line-preview-${i}`} type="line" paint={{
                             'line-color': '#3B82F6',
                             'line-width': 3,
                             'line-opacity': 0.8,
                           }} />
                         </Source>
-                      )}
-                    </Map>
+                      </Map>
+                    </div>
+                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Maximize2 className="h-6 w-6 text-white" />
+                    </div>
                   </div>
-                  <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <Maximize2 className="h-6 w-6 text-white" />
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+                )}
+                {isSelected && !previewGeoJSON && (
+                  <p className="text-[11px] text-muted-foreground italic">No GPS trace recorded yet for this cluster.</p>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       <div className="space-y-3">
@@ -236,6 +265,12 @@ const AdminDiscovery = () => {
                   <Badge variant={r.discoveryMeta.directionConfirmed ? 'secondary' : 'outline'}>
                     {r.discoveryMeta.directionConfirmed ? 'direction confirmed' : 'direction uncertain'}
                   </Badge>
+                  {r.discoveryMeta.direction && (
+                    <Badge variant="outline" className="gap-1">
+                      <ArrowRight className="h-3 w-3" />
+                      {r.discoveryMeta.direction}
+                    </Badge>
+                  )}
                 </div>
               )}
               <p className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</p>
@@ -254,12 +289,12 @@ const AdminDiscovery = () => {
 
       {/* Full-screen map modal for route preview */}
       {selectedDiscovery && showFullMap && routeGeoJSON && (
-        <Dialog open={true} onOpenChange={(open) => {
-          if (!open) {
-            setShowFullMap(false);
-            setSelectedDiscovery(null);
-          }
-        }}>
+        <Dialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setShowFullMap(false);
+          }}
+        >
           <DialogContent className="max-w-4xl h-[80vh] p-0 gap-0 rounded-[2rem] overflow-hidden">
             <DialogHeader className="p-4 border-b">
               <div className="flex items-center justify-between">
@@ -273,23 +308,21 @@ const AdminDiscovery = () => {
               <Map
                 ref={mapRef}
                 initialViewState={{
-                  latitude: selectedDiscovery.centerLat || 30.0444,
-                  longitude: selectedDiscovery.centerLng || 31.2357,
-                  zoom: 12
+                  latitude: selectedDiscovery.centerLat ?? 30.0444,
+                  longitude: selectedDiscovery.centerLng ?? 31.2357,
+                  zoom: 12,
                 }}
                 mapStyle={MAP_STYLE_DARK}
                 style={{ width: '100%', height: '100%' }}
                 attributionControl={false}
               >
-                {routeGeoJSON && (
-                  <Source id="route-full" type="geojson" data={routeGeoJSON}>
-                    <Layer id="route-line-full" type="line" paint={{
-                      'line-color': '#3B82F6',
-                      'line-width': 4,
-                      'line-opacity': 0.9,
-                    }} />
-                  </Source>
-                )}
+                <Source id="route-full" type="geojson" data={routeGeoJSON}>
+                  <Layer id="route-line-full" type="line" paint={{
+                    'line-color': '#3B82F6',
+                    'line-width': 4,
+                    'line-opacity': 0.9,
+                  }} />
+                </Source>
               </Map>
             </div>
           </DialogContent>

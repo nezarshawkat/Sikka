@@ -140,6 +140,7 @@ async function buildOfflinePayload(sinceRevision?: string) {
         reviewReportCount: l.reviewReportCount ?? 0,
         priceEgp: l.priceEgp,
         frequencyMinutes: l.frequencyMinutes,
+        observedSpeedKmh: l.observedSpeedKmh,
         hasFixedStops: l.hasFixedStops,
         updatedAt: l.updatedAt,
       };

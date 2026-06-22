@@ -36,6 +36,10 @@ type OfflineLine = {
   sourcePriority?: number;
   confidenceScore?: number;
   routeStatus?: RouteStatus;
+  /** Real average speed (km/h) computed server-side from timestamped rider
+   *  GPS traces. Preferred over the transport type's generic speed for this
+   *  line's duration estimate whenever it's set. */
+  observedSpeedKmh?: number | null;
   verifiedAt?: string | null;
   lastConfirmedAt?: string | null;
   needsReviewReason?: string | null;
@@ -150,6 +154,8 @@ type PlanCandidate = {
   totalWalkKm: number;
   qualityPenalty: number;
   signature: string;
+  /** True when at least one leg of this candidate rides a metro or monorail line. */
+  usesRail: boolean;
 };
 
 const DEFAULT_API_ORIGIN = "https://sikka-mq6w.onrender.com";
@@ -158,7 +164,7 @@ const API_BASE = `${API_ORIGIN}/api`;
 const SNAPSHOT_DB = "sikka-offline";
 const SNAPSHOT_STORE = "snapshots";
 const SNAPSHOT_KEY = "latest";
-const SNAPSHOT_SCHEMA_VERSION = 3;
+const SNAPSHOT_SCHEMA_VERSION = 4;
 const SNAPSHOT_REFRESH_MS = 10 * 60 * 1000;
 const WALK_MAX_KM = 0.8;
 const WALK_TOTAL_MAX_KM = 1.6;
@@ -258,12 +264,14 @@ function totalLinePenalty(line: OfflineLine): number {
 }
 
 function trustBadge(line: OfflineLine): string {
-  if (line.routeStatus === "needs_review") return "Needs review";
+  // Riders never need to know our internal data-source taxonomy (seed/gtfs/csv/discovery) —
+  // translate each into a plain, trust-building phrase instead.
+  if (line.routeStatus === "needs_review") return "Route being verified";
   const source = (line.dataSource || "").toLowerCase();
-  if (source === "discovery") return "Discovery verified";
-  if (source === "gtfs") return "GTFS";
-  if (source === "admin") return "Admin verified";
-  return routeQuality(line) === "suspect" ? "Low geometry confidence" : "Seed data";
+  if (source === "discovery") return "Rider-verified route";
+  if (source === "gtfs") return "Official route data";
+  if (source === "admin") return "Verified by Sikka";
+  return routeQuality(line) === "suspect" ? "Approximate route" : "Standard route";
 }
 
 function modePreferencePenalty(mode: ModeKey, planKey: PlanKey): number {
@@ -460,6 +468,41 @@ function transportName(type: OfflineType, line: OfflineLine, isArabic: boolean):
   return line.lineNumber ? `${typeName} ${line.lineNumber}` : lineName || typeName;
 }
 
+function connectorInstructions(connector: Connector, startName: string, endName: string, cost: number, isArabic: boolean): string[] {
+  if (connector.mode === "walk") {
+    return isArabic
+      ? [`امشِ من ${startName} إلى ${endName}.`, `ابقَ على الأرصفة والمعابر ولا تختصر من خارج الشوارع.`]
+      : [`Walk from ${startName} to ${endName}.`, `Stay on sidewalks/crossings and avoid off-street shortcuts.`];
+  }
+  if (connector.mode === "tuktuk") {
+    return isArabic
+      ? [
+          `دوّر على توك توك قريب من ${startName} — بيقفوا في مجموعات على الناصية غالباً.`,
+          `اتفق على السعر قبل ما تركب، وحوالي ${Math.round(cost)} جنيه — مالوش عداد.`,
+          `قول وجهتك بوضوح: ${endName}.`,
+        ]
+      : [
+          `Find a tuktuk near ${startName} — they often wait in clusters at a corner.`,
+          `Agree on the fare before getting in, about ${Math.round(cost)} EGP — there's no meter.`,
+          `Tell the driver your destination clearly: ${endName}.`,
+        ];
+  }
+  if (connector.mode === "taxi") {
+    return isArabic
+      ? [
+          `لو من خلال تطبيق: اطلب الرحلة من ${startName} إلى ${endName} وتأكد من اسم السائق ولوحة العربية.`,
+          `لو تاكسي شارع عادي: اتفق على السعر الأول (حوالي ${Math.round(cost)} جنيه).`,
+        ]
+      : [
+          `If using an app: request the ride from ${startName} to ${endName}, and check the driver/plate match before getting in.`,
+          `If it's a street taxi: agree the fare first (about ${Math.round(cost)} EGP).`,
+        ];
+  }
+  return isArabic
+    ? [`استخدم ${connector.nameAr} من ${startName}.`, `انزل عند ${endName} ثم أكمل الخطوة التالية.`]
+    : [`Take ${connector.nameEn} from ${startName}.`, `Get off at ${endName}, then continue to the next step.`];
+}
+
 function connectorSegment(connector: Connector, startName: string, endName: string, isArabic: boolean): ApiSegment {
   return {
     transport_type_id: connector.mode,
@@ -475,21 +518,124 @@ function connectorSegment(connector: Connector, startName: string, endName: stri
     line_id: null,
     line_number: null,
     route_geometry: connector.geometry,
-    instructions: isArabic
-      ? connector.mode === "walk"
-        ? [`امشِ من ${startName} إلى ${endName}.`, `ابقَ على الأرصفة والمعابر ولا تختصر من خارج الشوارع.`]
-        : [`استخدم ${connector.nameAr} من ${startName}.`, `انزل عند ${endName} ثم أكمل الخطوة التالية.`]
-      : connector.mode === "walk"
-        ? [`Walk from ${startName} to ${endName}.`, `Stay on sidewalks/crossings and avoid off-street shortcuts.`]
-        : [`Take ${connector.nameEn} from ${startName}.`, `Get off at ${endName}, then continue to the next step.`],
+    instructions: connectorInstructions(connector, startName, endName, connector.cost, isArabic),
     alternatives: [],
   };
+}
+
+function rideInstructions(candidate: Candidate, isArabic: boolean): string[] {
+  const name = transportName(candidate.type, candidate.line, isArabic);
+  const from = candidate.line.fromArea;
+  const to = candidate.line.toArea;
+  const cost = lineFare(candidate.type, candidate.line, Math.max(0.2, pathLengthKm(candidate.line.path)));
+  const lineLabel = candidate.line.lineNumber || (isArabic ? candidate.line.nameAr : candidate.line.nameEn);
+
+  // Typical wait before the next vehicle shows up, from the line's recorded
+  // frequency (or a sane per-mode default) — half the headway, which is the
+  // expected wait for a rider arriving at a random time.
+  const wait = Math.round(waitMinutes(candidate.line, candidate.mode));
+  const waitLine = wait > 0
+    ? [isArabic ? `المتوقع: ${name} جاي كل حوالي ${wait} دقيقة.` : `Expect the next ${name} in about ${wait} min.`]
+    : [];
+
+  let result: string[];
+
+  if (candidate.mode === "metro" || candidate.mode === "monorail" || candidate.mode === "train") {
+    const womenNote = candidate.mode === "metro";
+    result = isArabic
+      ? [
+          `روح لمحطة ${from} واشتري تذكرة أو اعمل تاب بالكارت عند الجيت.`,
+          ...(womenNote ? [`العربيتين في النص مخصصتين للسيدات فقط — لو محتاج تعرف.`] : []),
+          `اركب ${name} في اتجاه ${to}، وتابع لون الخط على لوحات الرصيف.`,
+          `انزل في محطة ${to} واتبع لافتة الخروج باسم الشارع/المعلم اللي يناسب وجهتك.`,
+        ]
+      : [
+          `Head to ${from} station and buy a ticket, or tap your card at the gate.`,
+          ...(womenNote ? [`The middle two cars are reserved for women only, in case that matters for you.`] : []),
+          `Board ${name} toward ${to}, and follow the line's color on the platform signage.`,
+          `Exit at ${to} station and follow the exit sign for the street/landmark you need — stations often have several exits leading to very different streets.`,
+        ];
+  } else if (candidate.mode === "microbus") {
+    result = isArabic
+      ? [
+          `قف على جنب الطريق عند ${from} في اتجاه السيارات الجاية علشان تقدر تلوّح بسهولة.`,
+          `لوّح بإيدك لأي ميكروباص رايح ناحية ${to} — مش هيقف لوحده.`,
+          `وانت داخل قول وجهتك بصوت عالي زي "${to}!" — أغلب الميكروباصات مالها لافتة خط واضحة.`,
+          `مرّر الأجرة لقدام إيد بإيد لحد السواق، وحوالي ${Math.round(cost)} جنيه. الباقي بيرجع بنفس الطريقة.`,
+          `لما تقرب من ${to} قول "على الطلب" قبل ما توصل بشوية — بينزّل في أي حتة مش في محطات بس.`,
+        ]
+      : [
+          `Stand at the edge of the road at ${from}, facing oncoming traffic, so you can flag one down easily.`,
+          `Flag down any microbus heading toward ${to} — it won't stop on its own.`,
+          `As you get in, call out your destination loudly, e.g. "${to}!" — most microbuses have no route signage.`,
+          `Pass your fare forward hand-to-hand to the driver, about ${Math.round(cost)} EGP. Change comes back the same way.`,
+          `When you're near ${to}, say "ala el talab" (on request) a few seconds before — it stops anywhere, not just at fixed points.`,
+        ];
+  } else if (candidate.mode === "serfis") {
+    result = isArabic
+      ? [
+          `روح لـ ${from} — غالباً فيه مكان معروف بتقف فيه السرفيسات.`,
+          `لوّح لسرفيس رايح ناحية ${to}، وأكّد وجهتك وانت داخل.`,
+          `ادفع حوالي ${Math.round(cost)} جنيه جوه العربية، بتمريرها لقدام.`,
+          `قول "على الطلب" وانت قرب من ${to}.`,
+        ]
+      : [
+          `Head to ${from} — usually a known stand where serfis line up or pass by.`,
+          `Flag one down heading toward ${to}, and confirm your destination as you board.`,
+          `Pay about ${Math.round(cost)} EGP onboard, passed forward like in a microbus.`,
+          `Ask to stop ("ala el talab") as you near ${to}.`,
+        ];
+  } else {
+    // CTA / NTA city bus — marked stops, route boards, more fixed than microbus.
+    result = isArabic
+      ? [
+          `روح لمحطة الأتوبيس المعلّمة عند ${from} — الأتوبيسات الرسمية بتقف في محطات معلّمة بس.`,
+          `قبل ما تركب، بص على لوحة رقم الخط ${lineLabel ? `(${lineLabel}) ` : ""}في الزجاج الأمامي وتأكد إنه رايح ${to}.`,
+          `اركب وادفع جوه (نقدي للكمساري أو تاب بالكارت)، وحوالي ${Math.round(cost)} جنيه.`,
+          `انزل عند ${to}، وخد بالك من الزحمة وانت بتنزل.`,
+        ]
+      : [
+          `Go to the marked bus stop at ${from} — official buses only stop at signed stops.`,
+          `Before boarding, check the route board${lineLabel ? ` (${lineLabel})` : ""} in the windshield to confirm it's heading to ${to}.`,
+          `Board and pay onboard (cash to the conductor, or tap your card), about ${Math.round(cost)} EGP.`,
+          `Get off at ${to}, watching for other traffic as you step down.`,
+        ];
+  }
+
+  return [...waitLine, ...result];
+}
+const ROAD_BOUND_MODES = new Set<ModeKey>(["bus", "microbus", "serfis", "taxi", "tuktuk"]);
+
+/** True during Cairo's typical weekday rush windows (rough heuristic — there
+ *  isn't enough per-time-of-day ridership data yet to do better than this). */
+function isRushHour(): boolean {
+  const now = new Date();
+  const day = now.getDay(); // 0 = Sunday
+  if (day === 5) return false; // Friday — much lighter traffic
+  const hour = now.getHours();
+  return (hour >= 7 && hour < 10) || (hour >= 15 && hour < 19);
+}
+
+/**
+ * Picks the best available speed estimate for a ride: real GPS-observed speed
+ * for this exact line when enough riders have confirmed it, otherwise the
+ * transport type's generic speed — then nudges road-bound modes down during
+ * rush hour, since metro/monorail/train run on dedicated rail and aren't
+ * affected by road traffic the same way.
+ */
+function effectiveSpeedKmh(line: OfflineLine, type: OfflineType, mode: ModeKey): number {
+  const base = line.observedSpeedKmh && line.observedSpeedKmh >= 3 && line.observedSpeedKmh <= 80
+    ? line.observedSpeedKmh
+    : type.averageSpeedKmh || 25;
+  if (ROAD_BOUND_MODES.has(mode) && isRushHour()) return base * 0.78;
+  return base;
 }
 
 function rideSegment(candidate: Candidate, from: ClosestPoint, to: ClosestPoint, isArabic: boolean): ApiSegment {
   const route = slicePath(candidate.line.path, from.index, to.index);
   const km = Math.max(0.2, pathLengthKm(route));
-  const minutes = waitMinutes(candidate.line, candidate.mode) + (km / Math.max(candidate.type.averageSpeedKmh || 25, 8)) * 60;
+  const speed = effectiveSpeedKmh(candidate.line, candidate.type, candidate.mode);
+  const minutes = waitMinutes(candidate.line, candidate.mode) + (km / Math.max(speed, 8)) * 60;
   return {
     transport_type_id: candidate.type.id,
     transport_name: transportName(candidate.type, candidate.line, isArabic),
@@ -508,17 +654,7 @@ function rideSegment(candidate: Candidate, from: ClosestPoint, to: ClosestPoint,
     info: isArabic
       ? `محسوبة على الهاتف من بيانات Sikka المحفوظة. الثقة: ${trustBadge(candidate.line)}.`
       : `Calculated on this phone from the synced Sikka route snapshot. Trust: ${trustBadge(candidate.line)}.`,
-    instructions: isArabic
-      ? [
-        `اتجه إلى أقرب نقطة على خط ${transportName(candidate.type, candidate.line, true)} عند ${candidate.line.fromArea}.`,
-        `تأكد من رقم/اسم الخط ${candidate.line.lineNumber || candidate.line.nameAr || candidate.line.nameEn}.`,
-        `اركب باتجاه ${candidate.line.toArea} واتبع مسار الطريق الظاهر على الخريطة.`,
-      ]
-      : [
-        `Go to the nearest safe boarding point for ${transportName(candidate.type, candidate.line, false)} near ${candidate.line.fromArea}.`,
-        `Confirm the line number/name: ${candidate.line.lineNumber || candidate.line.nameEn || candidate.line.nameAr}.`,
-        `Ride toward ${candidate.line.toArea} and follow the mapped street-aligned route.`,
-      ],
+    instructions: rideInstructions(candidate, isArabic),
     route_geometry: route,
     alternatives: [],
   };
@@ -761,7 +897,7 @@ function bestTransfer(a: OfflineLine, b: OfflineLine, maxKm: number): { aPoint: 
   return best;
 }
 
-function candidateStats(segments: ApiSegment[], linePenalty = 0): Omit<PlanCandidate, "score" | "signature"> {
+function candidateStats(segments: ApiSegment[], linePenalty = 0, usesRail = false): Omit<PlanCandidate, "score" | "signature"> {
   const cost = segments.reduce((sum, s) => sum + s.cost_egp, 0);
   const time = segments.reduce((sum, s) => sum + s.duration_minutes, 0);
   const transitLegs = segments.filter((s) => !!s.line_id).length;
@@ -771,7 +907,7 @@ function candidateStats(segments: ApiSegment[], linePenalty = 0): Omit<PlanCandi
     if (connectorModeFromSegment(s) !== "walk" || !s.route_geometry || s.route_geometry.length < 2) return sum;
     return sum + pathLengthKm(s.route_geometry);
   }, 0);
-  return { segments, cost, time, transfers, transitLegs, taxiLegs, totalWalkKm, qualityPenalty: linePenalty };
+  return { segments, cost, time, transfers, transitLegs, taxiLegs, totalWalkKm, qualityPenalty: linePenalty, usesRail };
 }
 
 function signatureFor(segments: ApiSegment[]): string {
@@ -780,8 +916,8 @@ function signatureFor(segments: ApiSegment[]): string {
     .join("|");
 }
 
-function makeCandidate(segments: ApiSegment[], planKey: PlanKey, linePenalty = 0): PlanCandidate | null {
-  const stats = candidateStats(segments, linePenalty);
+function makeCandidate(segments: ApiSegment[], planKey: PlanKey, linePenalty = 0, usesRail = false): PlanCandidate | null {
+  const stats = candidateStats(segments, linePenalty, usesRail);
   if (stats.totalWalkKm > WALK_TOTAL_MAX_KM) return null;
   const lineIds = segments.map((s) => s.line_id).filter((id): id is string => !!id);
   if (new Set(lineIds).size !== lineIds.length) return null;
@@ -826,6 +962,26 @@ function pickRouteOptions(candidates: PlanCandidate[], planKey: PlanKey): { vari
     picked.push({ variant, candidate: choice });
     used.add(choice.signature);
   }
+
+  // Guarantee a metro/monorail-inclusive option among the four plans whenever one exists,
+  // so riders always see a rail-based way to reach their destination if it's available.
+  const hasRailPick = picked.some((p) => p.candidate.usesRail);
+  if (!hasRailPick) {
+    const railCandidates = candidates.filter((c) => c.usesRail).sort((a, b) => a.score - b.score);
+    const bestRail = railCandidates.find((c) => !used.has(c.signature));
+    if (bestRail) {
+      // Replace the weakest-scoring existing pick (prefer swapping "fewest_transfers", since
+      // a rail ride naturally tends to minimize transfers anyway) with the rail candidate.
+      const swapIndex = picked.findIndex((p) => p.variant === "fewest_transfers");
+      const targetIndex = swapIndex >= 0 ? swapIndex : picked.length - 1;
+      if (targetIndex >= 0) {
+        used.delete(picked[targetIndex].candidate.signature);
+        picked[targetIndex] = { variant: picked[targetIndex].variant, candidate: bestRail };
+        used.add(bestRail.signature);
+      }
+    }
+  }
+
   return picked;
 }
 
@@ -859,6 +1015,7 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
     );
   }
 
+  const RAIL_MODES = new Set<ModeKey>(["metro", "monorail"]);
   const startCandidates = buildCandidates(snapshot, origin, planKey, 36);
   const endCandidates = buildCandidates(snapshot, dest, planKey, 36);
 
@@ -877,7 +1034,7 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
       addCandidate(
         candidates,
         seen,
-        makeCandidate(segments, planKey, totalLinePenalty(start.line) + modePreferencePenalty(start.mode, planKey)),
+        makeCandidate(segments, planKey, totalLinePenalty(start.line) + modePreferencePenalty(start.mode, planKey), RAIL_MODES.has(start.mode)),
       );
     }
   }
@@ -910,6 +1067,7 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
             + totalLinePenalty(end.line)
             + modePreferencePenalty(start.mode, planKey)
             + modePreferencePenalty(end.mode, planKey),
+          RAIL_MODES.has(start.mode) || RAIL_MODES.has(end.mode),
         ),
       );
     }

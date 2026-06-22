@@ -7,7 +7,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Clock, Wallet, MapPin, Check, Navigation, X, Info, ChevronRight, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Clock, Wallet, MapPin, Check, Navigation, X, Info, ChevronRight, ShieldCheck, Flag } from 'lucide-react';
+import ReportDialog from '@/components/ReportDialog';
 import { toast } from 'sonner';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -61,6 +62,8 @@ const TripResult = () => {
   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
   const [popupSegIndex, setPopupSegIndex] = useState<number | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportOption, setReportOption] = useState<RouteOption | null>(null);
   const watchRef = useRef<number | null>(null);
   const mapRef = useRef<MapRef | null>(null);
   const isDark = useIsDark();
@@ -340,7 +343,7 @@ const TripResult = () => {
             <p className="text-sm font-semibold text-foreground">Choose your route</p>
             <p className="text-[11px] text-muted-foreground">Swipe cards left/right</p>
           </div>
-          <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
+          <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scroll-smooth">
             {routeOptions.map((option, index) => {
               const selected = index === activeOptionIndex || option.route_variant === plan.route_variant;
               const color = OPTION_COLORS[option.route_variant || 'recommended'] || '#2563EB';
@@ -348,13 +351,24 @@ const TripResult = () => {
               const transfers = Math.max(0, option.segments.filter((seg) => seg.line_id).length - 1);
               const taxiHeavy = option.segments.some((seg) => seg.icon === 'car' || /taxi|uber|careem/i.test(seg.transport_name));
               return (
-                <button
+                <div
                   key={`${option.route_variant || 'route'}-${index}`}
-                  onClick={() => handleSelectOption(option, index)}
-                  className={`min-w-[90%] snap-center rounded-[2rem] border-2 p-6 text-left transition-all transform hover:scale-[1.02] ${selected ? 'shadow-xl' : 'opacity-70 hover:opacity-100'}`}
+                  className={`relative min-w-[90%] snap-center [scroll-snap-stop:always] rounded-[2rem] border-2 transition-all ${selected ? 'shadow-xl' : 'opacity-70 hover:opacity-100'}`}
                   style={{ borderColor: color, background: bgGradient }}
                 >
-                  <div className="flex items-center justify-between gap-2">
+                  {/* Report icon — top right of card */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setReportOption(option); setReportOpen(true); }}
+                    className="absolute top-3 right-3 z-10 h-8 w-8 rounded-full bg-destructive/10 hover:bg-destructive/20 flex items-center justify-center transition-colors"
+                    title="Report a problem"
+                  >
+                    <Flag className="h-4 w-4 text-destructive" />
+                  </button>
+                  <button
+                    onClick={() => handleSelectOption(option, index)}
+                    className="w-full p-6 text-left transform hover:scale-[1.01] transition-transform"
+                  >
+                  <div className="flex items-center justify-between gap-2 pr-8">
                     <Badge className="rounded-full text-sm px-3 py-1" style={{ backgroundColor: color, color: 'white' }}>
                       {option.route_label || 'Route'}
                     </Badge>
@@ -387,7 +401,8 @@ const TripResult = () => {
                     ))}
                     {taxiHeavy && <Badge variant="outline" className="ml-auto text-[10px]">Taxi used</Badge>}
                   </div>
-                </button>
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -494,6 +509,19 @@ const TripResult = () => {
           </Button>
         </div>
       )}
+
+      {/* Report dialog for plan cards */}
+      <ReportDialog
+        open={reportOpen}
+        onClose={() => { setReportOpen(false); setReportOption(null); }}
+        language={language}
+        segments={reportOption?.segments.map((seg, index) => ({
+          index,
+          label: `${seg.line_number ? `${seg.line_number} · ` : ''}${seg.transport_name}: ${seg.start_name} → ${seg.end_name}`,
+          transportTypeId: seg.transport_type_id,
+          transitLineId: seg.line_id ?? null,
+        })) ?? []}
+      />
     </div>
   );
 };

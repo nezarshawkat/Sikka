@@ -11,9 +11,11 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { useMapStyle } from '@/hooks/useMapStyle';
 import { useTripTracking } from '@/hooks/useTripTracking';
+import { useTripNotification } from '@/hooks/useTripNotification';
 import TripGuideSheet, { type GuidePlan, type GuideSegment, type GuideAlternative } from '@/components/trip/TripGuideSheet';
 import SegmentReviewDialog, { type ReviewSegment } from '@/components/trip/SegmentReviewDialog';
 import BusUsedDialog from '@/components/trip/BusUsedDialog';
+import MicrobusUsedDialog from '@/components/trip/MicrobusUsedDialog';
 import IntercityChoiceDialog from '@/components/trip/IntercityChoiceDialog';
 import ReportDialog from '@/components/ReportDialog';
 import ContributeTransportDialog from '@/components/ContributeTransportDialog';
@@ -23,21 +25,21 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { 
-  saveOfflineTrip, 
-  getOfflineTrip, 
-  clearOfflineTrip, 
-  saveOfflineData, 
+import {
+  saveOfflineTrip,
+  getOfflineTrip,
+  clearOfflineTrip,
+  saveOfflineData,
   setupOfflineListeners,
-  isOnline 
+  isOnline,
 } from '@/lib/offline';
 
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
 const FLIGHT_CITY_IDS = new Set(['cairo', 'alexandria', 'luxor', 'aswan', 'hurghada', 'sharm']);
 const NILE_CITY_IDS = new Set(['cairo', 'giza', 'luxor', 'aswan']);
 const PENDING_FEEDBACK_KEY = 'sikkaPendingTripFeedback';
 
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
 
 const reverseGeocode = async (lat: number, lng: number, language: string): Promise<string> => {
@@ -68,7 +70,7 @@ const Index = () => {
   const [locationName, setLocationName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Destination chosen by tapping the map (reverse-geocoded address shown for confirmation)
+  // Destination chosen by tapping the map or searching (reverse-geocoded address shown for confirmation)
   const [pickedDest, setPickedDest] = useState<{ lat: number; lng: number; name: string; loading: boolean } | null>(null);
 
   const [activeTrip, setActiveTrip] = useState<ActiveTripPlan | null>(null);
@@ -76,6 +78,7 @@ const Index = () => {
   const [expanded, setExpanded] = useState(true);
   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
   const [contributionTrace, setContributionTrace] = useState<[number, number][]>([]);
+  const [contributionTimestamps, setContributionTimestamps] = useState<number[]>([]);
   const [isContributingRoute, setIsContributingRoute] = useState(false);
   const [showDiscoveryRecorder, setShowDiscoveryRecorder] = useState(false);
   const [contributionDialogOpen, setContributionDialogOpen] = useState(false);
@@ -87,36 +90,32 @@ const Index = () => {
   const [tripReviewOpen, setTripReviewOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [cancelTripOpen, setCancelTripOpen] = useState(false);
+  const [serviceAlert, setServiceAlert] = useState<{ count: number; reportType: string } | null>(null);
 
-  // #6 — ask which bus the user took after finishing a bus segment
+  // Bus info dialog (NTA/CTA operator + bus number)
   const [busUsedOpen, setBusUsedOpen] = useState(false);
   const [busUsedName, setBusUsedName] = useState<string | undefined>(undefined);
   const [busUsedFrom, setBusUsedFrom] = useState<string | undefined>(undefined);
   const [busUsedTo, setBusUsedTo] = useState<string | undefined>(undefined);
 
-  // #7 — intercity vs serfis choice when crossing governorates
+  // Microbus info dialog
+  const [microbusUsedOpen, setMicrobusUsedOpen] = useState(false);
+  const [microbusUsedName, setMicrobusUsedName] = useState<string | undefined>(undefined);
+  const [microbusUsedFrom, setMicrobusUsedFrom] = useState<string | undefined>(undefined);
+  const [microbusUsedTo, setMicrobusUsedTo] = useState<string | undefined>(undefined);
+
+  // Intercity vs serfis choice
   const [choiceOpen, setChoiceOpen] = useState(false);
   const [pendingTrip, setPendingTrip] = useState<{
-    planUrl: string;
-    intercityUrl: string;
-    trainUrl: string;
-    flightUrl: string;
-    taxiUrl: string;
-    nileUrl: string;
-    fromName: string;
-    toName: string;
-    hasSerfis: boolean;
-    hasFlight: boolean;
-    hasNile: boolean;
+    planUrl: string; intercityUrl: string; trainUrl: string;
+    flightUrl: string; taxiUrl: string; nileUrl: string;
+    fromName: string; toName: string; hasSerfis: boolean; hasFlight: boolean; hasNile: boolean;
   } | null>(null);
 
   useEffect(() => {
     if (!isLoading && !user) {
-      if (!sessionStorage.getItem('splashShown')) {
-        navigate('/splash');
-      } else {
-        navigate('/auth');
-      }
+      if (!sessionStorage.getItem('splashShown')) navigate('/splash');
+      else navigate('/auth');
     }
   }, [user, isLoading, navigate]);
 
@@ -137,22 +136,15 @@ const Index = () => {
           const pending = sessionStorage.getItem(PENDING_FEEDBACK_KEY);
           const pendingIndex = pending ? Number(JSON.parse(pending).segmentIndex) : 0;
           setCurrentSegIdx(Number.isFinite(pendingIndex) ? pendingIndex : 0);
-          // Save to offline storage for persistence
           saveOfflineTrip(plan);
         }
       } catch {}
     } else {
-      // Try to restore from offline storage if no active session
       const offlineTrip = getOfflineTrip();
-      if (offlineTrip?.segments?.length) {
-        setActiveTrip(offlineTrip);
-      }
+      if (offlineTrip?.segments?.length) setActiveTrip(offlineTrip);
     }
   }, []);
 
-  // On the homepage the UI theme follows the chosen MAP type (a light/white map
-  // forces light mode here, a dark map forces dark mode here), independent of the
-  // app-wide theme. Leaving the homepage restores the user's chosen app theme.
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle('dark', mapMode === 'dark');
@@ -183,9 +175,6 @@ const Index = () => {
     }
   }, [language]);
 
-  // Render the route geometry supplied by the backend directly — no client-side
-  // road snapping. Segments without geometry fall back to a straight line drawn
-  // between their approximated start/end positions along the trip.
   const loadRoutes = useCallback((plan: ActiveTripPlan) => {
     const results: { segIndex: number; coords: [number, number][] }[] = [];
     const segCount = plan.segments.length;
@@ -205,13 +194,9 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
-    if (activeTrip) {
-      setRouteCoords([]);
-      loadRoutes(activeTrip);
-    }
+    if (activeTrip) { setRouteCoords([]); loadRoutes(activeTrip); }
   }, [activeTrip, loadRoutes]);
 
-  // Fit map to the route once loaded
   useEffect(() => {
     if (!activeTrip || !routeCoords.length || !mapRef.current) return;
     let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
@@ -222,55 +207,66 @@ const Index = () => {
       })
     );
     if (Number.isFinite(minLng)) {
-      try {
-        mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 800 });
-      } catch {}
+      try { mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 800 }); } catch {}
     }
   }, [routeCoords, activeTrip]);
 
-  // Setup offline listeners and save trip periodically
   useEffect(() => {
     setupOfflineListeners(
-      () => {
-        // On online: try to sync any pending requests
-        toast(t('backOnline', language) || 'Back online');
-      },
-      () => {
-        // On offline: notify user
-        toast(t('noInternet', language) || 'You are offline');
-      }
+      () => toast(t('backOnline', language) || 'Back online'),
+      () => toast(t('noInternet', language) || 'You are offline'),
     );
-
-    // Save trip data whenever it changes
-    if (activeTrip) {
-      saveOfflineTrip(activeTrip);
-    }
-
-    return () => {
-      // Cleanup not needed as setupOfflineListeners uses addEventListener
-    };
+    if (activeTrip) saveOfflineTrip(activeTrip);
   }, [activeTrip, language]);
 
   const onApproachSegmentEnd = useCallback((segIdx: number) => {
     if (!activeTrip) return;
-    if (segIdx < activeTrip.segments.length - 1) {
-      toast(t('approachingNext', language));
-    }
+    if (segIdx < activeTrip.segments.length - 1) toast(t('approachingNext', language));
   }, [activeTrip, language]);
 
-  const { userPos, progress, remainingMinutes } = useTripTracking({
+  const { userPos, progress, remainingMinutes, isOffRoute } = useTripTracking({
     enabled: !!activeTrip,
     segments: activeTrip?.segments ?? [],
     currentSegIdx,
     routeCoords,
     onApproachSegmentEnd,
+    onOffRouteChange: (offRoute) => {
+      if (offRoute) toast.error(t('offRouteWarning', language));
+    },
   });
+
+  // Persistent OS-level notification while trip is active
+  const currentSeg = activeTrip?.segments[currentSegIdx];
+  useTripNotification({
+    active: !!activeTrip,
+    from: activeTrip?.segments[0]?.start_name ?? '',
+    to: activeTrip?.destination ?? activeTrip?.segments[activeTrip.segments.length - 1]?.end_name ?? '',
+    transportName: currentSeg?.transport_name ?? '',
+    transportColor: currentSeg?.color ?? '#3B82F6',
+    transportCode: currentSeg?.line_number || undefined,
+    progress,
+  });
+
+  // Live service-alert banner: check for recent open rider reports on the
+  // current segment's line so the trip sheet can warn about delays etc.
+  useEffect(() => {
+    const lineId = currentSeg?.line_id;
+    if (!lineId) { setServiceAlert(null); return; }
+    let cancelled = false;
+    api
+      .get<{ count: number; reportType: string | null }>(`/reports/active-alerts/${lineId}`)
+      .then((data) => {
+        if (!cancelled) setServiceAlert(data?.count > 0 && data.reportType ? { count: data.count, reportType: data.reportType } : null);
+      })
+      .catch(() => { if (!cancelled) setServiceAlert(null); });
+    return () => { cancelled = true; };
+  }, [currentSeg?.line_id]);
 
   const clearTrip = () => {
     sessionStorage.removeItem('activeTrip');
     sessionStorage.removeItem('tripPlan');
     sessionStorage.removeItem(PENDING_FEEDBACK_KEY);
-    clearOfflineTrip(); // Clear offline trip data
+    clearOfflineTrip();
     setActiveTrip(null);
     setCurrentSegIdx(0);
     setExpanded(false);
@@ -288,22 +284,24 @@ const Index = () => {
   const clearContributionFlow = useCallback(() => {
     stopContributionRecording();
     setContributionTrace([]);
+    setContributionTimestamps([]);
     setShowDiscoveryRecorder(false);
     setContributionDialogOpen(false);
     setContributionOperator('microbus');
   }, [stopContributionRecording]);
 
   const startContributionRecording = useCallback(() => {
-    if (!navigator.geolocation) {
-      toast.error(t('gpsUnavailable', language));
-      return;
-    }
+    if (!navigator.geolocation) { toast.error(t('gpsUnavailable', language)); return; }
     setContributionTrace([]);
+    setContributionTimestamps([]);
     setIsContributingRoute(true);
     contributionWatchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const point: [number, number] = [pos.coords.longitude, pos.coords.latitude];
         setContributionTrace((prev) => [...prev, point]);
+        // Recorded in lockstep with contributionTrace (same index) so the
+        // discovery pipeline can compute real travel speed from elapsed time.
+        setContributionTimestamps((prev) => [...prev, pos.timestamp || Date.now()]);
       },
       () => toast.error(t('gpsUnavailable', language)),
       { enableHighAccuracy: true, maximumAge: 0 },
@@ -332,7 +330,7 @@ const Index = () => {
   };
 
   useEffect(() => {
-    if (!activeTrip || reviewOpen || busUsedOpen || tripReviewOpen) return;
+    if (!activeTrip || reviewOpen || busUsedOpen || microbusUsedOpen || tripReviewOpen) return;
     const pending = sessionStorage.getItem(PENDING_FEEDBACK_KEY);
     if (!pending) return;
     try {
@@ -345,23 +343,37 @@ const Index = () => {
         setBusUsedFrom(seg?.start_name);
         setBusUsedTo(seg?.end_name);
         setBusUsedOpen(true);
+      } else if (parsed.type === 'microbus') {
+        setMicrobusUsedName(seg?.transport_name);
+        setMicrobusUsedFrom(seg?.start_name);
+        setMicrobusUsedTo(seg?.end_name);
+        setMicrobusUsedOpen(true);
       } else if (parsed.type === 'segment') {
         openSegmentReview(Number.isFinite(segmentIndex) ? segmentIndex : currentSegIdx);
       } else if (parsed.type === 'trip') {
         setTripReviewOpen(true);
       }
     } catch {}
-  }, [activeTrip, busUsedOpen, currentSegIdx, reviewOpen, tripReviewOpen]);
+  }, [activeTrip, busUsedOpen, microbusUsedOpen, currentSegIdx, reviewOpen, tripReviewOpen]);
 
   const handleDone = () => {
     if (!activeTrip) return;
     const seg = activeTrip.segments[currentSegIdx];
-    sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({
-      type: seg.icon === 'bus' ? 'bus' : 'segment',
-      segmentIndex: currentSegIdx,
-    }));
-    // #6 — after finishing a bus leg, ask which bus number + operator was used.
-    if (seg.icon === 'bus') {
+    // Microbus and CTA/NTA buses share the same "bus" icon in the data, so the transport
+    // name (e.g. "Microbus" / "ميكروباص") is the only reliable way to tell them apart.
+    const isMicrobus = /microbus|ميكروباص/i.test(seg.transport_name || '');
+    const isBus = seg.icon === 'bus' && !isMicrobus;
+
+    if (isMicrobus) {
+      sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({ type: 'microbus', segmentIndex: currentSegIdx }));
+      setMicrobusUsedName(seg.transport_name);
+      setMicrobusUsedFrom(seg.start_name);
+      setMicrobusUsedTo(seg.end_name);
+      setMicrobusUsedOpen(true);
+      return;
+    }
+    if (isBus) {
+      sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({ type: 'bus', segmentIndex: currentSegIdx }));
       setBusUsedName(seg.transport_name);
       setBusUsedFrom(seg.start_name);
       setBusUsedTo(seg.end_name);
@@ -371,8 +383,6 @@ const Index = () => {
     openSegmentReview();
   };
 
-  // #7 — when a destination is chosen, detect intercity travel and offer the
-  // Serfis-vs-Intercity choice (or route straight to the intercity page).
   const handleDestinationSelect = async (suggestion: { place_name: string; center: [number, number] }) => {
     const destName = suggestion.place_name;
     const destLat = suggestion.center[1];
@@ -385,13 +395,10 @@ const Index = () => {
 
     try {
       const check = await api.get<{
-        isIntercity: boolean;
-        hasSerfis: boolean;
+        isIntercity: boolean; hasSerfis: boolean;
         fromCity: { id: string; nameEn: string; nameAr: string } | null;
         toCity: { id: string; nameEn: string; nameAr: string } | null;
-      }>(
-        `/trips/plan/intercity-check?startLat=${sLat}&startLng=${sLng}&endLat=${destLat}&endLng=${destLng}`,
-      );
+      }>(`/trips/plan/intercity-check?startLat=${sLat}&startLng=${sLng}&endLat=${destLat}&endLng=${destLng}`);
       if (check?.isIntercity && check.fromCity && check.toCity) {
         const fromCity = check.fromCity;
         const toCity = check.toCity;
@@ -402,17 +409,13 @@ const Index = () => {
         const hasFlight = FLIGHT_CITY_IDS.has(fromCity.id) && FLIGHT_CITY_IDS.has(toCity.id);
         const hasNile = NILE_CITY_IDS.has(fromCity.id) && NILE_CITY_IDS.has(toCity.id);
         setPendingTrip({
-          planUrl: planUrl(true),
-          intercityUrl,
+          planUrl: planUrl(true), intercityUrl,
           trainUrl: `/travel/train?${travelParams}`,
           flightUrl: `/travel/flight?${travelParams}`,
           taxiUrl: `/travel/taxi?${travelParams}`,
           nileUrl: `/travel/nile?${travelParams}`,
-          fromName,
-          toName,
-          hasSerfis: check.hasSerfis,
-          hasFlight,
-          hasNile,
+          fromName, toName,
+          hasSerfis: check.hasSerfis, hasFlight, hasNile,
         });
         setChoiceOpen(true);
         return;
@@ -423,22 +426,37 @@ const Index = () => {
     navigate(planUrl());
   };
 
-  // Tap anywhere on the map to choose a destination. Drops a pin, reverse-geocodes
-  // the chosen point into an address, and shows a confirmation card.
+  // Tap anywhere on the map — show place popup (same as search result)
   const handleMapClick = useCallback(async (evt: { lngLat: { lng: number; lat: number } }) => {
-    if (activeTrip || choiceOpen) return; // don't hijack taps while a trip guide or blocking dialog is open
+    if (activeTrip || choiceOpen) return;
     const { lat, lng } = evt.lngLat;
     setPickedDest({ lat, lng, name: '', loading: true });
+    // Fly to clicked location
+    if (mapRef.current) {
+      mapRef.current.flyTo({ center: [lng, lat], zoom: 15, duration: 600 });
+    }
     const name = await reverseGeocode(lat, lng, language);
     setPickedDest((prev) => (prev && prev.lat === lat && prev.lng === lng ? { ...prev, name, loading: false } : prev));
   }, [activeTrip, choiceOpen, language]);
 
-  // Confirm the tapped destination — runs the exact same flow as a search selection.
+  // When search resolves — show the same place popup as a map tap, and fly to it
+  const handleSearchResult = useCallback(async (suggestion: { place_name: string; center: [number, number] }) => {
+    if (activeTrip) return; // readonly when trip active — handled by destination intercity check
+    const lat = suggestion.center[1];
+    const lng = suggestion.center[0];
+    // Fly map to search result
+    if (mapRef.current) {
+      mapRef.current.flyTo({ center: [lng, lat], zoom: 15, duration: 600 });
+    }
+    setPickedDest({ lat, lng, name: suggestion.place_name, loading: false });
+  }, [activeTrip]);
+
   const confirmPickedDest = () => {
     if (!pickedDest) return;
     const name = pickedDest.name || `${pickedDest.lat.toFixed(4)}, ${pickedDest.lng.toFixed(4)}`;
     const dest = { place_name: name, center: [pickedDest.lng, pickedDest.lat] as [number, number] };
     setPickedDest(null);
+    setSearchQuery('');
     void handleDestinationSelect(dest);
   };
 
@@ -495,106 +513,115 @@ const Index = () => {
 
   return (
     <div className="h-screen w-screen relative overflow-hidden">
-        <Map
-          ref={mapRef}
-          {...viewState}
-          onMove={(evt) => setViewState(evt.viewState)}
-          onClick={(evt) => { void handleMapClick(evt); }}
-          onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[home-map] error:', err?.message || e, err?.stack); }}
-          cursor={activeTrip ? undefined : 'crosshair'}
-          mapStyle={mapStyle}
-          style={{ width: '100%', height: '100%' }}
-          attributionControl={false}
-        >
-          {activeTrip && routeCoords.length > 0 && (
-            <RouteLayers id="home-route" data={routeGeoJSON} />
-          )}
-          {!activeTrip && contributionTrace.length > 1 && (
-            <RouteLayers
-              id="contribution-route"
-              data={{
-                type: 'FeatureCollection',
-                features: [{
-                  type: 'Feature',
-                  properties: { color: '#258DFF', name: 'Contribution route' },
-                  geometry: { type: 'LineString', coordinates: contributionTrace },
-                }],
-              }}
-            />
-          )}
-
-          {activeTrip && (
-            <>
-              <Marker latitude={activeTrip.startLat} longitude={activeTrip.startLng}>
-                <div className="h-4 w-4 rounded-full bg-primary border-2 border-white shadow" />
-              </Marker>
-              <Marker latitude={activeTrip.destLat} longitude={activeTrip.destLng}>
-                <div className="h-4 w-4 rounded-full bg-destructive border-2 border-white shadow" />
-              </Marker>
-            </>
-          )}
-
-          {!activeTrip && pickedDest && (
-            <Marker latitude={pickedDest.lat} longitude={pickedDest.lng} anchor="bottom">
-              <MapPin className="h-8 w-8 text-destructive drop-shadow-lg" fill="currentColor" strokeWidth={1.5} />
-            </Marker>
-          )}
-
-          {(userPos || userLocation) && (
-            <Marker latitude={(userPos ?? userLocation)!.lat} longitude={(userPos ?? userLocation)!.lng}>
-              <div className="relative">
-                <div className="h-4 w-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
-                <div className="absolute inset-0 h-4 w-4 rounded-full bg-blue-500 animate-ping opacity-30" />
-              </div>
-            </Marker>
-          )}
-        </Map>
-
-      {/* Search bar overlay */}
-      <div className="absolute top-0 left-0 right-0 p-4 safe-area-top z-20">
-        <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="flex items-center gap-2">
-          <LocationAutocomplete
-            value={searchQuery}
-            onChange={setSearchQuery}
-            onSelect={(suggestion) => {
-              void handleDestinationSelect(suggestion);
-            }}
-            placeholder={t('searchDestination', language)}
-            className="flex-1"
-            language={language}
-            readOnlyDisplay={activeTrip?.destination || undefined}
-            trailingAction={activeTrip ? 'cancelTrip' : searchQuery ? 'clear' : undefined}
-            trailingLabel={t('cancel', language)}
-            onTrailingAction={() => {
-              if (activeTrip) setCancelTripOpen(true);
-              else setSearchQuery('');
+      <Map
+        ref={mapRef}
+        {...viewState}
+        onMove={(evt) => setViewState(evt.viewState)}
+        onClick={(evt) => { void handleMapClick(evt); }}
+        onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[home-map] error:', err?.message || e, err?.stack); }}
+        cursor={activeTrip ? undefined : 'crosshair'}
+        mapStyle={mapStyle}
+        style={{ width: '100%', height: '100%' }}
+        attributionControl={false}
+      >
+        {activeTrip && routeCoords.length > 0 && (
+          <RouteLayers id="home-route" data={routeGeoJSON} />
+        )}
+        {!activeTrip && contributionTrace.length > 1 && (
+          <RouteLayers
+            id="contribution-route"
+            data={{
+              type: 'FeatureCollection',
+              features: [{
+                type: 'Feature',
+                properties: { color: '#258DFF', name: 'Contribution route' },
+                geometry: { type: 'LineString', coordinates: contributionTrace },
+              }],
             }}
           />
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-14 w-14 rounded-full shadow-xl border border-white/20 shrink-0 glass-panel"
-            onClick={() => navigate('/profile')}
-          >
-            <User className="h-5 w-5" />
-          </Button>
-        </motion.div>
-      </div>
+        )}
+        {activeTrip && (
+          <>
+            <Marker latitude={activeTrip.startLat} longitude={activeTrip.startLng}>
+              <div className="h-4 w-4 rounded-full bg-primary border-2 border-white shadow" />
+            </Marker>
+            <Marker latitude={activeTrip.destLat} longitude={activeTrip.destLng}>
+              <div className="h-4 w-4 rounded-full bg-destructive border-2 border-white shadow" />
+            </Marker>
+          </>
+        )}
+        {!activeTrip && pickedDest && (
+          <Marker latitude={pickedDest.lat} longitude={pickedDest.lng} anchor="bottom">
+            <MapPin className="h-8 w-8 text-destructive drop-shadow-lg" fill="currentColor" strokeWidth={1.5} />
+          </Marker>
+        )}
+        {(userPos || userLocation) && (
+          <Marker latitude={(userPos ?? userLocation)!.lat} longitude={(userPos ?? userLocation)!.lng}>
+            <div className="relative">
+              <div className="h-4 w-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
+              <div className="absolute inset-0 h-4 w-4 rounded-full bg-blue-500 animate-ping opacity-30" />
+            </div>
+          </Marker>
+        )}
+      </Map>
 
-      {/* Active trip guide sheet with auto-focus button */}
+      {/* Search bar — hidden when trip is minimized to keep the map clean */}
+      {(!activeTrip || expanded) && (
+        <div className="absolute top-0 left-0 right-0 p-4 safe-area-top z-20">
+          <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="flex items-center gap-2">
+            <LocationAutocomplete
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onSelect={(suggestion) => {
+                if (activeTrip) {
+                  void handleDestinationSelect(suggestion);
+                } else {
+                  void handleSearchResult(suggestion);
+                }
+              }}
+              placeholder={t('searchDestination', language)}
+              className="flex-1"
+              language={language}
+              readOnlyDisplay={activeTrip?.destination || undefined}
+              trailingAction={activeTrip ? 'cancelTrip' : searchQuery ? 'clear' : undefined}
+              trailingLabel={t('cancel', language)}
+              onTrailingAction={() => {
+                if (activeTrip) setCancelTripOpen(true);
+                else { setSearchQuery(''); setPickedDest(null); }
+              }}
+            />
+            {/* Profile button — only visible when not in minimized trip mode */}
+            {!activeTrip && (
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-14 w-14 rounded-full shadow-xl border border-white/20 shrink-0 glass-panel"
+                onClick={() => navigate('/profile')}
+              >
+                <User className="h-5 w-5" />
+              </Button>
+            )}
+          </motion.div>
+        </div>
+      )}
+
+      {/* Active trip guide sheet */}
       {activeTrip ? (
         <>
-          {/* Auto-focus button on bottom right above trip popup */}
-          {userPos && (
+          {/* Focus button — only shown on the minimized map (above the trip popup), matching
+              the "nothing but map + route" rule for the minimized view. Hidden once the
+              sheet is expanded since the map is no longer the focus. */}
+          {userPos && !expanded && (
             <motion.div
               initial={{ scale: 0, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0, opacity: 0 }}
               transition={{ delay: 0.2 }}
-              className="absolute bottom-80 right-4 z-20"
+              className="absolute right-4 bottom-28 z-20"
             >
               <Button
                 size="icon"
-                className="h-14 w-14 rounded-full shadow-xl border border-white/20 glass-panel"
+                className="h-12 w-12 rounded-full shadow-xl border border-white/20 glass-panel"
                 onClick={() => {
                   if (mapRef.current && userPos) {
                     setViewState(v => ({ ...v, latitude: userPos.lat, longitude: userPos.lng, zoom: 15 }));
@@ -619,6 +646,8 @@ const Index = () => {
             onSwap={handleSwap}
             onReport={() => setReportOpen(true)}
             language={language}
+            isOffRoute={isOffRoute}
+            serviceAlert={serviceAlert}
           />
         </>
       ) : (
@@ -637,7 +666,7 @@ const Index = () => {
                     <MapPin className="h-5 w-5 text-destructive" />
                   </div>
                   <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground">{t('chosenDestination', language)}</p>
+                    <p className="text-sm font-medium text-foreground">{t('chosenDestination', language)}</p>
                     <p className="text-xs text-muted-foreground line-clamp-2">
                       {pickedDest.loading
                         ? t('locating', language)
@@ -646,7 +675,7 @@ const Index = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" className="flex-1 rounded-[2rem]" onClick={() => setPickedDest(null)}>
+                  <Button variant="outline" className="flex-1 rounded-[2rem]" onClick={() => { setPickedDest(null); setSearchQuery(''); }}>
                     {t('cancel', language)}
                   </Button>
                   <Button className="flex-1 rounded-[2rem]" onClick={confirmPickedDest} disabled={pickedDest.loading}>
@@ -677,36 +706,22 @@ const Index = () => {
                 {showDiscoveryRecorder && (
                   <div className="mx-auto w-[calc(100%-3rem)] max-w-md min-w-[16rem] space-y-2">
                     {!isContributingRoute && contributionTrace.length < 2 ? (
-                      <Button
-                        className="w-full h-16 rounded-[2rem] gap-2 text-base"
-                        onClick={startContributionRecording}
-                      >
+                      <Button className="w-full h-16 rounded-[2rem] gap-2 text-base" onClick={startContributionRecording}>
                         <Navigation className="h-5 w-5" />
                         {t('recordGps', language)}
                       </Button>
                     ) : isContributingRoute ? (
-                      <Button
-                        variant="destructive"
-                        className="w-full h-16 rounded-[2rem] gap-2 text-base"
-                        onClick={stopContributionRecording}
-                      >
+                      <Button variant="destructive" className="w-full h-16 rounded-[2rem] gap-2 text-base" onClick={stopContributionRecording}>
                         <Square className="h-5 w-5" />
                         {t('stopRecording', language)}
                       </Button>
                     ) : (
                       <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          variant="outline"
-                          className="h-12 rounded-[2rem] gap-2 bg-card/80"
-                          onClick={clearContributionFlow}
-                        >
+                        <Button variant="outline" className="h-12 rounded-[2rem] gap-2 bg-card/80" onClick={clearContributionFlow}>
                           <X className="h-4 w-4" />
                           {t('cancel', language)}
                         </Button>
-                        <Button
-                          className="h-12 rounded-[2rem] gap-2"
-                          onClick={() => setContributionDialogOpen(true)}
-                        >
+                        <Button className="h-12 rounded-[2rem] gap-2" onClick={() => setContributionDialogOpen(true)}>
                           {t('save', language)}
                         </Button>
                       </div>
@@ -763,17 +778,18 @@ const Index = () => {
         onClose={() => setContributionDialogOpen(false)}
         onSubmitted={clearContributionFlow}
         initialTrace={contributionTrace}
+        initialTimestamps={contributionTimestamps}
         initialOperator={contributionOperator}
         language={language}
       />
 
-      {/* #6 — which bus did you take? */}
+      {/* Bus info dialog — collecting operator/route info only; rating is never required here */}
       <BusUsedDialog
         open={busUsedOpen}
         onClose={() => setBusUsedOpen(false)}
         onDone={() => {
-          sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({ type: 'segment', segmentIndex: currentSegIdx }));
-          openSegmentReview();
+          sessionStorage.removeItem(PENDING_FEEDBACK_KEY);
+          handleSegmentReviewDone();
         }}
         transportName={busUsedName}
         fromArea={busUsedFrom}
@@ -781,7 +797,21 @@ const Index = () => {
         language={language}
       />
 
-      {/* #7 — Serfis vs Intercity choice */}
+      {/* Microbus info dialog — collecting operator/route info only; rating is never required here */}
+      <MicrobusUsedDialog
+        open={microbusUsedOpen}
+        onClose={() => setMicrobusUsedOpen(false)}
+        onDone={() => {
+          sessionStorage.removeItem(PENDING_FEEDBACK_KEY);
+          handleSegmentReviewDone();
+        }}
+        transportName={microbusUsedName}
+        fromArea={microbusUsedFrom}
+        toArea={microbusUsedTo}
+        language={language}
+      />
+
+      {/* Intercity vs Serfis choice */}
       <IntercityChoiceDialog
         open={choiceOpen}
         onClose={() => setChoiceOpen(false)}
@@ -789,12 +819,9 @@ const Index = () => {
           setChoiceOpen(false);
           if (!pendingTrip) return;
           const urls = {
-            serfis: pendingTrip.planUrl,
-            intercity: pendingTrip.intercityUrl,
-            train: pendingTrip.trainUrl,
-            flight: pendingTrip.flightUrl,
-            taxi: pendingTrip.taxiUrl,
-            nile: pendingTrip.nileUrl,
+            serfis: pendingTrip.planUrl, intercity: pendingTrip.intercityUrl,
+            train: pendingTrip.trainUrl, flight: pendingTrip.flightUrl,
+            taxi: pendingTrip.taxiUrl, nile: pendingTrip.nileUrl,
           };
           navigate(urls[choice]);
         }}
@@ -810,9 +837,7 @@ const Index = () => {
         <AlertDialogContent className="glass-panel rounded-[2rem]">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('cancelTripTitle', language)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('cancelTripDescription', language)}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t('cancelTripDescription', language)}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('keepTrip', language)}</AlertDialogCancel>
@@ -825,7 +850,6 @@ const Index = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
     </div>
   );
 };

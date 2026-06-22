@@ -1,39 +1,34 @@
 /**
  * Bus route data enrichment pipeline.
  *
- * Cairo's Mapbox `driving` profile treats buses like small cars and cuts
- * through narrow side-alleys. This pipeline injects "common sense" before
- * snapping:
+ * Cairo's road network has many narrow side-streets that a naive router will
+ * happily cut through. This pipeline injects "common sense" before snapping:
  *
  *   1. AI "breadcrumb" pre-processor — an LLM acting as a Cairo Transit
  *      Engineer expands vague stops (["Roxy","Abbassia"]) into precise hubs +
  *      intermediate main-road breadcrumbs (["Roxy Square","Khalifa El-Maamon
- *      Street", "Abbassia Square Bus Hub"]) so the route is pinned to primary
+ *      Street","Abbassia Square Bus Hub"]) so the route is pinned to primary
  *      corridors.
- *   2. Geocode each breadcrumb to a coordinate (reuses geocodeStop).
- *   3. Strict snap via Mapbox Directions `driving-traffic` with a 60 m radius
- *      per coordinate, chunked to respect the 25-waypoint limit and stitched.
- *   4. Caller saves the resulting LineString to transit_lines.route_path.
+ *   2. Geocode each breadcrumb to a coordinate via Nominatim (free, no key).
+ *   3. Drop any breadcrumb whose geocoded position would force the route to
+ *      travel backwards — this is what used to let a single bad geocode send
+ *      the whole route looping back on itself.
+ *   4. Snap via OSRM Map Matching (free, no key) with a generous per-point
+ *      radius, falling back to plain OSRM routing.
+ *   5. Run a final geometry sanity check; if the assembled path is still far
+ *      longer than the straight-line distance between its endpoints, the
+ *      result is flagged so the caller can route it to admin review instead
+ *      of shipping it to riders.
+ *   6. Caller saves the resulting LineString to transit_lines.route_path.
  */
 import { getAIClient, getAIModel } from "./aiClient";
-import { geocodeStop } from "./routePathGenerator";
-
-function getToken(): string | null {
-  return process.env.MAPBOX_TOKEN || process.env.VITE_MAPBOX_TOKEN || null;
-}
-
-// Great-circle distance in km between two [lng, lat] points.
-function haversineKm(a: [number, number], b: [number, number]): number {
-  const R = 6371;
-  const dLat = ((b[1] - a[1]) * Math.PI) / 180;
-  const dLng = ((b[0] - a[0]) * Math.PI) / 180;
-  const lat1 = (a[1] * Math.PI) / 180;
-  const lat2 = (b[1] * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
+import {
+  geocodeStopNominatim,
+  haversineKm,
+  dropBacktrackingPoints,
+  snapToRoadsFree,
+  checkPathQuality,
+} from "./routePathGenerator";
 
 // ─── 1. AI breadcrumb pre-processor ─────────────────────────────────────────
 
@@ -66,6 +61,8 @@ const SYSTEM_PROMPT =
   `geocoder can resolve it. Prefer "Street name, District" form for precision.\n` +
   `- Use as many breadcrumbs as the corridor needs for ~300 m spacing, but do ` +
   `NOT exceed 60 total waypoints.\n` +
+  `- Never describe a route that backtracks or revisits an earlier area — the ` +
+  `path must move steadily from the first stop toward the last.\n` +
   `Respond ONLY with strict JSON: {"waypoints": ["...", "..."]}.`;
 
 export async function expandStopsWithAI(
@@ -132,88 +129,24 @@ export async function expandStopsWithAI(
   }
 }
 
-// ─── 3. Strict road snapping (driving-traffic + 60 m radiuses, chunked) ──────
-
-const RADIUS_M = 60;          // strict snap radius per coordinate (relaxed for ~300 m dense breadcrumbs)
-const MAX_WAYPOINTS = 24;     // per request (Mapbox hard limit is 25; +1 overlap)
-
-async function fetchDirections(
-  chunk: [number, number][],
-  useRadius: boolean,
-  profile: string,
-): Promise<[number, number][] | null> {
-  const token = getToken();
-  if (!token || chunk.length < 2) return null;
-
-  const coordStr = chunk.map(p => `${p[0]},${p[1]}`).join(";");
-  let url =
-    `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}`
-    + `?geometries=geojson&overview=full&access_token=${token}`;
-  if (useRadius) {
-    url += `&radiuses=${chunk.map(() => RADIUS_M).join(";")}`;
-  }
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-    if (!res.ok) return null;
-    const data = await res.json() as {
-      code?: string;
-      routes?: Array<{ geometry: { coordinates: [number, number][] } }>;
-    };
-    if (data.code && data.code !== "Ok") return null;
-    const coords = data.routes?.[0]?.geometry?.coordinates;
-    return coords && coords.length >= 2 ? coords : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Snap an ordered list of coordinates onto the real road network using the
- * `driving-traffic` profile with a strict per-coordinate radius. Splits into
- * overlapping ≤25-point chunks and stitches the polylines back together.
- *
- * Per chunk, attempts (in order): driving-traffic+50 m, driving-traffic (no
- * radius), driving (no radius). Falls back to the raw chunk points if all fail
- * so a noisy snap never drops a whole route.
- */
-export async function snapToRoadsStrict(points: [number, number][]): Promise<[number, number][]> {
-  const token = getToken();
-  if (!token || points.length < 2) return points;
-
-  const allCoords: [number, number][] = [];
-
-  for (let i = 0; i < points.length - 1; i += MAX_WAYPOINTS) {
-    const chunk = points.slice(i, Math.min(i + MAX_WAYPOINTS + 1, points.length));
-    if (chunk.length < 2) continue;
-
-    const snapped =
-      (await fetchDirections(chunk, true, "driving-traffic"))
-      ?? (await fetchDirections(chunk, false, "driving-traffic"))
-      ?? (await fetchDirections(chunk, false, "driving"))
-      ?? chunk;
-
-    if (allCoords.length === 0) allCoords.push(...snapped);
-    else allCoords.push(...snapped.slice(1)); // stitch: drop duplicated overlap point
-
-    await new Promise(r => setTimeout(r, 80)); // gentle rate limit
-  }
-
-  return allCoords.length >= 2 ? allCoords : points;
-}
-
 // ─── Full pipeline ──────────────────────────────────────────────────────────
 
 export interface EnrichResult {
   routePath: { type: "LineString"; coordinates: [number, number][] } | null;
   expandedCount: number;
   geocodedCount: number;
+  droppedBacktrackCount: number;
   usedAI: boolean;
+  /** True when the assembled path still failed the post-hoc sanity check —
+   *  the caller should mark the route needs_review instead of shipping it. */
+  flagged: boolean;
+  flagReason: string | null;
 }
 
 /**
- * area names -> AI breadcrumbs -> geocoded points -> driving-traffic snapped
- * LineString. Returns routePath=null when there is no Mapbox token or fewer
- * than 2 points could be geocoded.
+ * area names -> AI breadcrumbs -> geocoded points -> backtrack-filtered ->
+ * map-matched LineString. Free end-to-end (Nominatim + OSRM); the AI step is
+ * the only part that costs anything, and degrades gracefully without a key.
  */
 export async function buildBusRoutePathAI(
   fromArea: string,
@@ -221,8 +154,10 @@ export async function buildBusRoutePathAI(
   viaStops: string[],
   city = "Cairo",
 ): Promise<EnrichResult> {
-  const empty: EnrichResult = { routePath: null, expandedCount: 0, geocodedCount: 0, usedAI: false };
-  if (!getToken()) return empty;
+  const empty: EnrichResult = {
+    routePath: null, expandedCount: 0, geocodedCount: 0,
+    droppedBacktrackCount: 0, usedAI: false, flagged: false, flagReason: null,
+  };
 
   const rawStops = [fromArea, ...(viaStops || []), toArea].filter(Boolean);
   if (rawStops.length < 2) return empty;
@@ -232,28 +167,46 @@ export async function buildBusRoutePathAI(
   const usedAI = expanded.length !== rawStops.length
     || expanded.some((s, i) => s !== rawStops[i]);
 
-  // 2. Geocode each waypoint (gentle rate limit, drop consecutive name dups and
-  //    near-coincident coordinates so re-anchored endpoints don't zigzag).
+  // 2. Geocode each waypoint via Nominatim (gentle rate limit is handled inside
+  //    geocodeStopNominatim). Drop consecutive name dups and near-coincident
+  //    coordinates so re-anchored endpoints don't zigzag.
   const points: [number, number][] = [];
   let last = "";
   for (const stop of expanded) {
     if (stop === last) continue;
     last = stop;
-    const pt = await geocodeStop(stop, city);
+    const pt = await geocodeStopNominatim(stop, city);
     if (pt) {
       const prev = points[points.length - 1];
       if (!prev || haversineKm(prev, pt) > 0.12) points.push(pt);
     }
-    await new Promise(r => setTimeout(r, 60));
   }
 
-  if (points.length < 2) return { ...empty, expandedCount: expanded.length, usedAI };
+  if (points.length < 2) {
+    return { ...empty, expandedCount: expanded.length, usedAI };
+  }
 
-  // 3. Strict snap to roads
-  const snapped = await snapToRoadsStrict(points);
-  const routePath = snapped.length >= 2
-    ? { type: "LineString" as const, coordinates: snapped }
-    : null;
+  // 3. Drop any point that would force the route to travel backwards — this
+  //    is the fix for the single-bad-geocode "loops around itself" bug.
+  const filtered = dropBacktrackingPoints(points);
+  const droppedBacktrackCount = points.length - filtered.length;
 
-  return { routePath, expandedCount: expanded.length, geocodedCount: points.length, usedAI };
+  // 4. Snap to roads (Map Matching first, OSRM Directions fallback).
+  const snapped = await snapToRoadsFree(filtered, "car");
+  if (snapped.length < 2) {
+    return { ...empty, expandedCount: expanded.length, geocodedCount: points.length, usedAI, droppedBacktrackCount };
+  }
+
+  // 5. Final sanity check on the assembled geometry.
+  const quality = checkPathQuality(snapped);
+
+  return {
+    routePath: { type: "LineString", coordinates: snapped },
+    expandedCount: expanded.length,
+    geocodedCount: points.length,
+    droppedBacktrackCount,
+    usedAI,
+    flagged: !quality.ok,
+    flagReason: quality.reason,
+  };
 }

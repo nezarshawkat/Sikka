@@ -13,6 +13,7 @@ interface ContributeTransportDialogProps {
   onClose: () => void;
   language: Language;
   initialTrace?: [number, number][];
+  initialTimestamps?: number[];
   initialOperator?: Operator;
   onSubmitted?: () => void;
 }
@@ -33,6 +34,7 @@ export default function ContributeTransportDialog({
   onClose,
   language,
   initialTrace,
+  initialTimestamps,
   initialOperator = 'microbus',
   onSubmitted,
 }: ContributeTransportDialogProps) {
@@ -47,6 +49,7 @@ export default function ContributeTransportDialog({
   const [directionConfirmed, setDirectionConfirmed] = useState(true);
   const [gpsQuality, setGpsQuality] = useState<'good' | 'ok' | 'poor'>('good');
   const [trace, setTrace] = useState<[number, number][]>([]);
+  const [timestamps, setTimestamps] = useState<number[]>([]);
   const [recording, setRecording] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [transportTypes, setTransportTypes] = useState<TransportType[]>([]);
@@ -78,6 +81,7 @@ export default function ContributeTransportDialog({
     setDirectionConfirmed(true);
     setGpsQuality('good');
     setTrace([]);
+    setTimestamps([]);
     stopRecording();
   };
 
@@ -99,6 +103,7 @@ export default function ContributeTransportDialog({
     watchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         setTrace((prev) => [...prev, [pos.coords.longitude, pos.coords.latitude]]);
+        setTimestamps((prev) => [...prev, pos.timestamp || Date.now()]);
       },
       () => {},
       { enableHighAccuracy: true, maximumAge: 0 },
@@ -115,7 +120,9 @@ export default function ContributeTransportDialog({
       toast.error(t('busNumberRequired', language));
       return;
     }
-    if (isTraceSubmit && operator === 'microbus' && (!fromArea.trim() || !toArea.trim())) {
+    // Require from/to areas for both operators when recording a GPS trace, so the
+    // direction of travel is always captured for the route the contributor rode.
+    if (isTraceSubmit && (!fromArea.trim() || !toArea.trim())) {
       toast.error(t('microbusRouteDetailsRequired', language));
       return;
     }
@@ -135,6 +142,9 @@ export default function ContributeTransportDialog({
         toArea: toArea || null,
         priceEgp: Number.isFinite(priceNum) && price !== '' ? priceNum : null,
         gpsTrace: (initialTrace?.length ? initialTrace : trace).length ? (initialTrace?.length ? initialTrace : trace) : null,
+        gpsTimestamps: (initialTimestamps?.length ? initialTimestamps : timestamps).length
+          ? (initialTimestamps?.length ? initialTimestamps : timestamps)
+          : null,
         routeCompleteness,
         directionConfirmed,
         gpsQuality,

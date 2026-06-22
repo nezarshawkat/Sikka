@@ -6,6 +6,7 @@ import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import {
   ChevronUp, ChevronDown, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag, ExternalLink,
+  AlertTriangle, Megaphone,
 } from 'lucide-react';
 
 const ICONS: Record<string, string> = {
@@ -39,6 +40,12 @@ interface TripGuideSheetProps {
   onSwap: (segIdx: number, alt: GuideAlternative) => void;
   onReport?: () => void;
   language: Language;
+  /** True when the rider's GPS has drifted meaningfully off the expected
+   *  path for the current segment — wrong vehicle, missed turn, etc. */
+  isOffRoute?: boolean;
+  /** Recent open rider reports for the current segment's line, surfaced as a
+   *  live service-alert banner (e.g. "3 riders reported this is delayed"). */
+  serviceAlert?: { count: number; reportType: string } | null;
 }
 
 const isTaxiLike = (seg: Pick<GuideSegment, 'icon' | 'transport_name'>) =>
@@ -66,6 +73,7 @@ function formatClock(minsFromNow: number, lang: Language): string {
 export default function TripGuideSheet({
   plan, currentSegIdx, progress, remainingMinutes, expanded, onToggleExpand,
   onNext, onBack, onDone, onClose, onSwap, onReport, language,
+  isOffRoute, serviceAlert,
 }: TripGuideSheetProps) {
   const seg = plan.segments[currentSegIdx];
   if (!seg) return null;
@@ -96,6 +104,24 @@ export default function TripGuideSheet({
         >
           <div className="h-1.5 w-10 rounded-full bg-muted-foreground/30" />
         </button>
+
+        {/* Off-route warning — sustained GPS drift from the expected path */}
+        {isOffRoute && (
+          <div className="mx-3 mb-2 rounded-xl bg-destructive/10 border border-destructive/25 px-3 py-2 flex items-center gap-2 shrink-0">
+            <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+            <p className="text-xs text-destructive font-medium">{t('offRouteWarning', language)}</p>
+          </div>
+        )}
+
+        {/* Live service alert from recent rider reports on this line */}
+        {!isOffRoute && serviceAlert && serviceAlert.count > 0 && (
+          <div className="mx-3 mb-2 rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2 flex items-center gap-2 shrink-0">
+            <Megaphone className="h-4 w-4 text-amber-600 shrink-0" />
+            <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+              {serviceAlert.count} {t('ridersReported', language)} {t(`rt_${serviceAlert.reportType}`, language)}
+            </p>
+          </div>
+        )}
 
         {/* ===== MINIMIZED BAR ===== */}
         <div className="px-4 pb-3">

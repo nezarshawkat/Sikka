@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
@@ -40,6 +41,7 @@ interface TransportType {
 
 const AdminRoutes = () => {
   const { language } = useAuth();
+  const navigate = useNavigate();
   const [routes, setRoutes] = useState<TransitLine[]>([]);
   const [transportTypes, setTransportTypes] = useState<TransportType[]>([]);
   const [typeId, setTypeId] = useState('all');
@@ -47,8 +49,11 @@ const AdminRoutes = () => {
   const [sourceFilter, setSourceFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [dedupeResult, setDedupeResult] = useState<{ groupsFound: number; duplicateLinesRemoved: number; groups: { keptLabel: string; removedLabels: string[] }[] } | null>(null);
+  const [dedupeRunning, setDedupeRunning] = useState(false);
 
-  useEffect(() => {
+  const fetchRoutes = () => {
+    setIsLoading(true);
     Promise.all([api.get<TransitLine[]>('/transit-lines'), api.get<TransportType[]>('/transport-types')])
       .then(([lines, types]) => {
         setRoutes(lines || []);
@@ -56,6 +61,10 @@ const AdminRoutes = () => {
       })
       .catch(() => {})
       .finally(() => setIsLoading(false));
+  };
+
+  useEffect(() => {
+    fetchRoutes();
   }, []);
 
   const filteredRoutes = useMemo(() => {
@@ -105,6 +114,27 @@ const AdminRoutes = () => {
     }
   };
 
+  const runDedupe = async (apply: boolean) => {
+    setDedupeRunning(true);
+    try {
+      const result = await api.post<{ groupsFound: number; duplicateLinesRemoved: number; groups: { keptLabel: string; removedLabels: string[] }[] }>(
+        `/transit-lines/dedupe?apply=${apply}`,
+        {},
+      );
+      setDedupeResult(result);
+      if (apply) {
+        toast.success(`Merged ${result.duplicateLinesRemoved} duplicate route${result.duplicateLinesRemoved === 1 ? '' : 's'}`);
+        fetchRoutes();
+      } else {
+        toast(result.groupsFound > 0 ? `Found ${result.groupsFound} duplicate group(s) — review below before applying` : 'No duplicates found');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Dedupe check failed');
+    } finally {
+      setDedupeRunning(false);
+    }
+  };
+
   if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;
 
   const typeById = new Map(transportTypes.map(t => [t.id, t]));
@@ -137,6 +167,39 @@ const AdminRoutes = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Duplicate-route cleanup: catches CSV/AI placeholders that ended up as
+          separate rows from a later GPS-verified line for the same corridor. */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="text-sm font-semibold">Duplicate route cleanup</h3>
+              <p className="text-xs text-muted-foreground">Finds routes describing the same corridor that ended up as separate entries.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={dedupeRunning} onClick={() => runDedupe(false)}>
+                Check for duplicates
+              </Button>
+              {dedupeResult && dedupeResult.groupsFound > 0 && (
+                <Button size="sm" variant="destructive" disabled={dedupeRunning} onClick={() => runDedupe(true)}>
+                  Merge {dedupeResult.groupsFound} group{dedupeResult.groupsFound === 1 ? '' : 's'}
+                </Button>
+              )}
+            </div>
+          </div>
+          {dedupeResult && dedupeResult.groupsFound > 0 && (
+            <div className="space-y-2 pt-1">
+              {dedupeResult.groups.map((g, i) => (
+                <div key={i} className="text-xs rounded-lg bg-muted/40 p-2">
+                  <p className="font-medium text-foreground">Keeps: {g.keptLabel}</p>
+                  <p className="text-muted-foreground">Removes: {g.removedLabels.join(' · ')}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-2 md:grid-cols-[220px_180px_180px_1fr]">
         <Select value={typeId} onValueChange={setTypeId}>
@@ -187,7 +250,11 @@ const AdminRoutes = () => {
         {filteredRoutes.map(route => {
           const type = typeById.get(route.transportTypeId);
           return (
-            <Card key={route.id}>
+            <Card
+              key={route.id}
+              className="cursor-pointer transition-shadow hover:shadow-md"
+              onClick={() => navigate(`/route/${route.id}`)}
+            >
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex flex-wrap gap-1">
@@ -219,7 +286,7 @@ const AdminRoutes = () => {
                     </p>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                   {route.routeStatus !== 'active' && (
                     <Button size="sm" className="h-8" onClick={() => updateRouteStatus(route, 'active')}>
                       Verify active

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { reviewsTable, transitLinesTable } from "@workspace/db";
+import { reviewsTable, transitLinesTable, profilesTable } from "@workspace/db";
 import { eq, desc, and, sql, type SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
@@ -15,6 +15,12 @@ function metaTransitLineId(meta: unknown): string | null {
   return typeof value === "string" && UUID_RE.test(value) ? value : null;
 }
 
+function metaTransportNumber(meta: unknown): string | null {
+  if (!meta || typeof meta !== "object") return null;
+  const value = (meta as { lineNumber?: unknown }).lineNumber;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 router.get("/", async (req, res) => {
   const filters: SQL[] = [];
   const { transportTypeId, reviewType } = req.query as { transportTypeId?: string; reviewType?: string };
@@ -25,16 +31,43 @@ router.get("/", async (req, res) => {
     filters.push(eq(reviewsTable.reviewType, reviewType));
   }
   const rows = await db
-    .select()
+    .select({
+      id: reviewsTable.id,
+      rating: reviewsTable.rating,
+      comment: reviewsTable.comment,
+      reviewType: reviewsTable.reviewType,
+      faceReaction: reviewsTable.faceReaction,
+      routeAccurate: reviewsTable.routeAccurate,
+      timingAccurate: reviewsTable.timingAccurate,
+      qualityGood: reviewsTable.qualityGood,
+      stationInfoCorrect: reviewsTable.stationInfoCorrect,
+      transportTypeId: reviewsTable.transportTypeId,
+      transitLineId: reviewsTable.transitLineId,
+      tripId: reviewsTable.tripId,
+      tripSegmentId: reviewsTable.tripSegmentId,
+      meta: reviewsTable.meta,
+      createdAt: reviewsTable.createdAt,
+      userName: profilesTable.displayName,
+      userPhone: profilesTable.phone,
+    })
     .from(reviewsTable)
+    .leftJoin(profilesTable, eq(profilesTable.userId, reviewsTable.userId))
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(desc(reviewsTable.createdAt));
-  res.json(rows);
+
+  // Backfill transitLineId / transportNumber from legacy meta for older rows
+  const enriched = rows.map((row) => ({
+    ...row,
+    transitLineId: row.transitLineId ?? metaTransitLineId(row.meta),
+    transportNumber: metaTransportNumber(row.meta),
+    transportName: (row.meta as { transportName?: string } | null)?.transportName ?? undefined,
+  }));
+  res.json(enriched);
 });
 
 router.post("/", requireAuth, async (req, res) => {
   const {
-    rating, comment, transportTypeId, tripSegmentId, tripId,
+    rating, comment, transportTypeId, transitLineId, tripSegmentId, tripId,
     reviewType, faceReaction, routeAccurate, timingAccurate,
     qualityGood, stationInfoCorrect, meta,
   } = req.body;
@@ -46,6 +79,10 @@ router.post("/", requireAuth, async (req, res) => {
 
   const resolvedTransportTypeId =
     typeof transportTypeId === "string" && UUID_RE.test(transportTypeId) ? transportTypeId : null;
+  const resolvedTransitLineId =
+    typeof transitLineId === "string" && UUID_RE.test(transitLineId)
+      ? transitLineId
+      : metaTransitLineId(meta);
   const resolvedTripSegmentId =
     typeof tripSegmentId === "string" && UUID_RE.test(tripSegmentId) ? tripSegmentId : null;
   const resolvedTripId =
@@ -56,6 +93,7 @@ router.post("/", requireAuth, async (req, res) => {
     rating: numRating,
     comment: comment ?? null,
     transportTypeId: resolvedTransportTypeId,
+    transitLineId: resolvedTransitLineId,
     tripSegmentId: resolvedTripSegmentId,
     tripId: resolvedTripId,
     reviewType: typeof reviewType === "string" ? reviewType : "segment",
@@ -66,8 +104,7 @@ router.post("/", requireAuth, async (req, res) => {
     stationInfoCorrect: typeof stationInfoCorrect === "boolean" ? stationInfoCorrect : null,
     meta: meta ?? null,
   }).returning();
-  const transitLineId = metaTransitLineId(meta);
-  if (transitLineId && (routeAccurate === false || qualityGood === false)) {
+  if (resolvedTransitLineId && (routeAccurate === false || qualityGood === false)) {
     await db
       .update(transitLinesTable)
       .set({
@@ -76,7 +113,7 @@ router.post("/", requireAuth, async (req, res) => {
         needsReviewReason: sql`case when ${transitLinesTable.reviewReportCount} + 1 >= 3 then 'repeated low route reviews' else ${transitLinesTable.needsReviewReason} end`,
         updatedAt: new Date(),
       })
-      .where(eq(transitLinesTable.id, transitLineId));
+      .where(eq(transitLinesTable.id, resolvedTransitLineId));
   }
   return res.json(row);
 });

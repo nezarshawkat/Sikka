@@ -1,100 +1,241 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import Map, { Source, Layer, type MapRef, type GeoJSONSource } from 'react-map-gl/maplibre';
-import { ArrowLeft, Edit2, Trash2, MapPin, Clock, DollarSign, CheckCircle2 } from 'lucide-react';
+import Map, { Source, Layer, type MapRef } from 'react-map-gl/maplibre';
+import {
+  ArrowLeft, Trash2, MapPin, DollarSign, CheckCircle2,
+  Maximize2, X, Save, ShieldAlert, RefreshCw, ArrowLeftRight,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { api } from '@/lib/api';
+import { useMapStyle } from '@/hooks/useMapStyle';
 import { toast } from 'sonner';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 interface TransitLine {
-  id: string; transportTypeId: string; lineNumber: string | null; nameEn: string; nameAr: string;
-  fromArea: string; toArea: string; viaStops: string[]; routePath: { type: string; coordinates: [number, number][] } | null;
-  stops: { name: string; lat: number; lng: number }[] | null;
-  priceEgp: number; frequencyMinutes: number | null; hasFixedStops: boolean; isActive: boolean;
+  id: string;
+  transportTypeId: string;
+  lineNumber: string | null;
+  nameEn: string;
+  nameAr: string;
+  fromArea: string;
+  toArea: string;
+  viaStops: string[];
+  routePath: { type: string; coordinates: [number, number][] } | null;
+  routeDirection: string;
+  priceEgp: number;
+  frequencyMinutes: number | null;
+  hasFixedStops: boolean;
+  isActive: boolean;
   governorate: string;
+  dataSource?: string;
+  sourcePriority?: number;
+  confidenceScore?: number;
+  routeStatus?: 'active' | 'needs_review' | 'inactive' | 'pending_discovery';
+  needsReviewReason?: string | null;
+  reviewReportCount?: number;
+  verifiedAt?: string | null;
+  lastConfirmedAt?: string | null;
 }
 
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
+interface TransportType {
+  id: string;
+  nameEn: string;
+  nameAr: string;
+  icon: string;
+  color: string;
+}
+
 const ICONS: Record<string, string> = {
   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
 };
 
+const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357, zoom: 12 };
+
 export default function RouteDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const mapRef = useRef<MapRef>(null);
-  
+  const { user, language } = useAuth();
+  const { style: mapStyle } = useMapStyle();
+  const previewMapRef = useRef<MapRef | null>(null);
+  const fullMapRef = useRef<MapRef | null>(null);
+
   const [route, setRoute] = useState<TransitLine | null>(null);
+  const [transportType, setTransportType] = useState<TransportType | null>(null);
   const [loading, setLoading] = useState(true);
-  const [transportName, setTransportName] = useState('');
-  const [viewState, setViewState] = useState({ latitude: 30.0444, longitude: 31.2357, zoom: 12 });
+  const [saving, setSaving] = useState(false);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  const [viewState, setViewState] = useState(CAIRO_CENTER);
 
-  useEffect(() => {
-    async function loadRoute() {
-      if (!id) return;
-      try {
-        const response = await api(`/transit-lines/${id}`);
-        setRoute(response);
-        
-        // Get transport type name
-        const types = await api('/transit-types');
-        const type = types.find((t: any) => t.id === response.transportTypeId);
-        setTransportName(type?.nameEn || '');
-        
-        // Fit map to route
-        if (response.routePath?.coordinates?.length) {
-          const coords = response.routePath.coordinates;
-          let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-          coords.forEach(([lng, lat]) => {
-            minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
-            minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
-          });
-          if (Number.isFinite(minLng)) {
-            setViewState(v => ({ ...v, latitude: (minLat + maxLat) / 2, longitude: (minLng + maxLng) / 2 }));
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load route:', err);
-        toast.error('Failed to load route');
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadRoute();
-  }, [id]);
+  // Editable fields — all route management controls live in this single form
+  const [form, setForm] = useState({
+    lineNumber: '', nameEn: '', nameAr: '', fromArea: '', toArea: '',
+    priceEgp: 0, frequencyMinutes: 0, hasFixedStops: false, isActive: true,
+    routeDirection: 'forward',
+  });
 
-  const handleDelete = async () => {
-    if (!id || !route || !user?.isAdmin) return;
-    if (!confirm('Are you sure you want to delete this route?')) return;
-    
-    try {
-      await api(`/transit-lines/${id}`, { method: 'DELETE' });
-      toast.success('Route deleted');
-      navigate('/admin/map');
-    } catch (err) {
-      toast.error('Failed to delete route');
+  const fitBoundsTo = (mapRef: React.RefObject<MapRef | null>, coords: [number, number][]) => {
+    if (!coords.length || !mapRef.current) return;
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    coords.forEach(([lng, lat]) => {
+      minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
+      minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
+    });
+    if (Number.isFinite(minLng)) {
+      try { mapRef.current.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 48, duration: 500 }); } catch {}
     }
   };
 
-  const geojsonData = route?.routePath ? {
-    type: 'FeatureCollection',
+  const loadRoute = async () => {
+    if (!id) return;
+    setLoading(true);
+    try {
+      const data = await api.get<TransitLine>(`/transit-lines/${id}`);
+      setRoute(data);
+      setForm({
+        lineNumber: data.lineNumber || '',
+        nameEn: data.nameEn || '',
+        nameAr: data.nameAr || '',
+        fromArea: data.fromArea || '',
+        toArea: data.toArea || '',
+        priceEgp: data.priceEgp ?? 0,
+        frequencyMinutes: data.frequencyMinutes ?? 0,
+        hasFixedStops: !!data.hasFixedStops,
+        isActive: data.isActive !== false,
+        routeDirection: data.routeDirection || 'forward',
+      });
+
+      const types = await api.get<TransportType[]>('/transport-types');
+      setTransportType(types.find((t) => t.id === data.transportTypeId) ?? null);
+
+      const coords = data.routePath?.coordinates;
+      if (coords?.length) {
+        const mid = coords[Math.floor(coords.length / 2)];
+        setViewState((v) => ({ ...v, latitude: mid[1], longitude: mid[0] }));
+      }
+    } catch (err) {
+      console.error('Failed to load route:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to load route');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void loadRoute(); }, [id]);
+
+  useEffect(() => {
+    const coords = route?.routePath?.coordinates;
+    if (coords?.length) fitBoundsTo(previewMapRef, coords);
+  }, [route, loading]);
+
+  useEffect(() => {
+    if (!fullscreenOpen) return;
+    const coords = route?.routePath?.coordinates;
+    if (coords?.length) {
+      // Give the dialog a tick to mount before measuring the map container
+      const timeout = setTimeout(() => fitBoundsTo(fullMapRef, coords), 100);
+      return () => clearTimeout(timeout);
+    }
+  }, [fullscreenOpen, route]);
+
+  const handleSave = async () => {
+    if (!id) return;
+    setSaving(true);
+    try {
+      const updated = await api.put<TransitLine>(`/transit-lines/${id}`, {
+        lineNumber: form.lineNumber || null,
+        nameEn: form.nameEn,
+        nameAr: form.nameAr,
+        fromArea: form.fromArea,
+        toArea: form.toArea,
+        priceEgp: Number(form.priceEgp) || 0,
+        frequencyMinutes: form.frequencyMinutes ? Number(form.frequencyMinutes) : null,
+        hasFixedStops: form.hasFixedStops,
+        isActive: form.isActive,
+        routeDirection: form.routeDirection,
+      });
+      setRoute(updated);
+      toast.success('Route updated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateStatus = async (status: 'active' | 'needs_review' | 'inactive') => {
+    if (!id) return;
+    try {
+      const updated = await api.put<TransitLine>(`/transit-lines/${id}`, {
+        routeStatus: status,
+        ...(status === 'active' ? { verifiedAt: new Date().toISOString(), needsReviewReason: null } : {}),
+      });
+      setRoute(updated);
+      toast.success(`Route marked as ${status.replace('_', ' ')}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update status');
+    }
+  };
+
+  // Flip the recorded direction: reverses the path geometry and swaps from/to areas.
+  const handleFlipDirection = async () => {
+    if (!id || !route?.routePath?.coordinates?.length) {
+      toast.error('No route geometry to flip');
+      return;
+    }
+    setSaving(true);
+    try {
+      const reversedCoords = [...route.routePath.coordinates].reverse();
+      const updated = await api.put<TransitLine>(`/transit-lines/${id}`, {
+        routePath: { type: 'LineString', coordinates: reversedCoords },
+        fromArea: form.toArea,
+        toArea: form.fromArea,
+        routeDirection: form.routeDirection === 'forward' ? 'reverse' : 'forward',
+      });
+      setRoute(updated);
+      setForm((f) => ({ ...f, fromArea: f.toArea, toArea: f.fromArea, routeDirection: updated.routeDirection }));
+      toast.success('Direction flipped');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to flip direction');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!id || !route || !user?.isAdmin) return;
+    if (!confirm('Are you sure you want to delete this route? This cannot be undone.')) return;
+    try {
+      await api.delete(`/transit-lines/${id}`);
+      toast.success('Route deleted');
+      navigate('/admin/routes');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete route');
+    }
+  };
+
+  const geojsonData = route?.routePath?.coordinates?.length ? {
+    type: 'FeatureCollection' as const,
     features: [{
-      type: 'Feature',
-      geometry: route.routePath,
-      properties: { id: route.id }
-    }]
+      type: 'Feature' as const,
+      geometry: route.routePath as { type: 'LineString'; coordinates: [number, number][] },
+      properties: { id: route.id },
+    }],
   } : null;
 
   if (loading) {
     return (
-      <div className="w-full h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+      <div className="w-full h-screen flex items-center justify-center bg-background">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4" />
-          <p className="text-slate-600 dark:text-slate-300">Loading route...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading route...</p>
         </div>
       </div>
     );
@@ -102,222 +243,269 @@ export default function RouteDetail() {
 
   if (!route) {
     return (
-      <div className="w-full h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-        <div className="text-center">
-          <p className="text-slate-600 dark:text-slate-300 mb-4">Route not found</p>
+      <div className="w-full h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <p className="text-muted-foreground">Route not found</p>
           <Button onClick={() => navigate(-1)} variant="outline">Go Back</Button>
         </div>
       </div>
     );
   }
 
+  const renderRouteLine = () => (
+    <Layer
+      id="route-line"
+      type="line"
+      paint={{ 'line-color': transportType?.color || '#3B82F6', 'line-width': 4, 'line-opacity': 0.85 }}
+    />
+  );
+
   return (
-    <div className="w-full min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+    <div className="w-full min-h-screen bg-background">
       {/* Header */}
-      <div className="sticky top-0 z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-700">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => navigate(-1)}
-              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
-            >
-              <ArrowLeft className="w-6 h-6" />
+      <div className="sticky top-0 z-30 bg-card/90 backdrop-blur-xl border-b">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate(-1)} className="p-2 hover:bg-muted rounded-lg transition">
+              <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-2xl">{ICONS[transportName.toLowerCase()] || '🚌'}</span>
-                <h1 className="text-xl font-bold">{route.lineNumber || 'Route'} - {route.nameEn}</h1>
+                <span className="text-xl">{ICONS[transportType?.icon?.toLowerCase() || ''] || '🚌'}</span>
+                <h1 className="text-lg font-bold">{route.lineNumber || 'Route'} — {route.nameEn}</h1>
               </div>
-              <p className="text-sm text-slate-600 dark:text-slate-400">{route.nameAr}</p>
+              <p className="text-xs text-muted-foreground">{route.nameAr}</p>
             </div>
           </div>
           {user?.isAdmin && (
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-2">
-                <Edit2 className="w-4 h-4" />
-                Edit
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={handleDelete}
-                className="gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                Delete
-              </Button>
-            </div>
+            <Button variant="destructive" size="sm" onClick={handleDelete} className="gap-2">
+              <Trash2 className="w-4 h-4" />
+              Delete
+            </Button>
           )}
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
+      <div className="max-w-5xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main column */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Map */}
+          {/* Small embedded preview map — clicking it opens the full-screen interactive map */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="rounded-[2rem] overflow-hidden shadow-lg h-[400px]"
+            className="relative rounded-[1.5rem] overflow-hidden shadow-lg h-56 border cursor-pointer group"
+            onClick={() => setFullscreenOpen(true)}
           >
             <Map
-              ref={mapRef}
-              mapboxAccessToken={MAPBOX_TOKEN}
-              initialViewState={viewState}
+              ref={previewMapRef}
+              {...viewState}
+              onMove={(evt) => setViewState(evt.viewState)}
               style={{ width: '100%', height: '100%' }}
-              mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+              mapStyle={mapStyle}
+              interactive={false}
+              attributionControl={false}
             >
               {geojsonData && (
-                <Source id="route-source" type="geojson" data={geojsonData}>
-                  <Layer
-                    id="route-layer"
-                    type="line"
-                    paint={{
-                      'line-color': '#3B82F6',
-                      'line-width': 3,
-                      'line-opacity': 0.8,
-                    }}
-                  />
-                </Source>
-              )}
-              
-              {/* Route stops */}
-              {route.stops && route.stops.length > 0 && (
-                <Source
-                  id="stops-source"
-                  type="geojson"
-                  data={{
-                    type: 'FeatureCollection',
-                    features: route.stops.map(stop => ({
-                      type: 'Feature',
-                      geometry: { type: 'Point', coordinates: [stop.lng, stop.lat] },
-                      properties: { name: stop.name }
-                    }))
-                  }}
-                >
-                  <Layer
-                    id="stops-layer"
-                    type="circle"
-                    paint={{
-                      'circle-radius': 6,
-                      'circle-color': '#EC4899',
-                      'circle-opacity': 0.9,
-                      'circle-stroke-width': 2,
-                      'circle-stroke-color': '#fff',
-                    }}
-                  />
+                <Source id="route-source-preview" type="geojson" data={geojsonData}>
+                  {renderRouteLine()}
                 </Source>
               )}
             </Map>
-          </motion.div>
-
-          {/* Route Details */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="rounded-[2rem] bg-white dark:bg-slate-800 p-6 shadow-lg space-y-4"
-          >
-            <h2 className="text-lg font-bold">Route Information</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">From</p>
-                <p className="font-semibold">{route.fromArea}</p>
-              </div>
-              <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">To</p>
-                <p className="font-semibold">{route.toArea}</p>
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 rounded-full p-3 shadow-lg">
+                <Maximize2 className="w-5 h-5 text-foreground" />
               </div>
             </div>
-            {route.viaStops.length > 0 && (
+            {!geojsonData && (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/60">
+                <p className="text-sm text-muted-foreground">No route geometry recorded yet</p>
+              </div>
+            )}
+          </motion.div>
+
+          {/* Route management form — all controls in one place */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05 }}
+            className="rounded-[1.5rem] bg-card p-6 shadow-sm border space-y-4"
+          >
+            <h2 className="text-base font-bold">Route Information</h2>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Line number</Label>
+                <Input value={form.lineNumber} onChange={(e) => setForm((f) => ({ ...f, lineNumber: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Price (EGP)</Label>
+                <Input
+                  type="number"
+                  value={form.priceEgp}
+                  onChange={(e) => setForm((f) => ({ ...f, priceEgp: Number(e.target.value) }))}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Name (English)</Label>
+                <Input value={form.nameEn} onChange={(e) => setForm((f) => ({ ...f, nameEn: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Name (Arabic)</Label>
+                <Input value={form.nameAr} onChange={(e) => setForm((f) => ({ ...f, nameAr: e.target.value }))} dir="rtl" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 items-end">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">From area</Label>
+                <Input value={form.fromArea} onChange={(e) => setForm((f) => ({ ...f, fromArea: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">To area</Label>
+                <Input value={form.toArea} onChange={(e) => setForm((f) => ({ ...f, toArea: e.target.value }))} />
+              </div>
+            </div>
+
+            {/* Direction control */}
+            <div className="flex items-center justify-between rounded-xl border p-3 bg-muted/30">
               <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Via Stops</p>
+                <p className="text-xs font-medium text-foreground">Route direction</p>
+                <p className="text-xs text-muted-foreground">
+                  Path runs {form.routeDirection === 'forward' ? `${form.fromArea} → ${form.toArea}` : `${form.fromArea} → ${form.toArea} (reversed)`}
+                </p>
+              </div>
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleFlipDirection} disabled={saving}>
+                <ArrowLeftRight className="h-3.5 w-3.5" />
+                Flip
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Frequency (minutes)</Label>
+                <Input
+                  type="number"
+                  value={form.frequencyMinutes}
+                  onChange={(e) => setForm((f) => ({ ...f, frequencyMinutes: Number(e.target.value) }))}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label className="text-xs text-muted-foreground">Fixed stops</Label>
+                <div className="flex items-center gap-2 h-9">
+                  <Switch checked={form.hasFixedStops} onCheckedChange={(v) => setForm((f) => ({ ...f, hasFixedStops: v }))} />
+                  <span className="text-sm text-muted-foreground">{form.hasFixedStops ? 'Yes' : 'No'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-xl border p-3">
+              <div>
+                <p className="text-xs font-medium text-foreground">Active / bookable</p>
+                <p className="text-xs text-muted-foreground">Whether this route is offered in trip plans</p>
+              </div>
+              <Switch checked={form.isActive} onCheckedChange={(v) => setForm((f) => ({ ...f, isActive: v }))} />
+            </div>
+
+            {route.viaStops?.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Via stops</p>
                 <p className="text-sm">{route.viaStops.join(', ')}</p>
               </div>
             )}
+
+            <Button className="w-full gap-2" onClick={handleSave} disabled={saving}>
+              <Save className="h-4 w-4" />
+              {saving ? 'Saving...' : 'Save changes'}
+            </Button>
           </motion.div>
         </div>
 
         {/* Sidebar */}
         <div className="space-y-6">
-          {/* Key Stats */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="rounded-[2rem] bg-white dark:bg-slate-800 p-6 shadow-lg space-y-4"
+            transition={{ delay: 0.1 }}
+            className="rounded-[1.5rem] bg-card p-6 shadow-sm border space-y-4"
           >
-            <h3 className="font-bold text-lg">Details</h3>
-            
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <DollarSign className="w-5 h-5 text-green-500" />
-                <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">Fare</p>
-                  <p className="font-semibold">{route.priceEgp} EGP</p>
-                </div>
-              </div>
+            <h3 className="font-bold text-base">Status & quality</h3>
 
-              {route.frequencyMinutes && (
-                <div className="flex items-center gap-3">
-                  <Clock className="w-5 h-5 text-blue-500" />
-                  <div>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Frequency</p>
-                    <p className="font-semibold">Every {route.frequencyMinutes} min</p>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3">
-                <CheckCircle2 className={`w-5 h-5 ${route.isActive ? 'text-green-500' : 'text-red-500'}`} />
-                <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">Status</p>
-                  <p className="font-semibold">{route.isActive ? 'Active' : 'Inactive'}</p>
-                </div>
-              </div>
+            <div className="flex flex-wrap gap-1">
+              <Badge variant={route.routeStatus === 'needs_review' ? 'destructive' : 'secondary'}>
+                {route.routeStatus ?? 'active'}
+              </Badge>
+              <Badge variant="outline">{route.dataSource ?? 'seed'} · {route.sourcePriority ?? 10}</Badge>
             </div>
 
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-slate-600 dark:text-slate-400">Fixed Stops</span>
-                <span className="font-semibold">{route.hasFixedStops ? 'Yes' : 'No'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600 dark:text-slate-400">Governorate</span>
-                <span className="font-semibold">{route.governorate}</span>
-              </div>
+            <div className="space-y-1 text-sm">
+              <p className="flex items-center gap-2 text-muted-foreground">
+                <CheckCircle2 className="h-4 w-4" />
+                Confidence: {Math.round((route.confidenceScore ?? 0.6) * 100)}%
+              </p>
+              <p className="flex items-center gap-2 text-muted-foreground">
+                <DollarSign className="h-4 w-4" />
+                {route.priceEgp} EGP
+              </p>
+              <p className="flex items-center gap-2 text-muted-foreground">
+                <MapPin className="h-4 w-4" />
+                {route.routePath ? `${route.routePath.coordinates.length} GPS points` : 'No geometry'}
+              </p>
+              <p className="text-xs text-muted-foreground">Reports: {route.reviewReportCount ?? 0}</p>
+              {route.needsReviewReason && (
+                <p className="flex gap-1 text-yellow-600 text-xs">
+                  <ShieldAlert className="h-3 w-3 mt-0.5 shrink-0" />
+                  {route.needsReviewReason}
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              {route.routeStatus !== 'active' && (
+                <Button size="sm" onClick={() => updateStatus('active')}>Verify active</Button>
+              )}
+              {route.routeStatus !== 'needs_review' && (
+                <Button size="sm" variant="outline" onClick={() => updateStatus('needs_review')}>Mark needs review</Button>
+              )}
+              {route.routeStatus !== 'inactive' && (
+                <Button size="sm" variant="outline" onClick={() => updateStatus('inactive')}>Deactivate</Button>
+              )}
+              <Button size="sm" variant="ghost" className="gap-2" onClick={() => void loadRoute()}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                Refresh
+              </Button>
             </div>
           </motion.div>
-
-          {/* Stops List */}
-          {route.stops && route.stops.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="rounded-[2rem] bg-white dark:bg-slate-800 p-6 shadow-lg"
-            >
-              <h3 className="font-bold text-lg mb-4">Stops ({route.stops.length})</h3>
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {route.stops.map((stop, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-start gap-3 pb-3 border-b border-slate-200 dark:border-slate-700 last:border-0"
-                  >
-                    <div className="flex-shrink-0 mt-1">
-                      <MapPin className="w-4 h-4 text-slate-500" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{stop.name}</p>
-                      <p className="text-xs text-slate-500">{stop.lat.toFixed(4)}, {stop.lng.toFixed(4)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          )}
         </div>
       </div>
+
+      {/* Full-screen interactive map */}
+      <Dialog open={fullscreenOpen} onOpenChange={setFullscreenOpen}>
+        <DialogContent className="max-w-none w-screen h-screen p-0 rounded-none border-none">
+          <button
+            onClick={() => setFullscreenOpen(false)}
+            className="absolute top-4 right-4 z-50 bg-white/90 rounded-full p-2 shadow-lg"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <Map
+            ref={fullMapRef}
+            {...viewState}
+            onMove={(evt) => setViewState(evt.viewState)}
+            style={{ width: '100%', height: '100%' }}
+            mapStyle={mapStyle}
+            attributionControl={false}
+          >
+            {geojsonData && (
+              <Source id="route-source-full" type="geojson" data={geojsonData}>
+                {renderRouteLine()}
+              </Source>
+            )}
+          </Map>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

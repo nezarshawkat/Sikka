@@ -52,6 +52,10 @@ export interface LineInfo {
   priceEgp: number;
   frequencyMinutes: number | null;
   hasFixedStops: boolean;
+  /** Real average speed (km/h) computed from timestamped rider GPS traces,
+   *  when enough data exists. Preferred over the transport type's generic
+   *  speed for this line's duration estimate whenever it's set. */
+  observedSpeedKmh?: number | null;
   // route_path coordinates as stored in DB: [lng, lat] pairs
   path: [number, number][] | null;
   stops: LineStop[]; // ordered along the line

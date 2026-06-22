@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { MapPin } from 'lucide-react';
+import { MapPin, User } from 'lucide-react';
 
 interface Report {
   id: string;
@@ -17,6 +17,9 @@ interface Report {
   longitude: number | null;
   status: string;
   createdAt: string;
+  /** User who submitted the report, joined from their profile. */
+  userName?: string | null;
+  userPhone?: string | null;
 }
 
 const STATUS_FILTERS = ['all', 'open', 'resolved', 'rejected'];
@@ -84,7 +87,16 @@ const AdminReports = () => {
                 {t(report.status, language)}
               </span>
             </div>
-            {report.description && <p className="text-sm text-foreground">{report.description}</p>}
+
+            {/* User who filed the report */}
+            <div className="flex items-center gap-1.5">
+              <User className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-medium text-foreground">
+                {report.userName || report.userPhone || 'Anonymous'}
+              </span>
+            </div>
+
+            {report.description && <p className="text-sm text-foreground whitespace-pre-line">{report.description}</p>}
             {report.latitude != null && report.longitude != null && (
               <p className="text-xs text-muted-foreground flex items-center gap-1">
                 <MapPin className="h-3 w-3" />

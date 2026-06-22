@@ -12,6 +12,9 @@ interface UseTripTrackingArgs {
   routeCoords: { segIndex: number; coords: [number, number][] }[];
   /** Fired once when the user gets within the arrival threshold of the current segment end. */
   onApproachSegmentEnd?: (segIdx: number) => void;
+  /** Fired once when the rider's drift-off-route state changes (true = just
+   *  went off-route, false = just came back onto it). */
+  onOffRouteChange?: (offRoute: boolean) => void;
 }
 
 export interface UserPos {
@@ -21,6 +24,16 @@ export interface UserPos {
 
 const EARTH_R = 6371000; // metres
 const ARRIVAL_THRESHOLD_M = 120;
+// How far the rider can be from the expected path before we consider them
+// drifted off it. Generous enough to absorb normal GPS noise and the width of
+// a real street, but still tight enough to flag "wrong vehicle" or "missed a
+// turn" situations meaningfully sooner than just silently mistracking progress.
+const OFF_ROUTE_THRESHOLD_M = 220;
+// Require this many consecutive readings on the wrong side of the threshold
+// before flipping state, so a single noisy GPS fix doesn't trigger a false
+// alarm (and so a brief reconnect to the route doesn't instantly clear a real
+// one either).
+const OFF_ROUTE_STREAK = 3;
 
 function haversine(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const dLat = ((bLat - aLat) * Math.PI) / 180;
@@ -44,19 +57,28 @@ export function useTripTracking({
   currentSegIdx,
   routeCoords,
   onApproachSegmentEnd,
+  onOffRouteChange,
 }: UseTripTrackingArgs) {
   const [userPos, setUserPos] = useState<UserPos | null>(null);
   const [progress, setProgress] = useState(0); // 0..100 over whole route
   const [segProgress, setSegProgress] = useState(0); // 0..1 within current segment
+  const [isOffRoute, setIsOffRoute] = useState(false);
+  const [offRouteDistanceM, setOffRouteDistanceM] = useState(0);
   const watchRef = useRef<number | null>(null);
   const approachedRef = useRef<Record<number, boolean>>({});
+  const offRouteStreakRef = useRef(0);
+  const onRouteStreakRef = useRef(0);
 
   useEffect(() => {
     if (!enabled || !navigator.geolocation) return;
     // Reset ephemeral tracking state for the new tracking session / trip.
     approachedRef.current = {};
+    offRouteStreakRef.current = 0;
+    onRouteStreakRef.current = 0;
     setProgress(0);
     setSegProgress(0);
+    setIsOffRoute(false);
+    setOffRouteDistanceM(0);
     watchRef.current = navigator.geolocation.watchPosition(
       (pos) => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
       () => {},
@@ -114,6 +136,33 @@ export function useTripTracking({
       void nearestIdx;
       setProgress(Math.max(0, Math.min(100, (nearestCum / totalDist) * 100)));
 
+      // Off-route detection: nearestD is the distance from the rider's actual
+      // GPS fix to the closest point on the expected route polyline. A
+      // sustained large gap means they likely boarded the wrong vehicle,
+      // missed a turn on foot, or got off somewhere unexpected — not just GPS
+      // jitter, which is why we require a streak in either direction before
+      // flipping state.
+      setOffRouteDistanceM(Math.round(nearestD));
+      if (nearestD > OFF_ROUTE_THRESHOLD_M) {
+        offRouteStreakRef.current += 1;
+        onRouteStreakRef.current = 0;
+        if (offRouteStreakRef.current >= OFF_ROUTE_STREAK) {
+          setIsOffRoute((prev) => {
+            if (!prev) onOffRouteChange?.(true);
+            return true;
+          });
+        }
+      } else {
+        onRouteStreakRef.current += 1;
+        offRouteStreakRef.current = 0;
+        if (onRouteStreakRef.current >= OFF_ROUTE_STREAK) {
+          setIsOffRoute((prev) => {
+            if (prev) onOffRouteChange?.(false);
+            return false;
+          });
+        }
+      }
+
       // progress within the current segment
       const segStartCum = currentSegIdx > 0 ? segDistances[currentSegIdx - 1] ?? 0 : 0;
       const segEndCum = segDistances[currentSegIdx] ?? totalDist;
@@ -132,7 +181,7 @@ export function useTripTracking({
         onApproachSegmentEnd?.(currentSegIdx);
       }
     }
-  }, [userPos, routeCoords, currentSegIdx, onApproachSegmentEnd]);
+  }, [userPos, routeCoords, currentSegIdx, onApproachSegmentEnd, onOffRouteChange]);
 
   // Remaining minutes = remaining segments' durations, scaled by progress in current.
   const remainingMinutes = (() => {
@@ -146,5 +195,5 @@ export function useTripTracking({
     return Math.round(total);
   })();
 
-  return { userPos, progress, segProgress, remainingMinutes };
+  return { userPos, progress, segProgress, remainingMinutes, isOffRoute, offRouteDistanceM };
 }

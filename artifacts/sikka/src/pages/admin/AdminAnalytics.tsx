@@ -7,7 +7,7 @@ import { Users, Route, Star, Train, TrendingUp, MessageSquare, AlertCircle, Chec
 
 interface AnalyticsStats { users: number; trips: number; reviews: number; routes: number }
 interface Review { rating: number; transportTypeId: string | null; createdAt: string }
-interface Report { reportType: string; createdAt: string }
+interface Report { reportType: string; status: string; createdAt: string }
 interface TransportType { id: string; nameEn: string; nameAr: string }
 
 const AdminAnalytics = () => {
@@ -64,9 +64,9 @@ const AdminAnalytics = () => {
   }, [reports]);
 
   const reportStats = useMemo(() => {
-    const resolved = reports.filter(r => r.reportType === 'resolved').length;
-    const unresolved = reports.filter(r => r.reportType === 'unresolved').length;
-    const pending = reports.filter(r => r.reportType === 'pending').length;
+    const resolved = reports.filter(r => r.status === 'resolved').length;
+    const unresolved = reports.filter(r => r.status === 'rejected').length;
+    const pending = reports.filter(r => r.status === 'open').length;
     return { resolved, unresolved, pending };
   }, [reports]);
 
@@ -165,7 +165,7 @@ const AdminAnalytics = () => {
             <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20">
               <div className="flex items-center gap-1.5 mb-1">
                 <AlertCircle className="h-4 w-4 text-destructive" />
-                <p className="text-xs text-muted-foreground">Unresolved</p>
+                <p className="text-xs text-muted-foreground">Rejected</p>
               </div>
               <p className="text-lg font-bold text-destructive">{reportStats.unresolved}</p>
             </div>

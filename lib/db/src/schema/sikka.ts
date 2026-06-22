@@ -63,8 +63,14 @@ export const transitLinesTable = pgTable("transit_lines", {
   reviewReportCount: integer("review_report_count").notNull().default(0),
   priceEgp: real("price_egp").notNull().default(5),
   frequencyMinutes: integer("frequency_minutes"),
+  /** Real average speed (km/h) computed from timestamped rider GPS traces,
+   *  when enough data exists. Preferred over the transport type's generic
+   *  speed for this line's duration estimate whenever it's set. */
+  observedSpeedKmh: real("observed_speed_kmh"),
   hasFixedStops: boolean("has_fixed_stops").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
+  /** Direction the stored routePath coordinates run in, relative to fromArea -> toArea. */
+  routeDirection: text("route_direction").notNull().default("forward"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -132,6 +138,8 @@ export const reviewsTable = pgTable("reviews", {
   rating: integer("rating").notNull(),
   comment: text("comment"),
   transportTypeId: uuid("transport_type_id"),
+  /** The specific transit line this review is about, so admin can show route info. */
+  transitLineId: uuid("transit_line_id"),
   tripSegmentId: uuid("trip_segment_id"),
   tripId: uuid("trip_id"),
   reviewType: text("review_type").notNull().default("segment"),
@@ -167,11 +175,17 @@ export const transportReportsTable = pgTable("transport_reports", {
   fromArea: text("from_area"),
   toArea: text("to_area"),
   gpsTrace: jsonb("gps_trace").$type<[number, number][]>(),
+  /** Epoch-ms timestamp for each point in gpsTrace, same index, same length.
+   *  Lets the discovery pipeline compute real travel speed instead of relying
+   *  on a generic per-mode estimate. Null for traces recorded before this was
+   *  added, or where the device didn't provide timing. */
+  gpsTimestamps: jsonb("gps_timestamps").$type<number[]>(),
   stopsVisited: jsonb("stops_visited").$type<string[]>(),
   discoveryMeta: jsonb("discovery_meta").$type<{
     routeCompleteness?: "full" | "partial";
     directionConfirmed?: boolean;
     gpsQuality?: "good" | "ok" | "poor";
+    direction?: string | null;
   }>(),
   priceEgp: real("price_egp"),
   status: text("status").notNull().default("pending"),

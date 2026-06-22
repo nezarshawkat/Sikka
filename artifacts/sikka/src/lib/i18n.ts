@@ -635,6 +635,11 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
   en: {
     user: 'User',
     gpsUnavailable: 'GPS unavailable',
+    focusOnLocation: 'Focus on my location',
+    noInternet: 'You are offline',
+    backOnline: 'Back online',
+    offRouteWarning: "Looks like you've drifted off this route — check you're on the right vehicle.",
+    ridersReported: 'riders reported',
     discoverMicrobusHint: 'Record the actual shared route you ride.',
     discoverBusHint: 'We will ask CTA/NTA and bus number, then learn the path from GPS.',
     discoverInstructionChoose: 'Choose the transportation you will use from above.',
@@ -676,6 +681,11 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
   ar: {
     user: 'مستخدم',
     gpsUnavailable: 'GPS غير متاح',
+    focusOnLocation: 'التركيز على موقعي',
+    noInternet: 'أنت غير متصل بالإنترنت',
+    backOnline: 'تم الاتصال مرة أخرى',
+    offRouteWarning: 'يبدو أنك انحرفت عن هذا الخط — تأكد إنك راكب الوسيلة الصحيحة.',
+    ridersReported: 'راكب أبلغوا عن',
     discoverMicrobusHint: 'سجّل خط الميكروباص الحقيقي أثناء الركوب.',
     discoverBusHint: 'سنطلب الجهة ورقم الأتوبيس ونتعلم المسار من GPS.',
     discoverInstructionChoose: 'اختر وسيلة المواصلات التي ستستخدمها من الأعلى.',

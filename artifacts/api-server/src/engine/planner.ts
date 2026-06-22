@@ -13,7 +13,7 @@ import { buildGraph, nearestStops } from "./graph.js";
 import { findRoutes, type SearchOverlay, type SearchResult } from "./pathfinder.js";
 import { PROFILES, directFare, walkMinutes, WALK_MAX_KM } from "./cost.js";
 import { haversineKm } from "./geo.js";
-import { snapConnector, snapFootOsrm } from "../utils/routePathGenerator.js";
+import { snapConnector, snapFootOsrm, getWalkingDirections, type WalkingStep } from "../utils/routePathGenerator.js";
 import { estimateCrowding } from "./crowding.js";
 import { scorePlan, planConfidence } from "./score.js";
 import { explainPlan } from "./explain.js";
@@ -504,63 +504,150 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, languageO
   const isArabic = language === "ar";
   const name = type ? (isArabic ? type.nameAr : type.nameEn) : isArabic ? "مشي" : "Walk";
   const cost = Math.round(leg.costEgp);
-  const mins = Math.max(1, Math.round(leg.timeMin));
   const km = Math.max(0.1, Math.round(leg.distanceKm * 10) / 10);
-  const crowd = isArabic
-    ? leg.crowding === "high" ? "زحمة عالية" : leg.crowding === "medium" ? "زحمة متوسطة" : "زحمة قليلة"
-    : `${leg.crowding} crowding`;
+  const start = leg.startName || (isArabic ? "موقعك" : "your location");
+  const end = leg.endName || (isArabic ? "النقطة التالية" : "the next point");
+  const ln = leg.lineNumber ? ` ${leg.lineNumber}` : "";
+  const stops = leg.stopsCount ?? 0;
 
+  // Typical wait before the next vehicle shows up — half the headway, the
+  // expected wait for a rider arriving at a random time. Only meaningful for
+  // shared transit modes, not personal/on-demand rides (taxi/tuktuk) or walks.
+  const wait = Math.round(leg.waitMin ?? 0);
+  const waitLine = wait > 0
+    ? [isArabic ? `المتوقع: ${name}${ln} جاي كل حوالي ${wait} دقيقة.` : `Expect the next ${name}${ln} in about ${wait} min.`]
+    : [];
+
+  // ── Walking (fallback text — real turn-by-turn is used when OSRM is reachable) ──
   if (leg.mode === "walk") {
     return isArabic
       ? [
-          `ابدأ من ${leg.startName || "موقعك"}.`,
-          `امشِ أقصر مسار متاح حوالي ${km} كم (${mins} دقيقة).`,
-          `اتجه إلى ${leg.endName || "النقطة التالية"} وتأكد أنك وصلت قبل ركوب الوسيلة التالية.`,
+          `ابدأ من ${start}.`,
+          `امشِ أقصر مسار متاح حوالي ${km} كم.`,
+          `اتجه إلى ${end} وتأكد أنك وصلت قبل ركوب الوسيلة التالية.`,
         ]
       : [
-          `Start at ${leg.startName || "your location"}.`,
-          `Walk the shortest available path for about ${km} km (${mins} min).`,
-          `Arrive at ${leg.endName || "the next point"} before boarding the next leg.`,
+          `Start at ${start}.`,
+          `Walk the shortest available path for about ${km} km.`,
+          `Arrive at ${end} before boarding the next leg.`,
         ];
   }
 
-  if (leg.mode === "taxi" || leg.mode === "tuktuk") {
+  // ── Tuktuk: no meter, agree the fare first ──
+  if (leg.mode === "tuktuk") {
     return isArabic
       ? [
-          `من ${leg.startName || "موقعك"} إلى ${leg.endName || "الوجهة"}.`,
+          `دوّر على توك توك قريب من ${start} — بيقفوا في مجموعات على الناصية غالباً.`,
+          `اتفق على السعر قبل ما تركب، وحوالي ${cost} جنيه — التوك توك مالوش عداد.`,
+          `قول وجهتك بوضوح: ${end}.`,
+          `ادفع زي ما اتفقتوا، وانزل من الجنب البعيد عن السيارات.`,
         ]
       : [
-          `From ${leg.startName || "your location"} to ${leg.endName || "your destination"}.`,
+          `Find a tuktuk near ${start} — they often wait in clusters at a corner.`,
+          `Agree on the fare before you get in, about ${cost} EGP — tuktuks don't have a meter.`,
+          `Tell the driver your destination clearly: ${end}.`,
+          `Pay as agreed, and get out on the side away from traffic.`,
         ];
   }
 
-  const ln = leg.lineNumber ? ` ${leg.lineNumber}` : "";
-  const stops = leg.stopsCount ?? 0;
-  const stopText = isArabic
-    ? stops > 0 ? `عدّ ${stops} محطة/محطات تقريباً` : `تابع الخط حوالي ${km} كم`
-    : stops > 0 ? `Count about ${stops} stop${stops === 1 ? "" : "s"}` : `Stay on the line for about ${km} km`;
-  const isStreetBus = leg.mode === "bus" || leg.mode === "microbus" || leg.mode === "serfis";
-  const askDestination = isArabic
-    ? `اسأل هل يتجه إلى ${leg.endName}.`
-    : `Ask if it goes to ${leg.endName}.`;
+  // ── Taxi (street taxi or app-based) ──
+  if (leg.mode === "taxi") {
+    return isArabic
+      ? [
+          `لو من خلال تطبيق: اطلب الرحلة من ${start} إلى ${end} وتأكد من اسم السائق ولوحة العربية قبل الركوب.`,
+          `لو تاكسي عادي في الشارع: اتفق على السعر قبل الركوب (حوالي ${cost} جنيه) لأنه غالباً بدون عداد.`,
+          `ادفع من خلال التطبيق، أو نقدي في الآخر لو تاكسي شارع.`,
+        ]
+      : [
+          `If using an app: request the ride from ${start} to ${end}, and check the driver's name and plate match before getting in.`,
+          `If it's a street taxi: agree the fare before the ride starts (about ${cost} EGP) — most don't run a meter.`,
+          `Pay through the app, or in cash at the end for a street taxi.`,
+        ];
+  }
 
-  return isArabic
+  // ── Metro / Monorail / Train: gated stations, fixed stops, clear signage ──
+  if (leg.mode === "metro" || leg.mode === "monorail" || leg.mode === "train") {
+    const womenNote = leg.mode === "metro";
+    return [...waitLine, ...(isArabic
+      ? [
+          `روح لمحطة ${start} واشتري تذكرة أو اعمل تاب بالكارت عند الجيت.`,
+          ...(womenNote ? [`العربيتين في النص مخصصتين للسيدات فقط — لو محتاج تعرف.`] : []),
+          `اركب ${name}${ln} في اتجاه ${end}، وتابع لون الخط على لوحات الرصيف.`,
+          stops > 0 ? `عدّ حوالي ${stops} محطة — أسماء المحطات بتُعلن وبتظهر على الشاشة جوه العربية.` : `تابع الخط حتى محطة ${end}.`,
+          `انزل في محطة ${end} واتبع لافتة الخروج باسم الشارع/المعلم اللي يناسب وجهتك — لمحطات المترو أكتر من باب خروج بيوصل لشوارع مختلفة تماماً.`,
+        ]
+      : [
+          `Head to ${start} station and buy a ticket, or tap your card at the gate.`,
+          ...(womenNote ? [`The middle two cars are reserved for women only, in case that matters for you.`] : []),
+          `Board ${name}${ln} toward ${end}, and follow the line's color on the platform signage.`,
+          stops > 0 ? `Count about ${stops} stop${stops === 1 ? "" : "s"} — station names are announced and shown on screens inside the car.` : `Stay on the line until ${end}.`,
+          `Exit at ${end} station and follow the exit sign for the street or landmark you need — metro stations often have several numbered exits leading to very different streets.`,
+        ])];
+  }
+
+  // ── Microbus: informal, no signage, no fixed stops ──
+  if (leg.mode === "microbus") {
+    return [...waitLine, ...(isArabic
+      ? [
+          `امشِ لحد ${start} وقف على جنب الطريق في اتجاه السيارات الجاية، علشان تقدر تلوّح بسهولة.`,
+          `لوّح بإيدك لأي ميكروباص رايح في اتجاهك — مش هيقف لوحده، ولازم تلوّح بوضوح.`,
+          `وانت داخل قول وجهتك بصوت عالي زي "${end}!" — أغلب الميكروباصات مالها لافتة خط واضحة.`,
+          `مرّر الأجرة لقدام إيد بإيد لحد ما توصل للسواق، وحوالي ${cost} جنيه. الباقي بيرجع بنفس الطريقة.`,
+          `لما تقرب من ${end} قول "على الطلب" أو "هنا كويس" قبل ما توصل بشوية — الميكروباص بينزّل في أي حتة، مش في محطات بس.`,
+          `انزل من الجنب البعيد عن السيارات، وخد بالك من الموتوسيكلات قبل ما تفتح الباب.`,
+        ]
+      : [
+          `Walk to ${start} and stand at the edge of the road facing oncoming traffic, so you can flag one down easily.`,
+          `Flag down any microbus heading your way — it won't stop on its own, so wave clearly.`,
+          `As you get in, call out your destination loudly, e.g. "${end}!" — most microbuses have no route signage.`,
+          `Pass your fare forward hand-to-hand until it reaches the driver, about ${cost} EGP. Change comes back the same way.`,
+          `When you're near ${end}, say "ala el talab" (on request) or just ask to stop a few seconds before — microbuses stop anywhere on request, not just at fixed points.`,
+          `Get out on the side away from traffic, and check for motorcycles passing close before opening the door.`,
+        ])];
+  }
+
+  // ── Serfis: similar etiquette to microbus, often has an informal stand at each end ──
+  if (leg.mode === "serfis") {
+    return [...waitLine, ...(isArabic
+      ? [
+          `روح لـ ${start} — غالباً فيه مكان معروف بتقف فيه السرفيسات أو بتعدي منه.`,
+          `لوّح لسرفيس رايح ناحية ${end}، أو اسأل أي حد واقف هناك يدّلك على الصحيح.`,
+          `أكّد وجهتك وانت داخل — السواق بينده على الخط، بس اتأكد لو مش متابع.`,
+          `ادفع حوالي ${cost} جنيه جوه العربية، بتمريرها لقدام زي الميكروباص.`,
+          `قول "على الطلب" وانت قرب من ${end}.`,
+          `انزل بحذر من جنب الرصيف.`,
+        ]
+      : [
+          `Head to ${start} — usually a known stand or corner where serfis line up or pass by.`,
+          `Flag one down heading toward ${end}, or ask someone waiting there which one to take.`,
+          `Confirm your destination as you board — drivers usually call out the route, but double-check if unsure.`,
+          `Pay about ${cost} EGP onboard, passed forward like in a microbus.`,
+          `Ask to stop ("ala el talab") as you near ${end}.`,
+          `Get off carefully on the curb side.`,
+        ])];
+  }
+
+  // ── CTA / NTA city bus: marked stops, route boards, more fixed than microbus ──
+  const stopText = isArabic
+    ? stops > 0 ? `عدّ ${stops} محطة تقريباً` : `تابع الخط حوالي ${km} كم`
+    : stops > 0 ? `Count about ${stops} stop${stops === 1 ? "" : "s"}` : `Stay on for about ${km} km`;
+  return [...waitLine, ...(isArabic
     ? [
-        `توجه إلى نقطة الركوب: ${leg.startName}.`,
-        `اركب ${name}${ln}${leg.lineNumber ? " (تأكد من رقم/لافتة الخط قبل الركوب)" : ""}.`,
-        ...(isStreetBus ? [askDestination] : []),
-        `ادفع حوالي ${cost} جنيه عند الركوب أو حسب نظام الوسيلة.`,
-        `${stopText}، وراقب الاتجاه نحو ${leg.endName}.`,
-        `انزل عند ${leg.endName}. مستوى الزحام المتوقع: ${crowd}.`,
+        `روح لمحطة الأتوبيس المعلّمة عند ${start} — الأتوبيسات الرسمية بتقف في محطات معلّمة بس، مش في أي حتة.`,
+        `قبل ما تركب، بص على لوحة رقم الخط/الوجهة في الزجاج الأمامي وتأكد إنه رايح ${end}.`,
+        `اركب ${name}${ln} وادفع جوه (نقدي للكمساري أو تاب بالكارت)، وحوالي ${cost} جنيه.`,
+        `يفضل تتأكد مع الكمساري أو أي راكب إن الأتوبيس ده بيقف قريب من ${end}، لأن مش كل المحطات بتُعلن.`,
+        `${stopText}، وراقب الاتجاه نحو ${end}.`,
+        `انزل عند ${end} وخد بالك من الزحمة وانت بتنزل.`,
       ]
     : [
-        `Go to the boarding point: ${leg.startName}.`,
-        `Board ${name}${ln}${leg.lineNumber ? " (confirm the number/sign before boarding)" : ""}.`,
-        ...(isStreetBus ? [askDestination] : []),
-        `Pay about ${cost} EGP when boarding or as the operator requests.`,
-        `${stopText}, watching for the direction toward ${leg.endName}.`,
-        `Get off at ${leg.endName}. Expected condition: ${crowd}.`,
-      ];
+        `Go to the marked bus stop at ${start} — official buses only stop at signed stops, not on request.`,
+        `Before boarding, check the route number/destination board in the windshield to confirm it's heading to ${end}.`,
+        `Board ${name}${ln} and pay onboard (cash to the conductor, or tap your card), about ${cost} EGP.`,
+        `It's still worth confirming with the conductor or a fellow rider that this bus stops near ${end}, since not every stop is announced.`,
+        `${stopText}, watching for the direction toward ${end}.`,
+        `Get off at ${end}, watching for other traffic as you step down.`,
+      ])];
 }
 
 // Straight-line fallback for a connector whose snap failed: a few linearly
@@ -607,6 +694,68 @@ async function onStreetGeometry(leg: PlanLeg): Promise<number[][]> {
     return interpolateLine(leg.startCoord, leg.endCoord);
   }
   return leg.geometry;
+}
+
+// Cap the number of spoken-out turns so a long walk doesn't read like a wall of
+// text; group anything past the cap into one closing line instead of dropping it.
+const MAX_WALK_STEPS = 6;
+
+function formatWalkSteps(steps: WalkingStep[], leg: PlanLeg, isArabic: boolean): string[] {
+  const real = steps.filter((s) => s.distanceMeters > 0 || steps.indexOf(s) === 0);
+  const shown = real.slice(0, MAX_WALK_STEPS);
+  const lines = shown.map((s) => {
+    const meters = s.distanceMeters;
+    const dist = meters >= 1000
+      ? `${(meters / 1000).toFixed(1)} km`
+      : meters > 15 ? `${meters} m` : "";
+    return isArabic
+      ? `${s.instruction}${dist ? ` (${dist})` : ""}`
+      : `${s.instruction}${dist ? ` (${dist})` : ""}`;
+  });
+  if (real.length > MAX_WALK_STEPS) {
+    lines.push(isArabic
+      ? `تابع حسب الخريطة لحد ${leg.endName || "النقطة التالية"}.`
+      : `Keep following the map the rest of the way to ${leg.endName || "the next point"}.`);
+  }
+  return lines;
+}
+
+/**
+ * Walk legs get REAL turn-by-turn from OSRM (free) when reachable, instead of
+ * a generic "walk about X km" line. Falls back to the existing distance-based
+ * instructions and snapped/interpolated geometry if OSRM can't be reached —
+ * the rider is never left with no guidance at all.
+ */
+async function walkLegDetails(
+  leg: PlanLeg,
+  type: TransportTypeInfo | null,
+  languageOrArabic: boolean | string,
+): Promise<{ geometry: number[][]; instructions: string[] }> {
+  const language = plannerLanguage(languageOrArabic);
+  if (leg.mode !== "walk") {
+    return { geometry: await onStreetGeometry(leg), instructions: legInstructions(leg, type, language) };
+  }
+
+  const a: [number, number] = [leg.startCoord.lng, leg.startCoord.lat];
+  const b: [number, number] = [leg.endCoord.lng, leg.endCoord.lat];
+  try {
+    const directions = await getWalkingDirections(a, b);
+    if (directions?.steps.length) {
+      const geometry = directions.geometry.map((p) => [p[0], p[1]] as [number, number]);
+      geometry[0] = a;
+      geometry[geometry.length - 1] = b;
+      const isArabic = language === "ar";
+      const stepLines = (language === "en" || language === "ar")
+        ? formatWalkSteps(directions.steps, leg, isArabic)
+        : [];
+      if (stepLines.length) {
+        return { geometry, instructions: stepLines };
+      }
+    }
+  } catch (e) {
+    console.error("Walking directions lookup failed", e);
+  }
+  return { geometry: await onStreetGeometry(leg), instructions: legInstructions(leg, type, language) };
 }
 
 const STITCH_CONNECTOR_MODES = new Set<ModeKey>(["walk", "taxi", "tuktuk"]);
@@ -686,6 +835,7 @@ async function buildConnectorAlternative(
   const speed = mode === "walk" ? 4.5 : type?.speedKmh ?? 25;
   const cost = mode === "walk" ? 0 : directFare(type!, leg.distanceKm);
   const altLeg: PlanLeg = { ...leg, mode, typeId: type?.id ?? null, lineId: null, lineNumber: null, costEgp: cost, timeMin: (leg.distanceKm / speed) * 60 };
+  const { geometry, instructions } = await walkLegDetails(altLeg, type, language);
   return {
     transport_type_id: label.id,
     transport_name: label.name,
@@ -696,8 +846,8 @@ async function buildConnectorAlternative(
     line_id: null,
     line_number: null,
     info: `${Math.round(leg.distanceKm * 10) / 10} km`,
-    instructions: legInstructions(altLeg, type, language),
-    route_geometry: await onStreetGeometry(altLeg),
+    instructions,
+    route_geometry: geometry,
   };
 }
 
@@ -781,6 +931,7 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, lang
         ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}`
         : isArabic ? "مشي" : "Walk";
     const alternatives = await buildAlternatives(graph, leg, plan.plan, language);
+    const { geometry, instructions } = await walkLegDetails(leg, type, language);
     return {
       transport_type_id: leg.typeId ?? leg.mode,
       transport_name: name,
@@ -791,8 +942,8 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, lang
       color: type?.color ?? "#64748B", icon: UI_ICON[leg.mode],
       line_id: leg.lineId, line_number: leg.lineNumber,
       info: `${Math.round(leg.distanceKm * 10) / 10} km · ${leg.crowding} crowding`,
-      instructions: legInstructions(leg, type, language),
-      route_geometry: await onStreetGeometry(leg),
+      instructions,
+      route_geometry: geometry,
       crowding: leg.crowding, alternatives,
     };
   }));

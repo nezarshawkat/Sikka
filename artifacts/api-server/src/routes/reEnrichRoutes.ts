@@ -87,7 +87,7 @@ router.post("/", requireAdmin, async (req, res) => {
   let updated = 0;
   let skipped = 0;
   let failed = 0;
-  const results: Array<{ id: string; line: string | null; status: string; coords?: number }> = [];
+  const results: Array<{ id: string; line: string | null; status: string; coords?: number; droppedBacktrackCount?: number }> = [];
 
   for (const line of batch) {
     const gov = (line as { governorate?: string }).governorate || "Cairo";
@@ -100,7 +100,13 @@ router.post("/", requireAdmin, async (req, res) => {
         gov,
       );
       const coords = result.routePath?.coordinates.length ?? 0;
-      const reason = validateSnappedPath(line.routePath?.coordinates, result.routePath?.coordinates);
+      const stepReason = validateSnappedPath(line.routePath?.coordinates, result.routePath?.coordinates);
+      // Two independent checks, both must pass: per-step jump size / endpoint
+      // drift (stepReason) catches a single bad snap, while result.flagged
+      // catches a path whose individual steps all look fine but whose total
+      // length is still a multiple of the straight-line distance — the
+      // signature of a route that loops or zigzags overall.
+      const reason = stepReason ?? (result.flagged ? result.flagReason ?? "loops_or_zigzags" : null);
       if (result.routePath && !reason) {
         await db
           .update(transitLinesTable)
@@ -116,7 +122,7 @@ router.post("/", requireAdmin, async (req, res) => {
           })
           .where(eq(transitLinesTable.id, line.id));
         updated++;
-        results.push({ id: line.id, line: line.lineNumber, status: "updated", coords });
+        results.push({ id: line.id, line: line.lineNumber, status: "updated", coords, droppedBacktrackCount: result.droppedBacktrackCount });
         console.log(`[re-enrich] ✓ ${label} — ${coords} pts (AI=${result.usedAI})`);
       } else {
         await db
@@ -128,7 +134,7 @@ router.post("/", requireAdmin, async (req, res) => {
           })
           .where(eq(transitLinesTable.id, line.id));
         skipped++;
-        results.push({ id: line.id, line: line.lineNumber, status: reason ?? "skipped", coords });
+        results.push({ id: line.id, line: line.lineNumber, status: reason ?? "skipped", coords, droppedBacktrackCount: result.droppedBacktrackCount });
         console.log(`[re-enrich] ↷ ${label} — marked needs_review (${reason ?? "new=" + coords + " pts"})`);
       }
     } catch (err) {

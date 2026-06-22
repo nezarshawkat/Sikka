@@ -66,6 +66,23 @@ export default function SegmentReviewDialog({
     return id && UUID_RE.test(id) ? id : null;
   };
 
+  const resolveTransitLineId = (): string | null => {
+    const id = segment?.line_id;
+    return id && UUID_RE.test(id) ? id : null;
+  };
+
+  const resolveTripId = (): string | null => {
+    if (tripId) return tripId;
+    try {
+      const stored = sessionStorage.getItem('activeTrip') || sessionStorage.getItem('tripPlan');
+      if (!stored) return null;
+      const parsed = JSON.parse(stored) as { id?: string };
+      return parsed?.id && UUID_RE.test(parsed.id) ? parsed.id : null;
+    } catch {
+      return null;
+    }
+  };
+
   const handleSubmit = async () => {
     if (face == null) {
       toast.error(t('selectFace', language));
@@ -78,8 +95,9 @@ export default function SegmentReviewDialog({
         await api.post('/reviews', {
           reviewType: 'trip',
           transportTypeId: null,
+          transitLineId: null,
           tripSegmentId: null,
-          tripId: tripId || null,
+          tripId: resolveTripId(),
           faceReaction: rating,
           rating,
           comment: comment || null,
@@ -89,7 +107,9 @@ export default function SegmentReviewDialog({
         await api.post('/reviews', {
           reviewType: 'segment',
           transportTypeId: resolveTransportTypeId(),
+          transitLineId: resolveTransitLineId(),
           tripSegmentId: null,
+          tripId: resolveTripId(),
           faceReaction: rating,
           rating,
           routeAccurate: answers.routeAccurate ?? null,
@@ -215,6 +235,14 @@ export default function SegmentReviewDialog({
           />
 
           <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1 h-11 rounded-[2rem]"
+              onClick={() => { reset(); onSubmitted?.(); onClose(); }}
+              disabled={submitting}
+            >
+              {t('skip', language) || 'Skip'}
+            </Button>
             <Button className="flex-1 h-11 rounded-[2rem]" onClick={handleSubmit} disabled={submitting}>
               {t('submit', language)}
             </Button>

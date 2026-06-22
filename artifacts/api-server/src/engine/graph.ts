@@ -46,6 +46,33 @@ const PATH_SUSPECT_STEP_KM = 0.5; // flag a line if any consecutive route_path s
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let cached: TransitGraph | null = null;
 
+const ROAD_BOUND_MODES = new Set<ModeKey>(["bus", "microbus", "serfis", "taxi", "tuktuk"]);
+
+/** True during Cairo's typical weekday rush windows (rough heuristic — there
+ *  isn't enough per-time-of-day ridership data yet to do better than this). */
+function isRushHour(): boolean {
+  const now = new Date();
+  const day = now.getDay(); // 0 = Sunday
+  if (day === 5) return false; // Friday — much lighter traffic
+  const hour = now.getHours();
+  return (hour >= 7 && hour < 10) || (hour >= 15 && hour < 19);
+}
+
+/**
+ * Picks the best available speed estimate for a line: real GPS-observed
+ * speed when enough riders have confirmed it, otherwise the transport type's
+ * generic speed — then nudges road-bound modes down during rush hour, since
+ * metro/monorail/train run on dedicated rail and aren't affected by road
+ * traffic the same way.
+ */
+function effectiveLineSpeedKmh(line: LineInfo, type: TransportTypeInfo): number {
+  const base = line.observedSpeedKmh && line.observedSpeedKmh >= 3 && line.observedSpeedKmh <= 80
+    ? line.observedSpeedKmh
+    : type.speedKmh;
+  if (ROAD_BOUND_MODES.has(type.mode) && isRushHour()) return base * 0.78;
+  return base;
+}
+
 // Max great-circle gap between any two consecutive route_path coordinates (km).
 function maxConsecutiveStepKm(path: [number, number][]): number {
   let max = 0;
@@ -240,6 +267,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       toArea: l.toArea,
       priceEgp: l.priceEgp,
       frequencyMinutes: l.frequencyMinutes,
+      observedSpeedKmh: l.observedSpeedKmh,
       hasFixedStops: l.hasFixedStops,
       path,
       stops,
@@ -320,6 +348,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     });
 
     const gtfsQualityBias = line.pathSuspect ? 1.4 : (line.path?.length ?? 0) >= 50 ? 0.55 : 0.95;
+    const effectiveSpeed = effectiveLineSpeedKmh(line, type);
     for (let i = 0; i < line.stops.length - 1; i++) {
       const a = line.stops[i];
       const b = line.stops[i + 1];
@@ -328,7 +357,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       // promoted GPS discovery, so it gets a strong weight advantage over
       // hand-entered/noisy alternatives while still letting the shortest valid
       // path win inside that trusted pool.
-      const timeMin = ((dist / Math.max(8, type.speedKmh)) * 60) * gtfsQualityBias;
+      const timeMin = ((dist / Math.max(8, effectiveSpeed)) * 60) * gtfsQualityBias;
       const cost = perKm * dist;
       addEdge(edges, lsIds[i], {
         to: lsIds[i + 1],

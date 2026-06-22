@@ -26,11 +26,13 @@ type ReportClusterRow = {
   fromArea: string | null;
   toArea: string | null;
   gpsTrace: TracePoint[] | null;
+  gpsTimestamps: (number | null)[] | null;
   priceEgp: number | null;
   discoveryMeta?: {
     routeCompleteness?: "full" | "partial";
     directionConfirmed?: boolean;
     gpsQuality?: "good" | "ok" | "poor";
+    direction?: string | null;
   } | null;
   createdAt: Date;
 };
@@ -63,21 +65,78 @@ function sanitizeTrace(input: unknown): TracePoint[] | null {
   return out.length >= MIN_TRACE_POINTS ? out : null;
 }
 
+/**
+ * Sanitizes a GPS trace exactly like sanitizeTrace, but keeps a parallel
+ * timestamps array in lockstep with whichever points survive the same
+ * distance-based de-duplication — so trace[i] and timestamps[i] always refer
+ * to the same physical point, even though some input points get dropped.
+ */
+function sanitizeTraceWithTimestamps(
+  traceInput: unknown,
+  timestampsInput: unknown,
+): { trace: TracePoint[]; timestamps: (number | null)[] } | null {
+  if (!Array.isArray(traceInput)) return null;
+  const rawTimestamps = Array.isArray(timestampsInput) ? timestampsInput : [];
+  const trace: TracePoint[] = [];
+  const timestamps: (number | null)[] = [];
+  for (let i = 0; i < traceInput.length; i++) {
+    const item = traceInput[i];
+    if (!Array.isArray(item) || item.length < 2) continue;
+    const lng = Number(item[0]);
+    const lat = Number(item[1]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+    const pt: TracePoint = [lng, lat];
+    const prev = trace[trace.length - 1];
+    if (!prev || pointKm(prev, pt) >= 0.02) {
+      trace.push(pt);
+      const ts = Number(rawTimestamps[i]);
+      timestamps.push(Number.isFinite(ts) && ts > 0 ? ts : null);
+    }
+  }
+  return trace.length >= MIN_TRACE_POINTS ? { trace, timestamps } : null;
+}
+
+/**
+ * Real average speed (km/h) for one rider's trace, from elapsed wall-clock
+ * time between its first and last timestamped point. Returns null when
+ * timestamps are missing or the result is outside a sane range for any
+ * road-bound Cairo transit mode (rejects GPS glitches / stalled-then-jumped
+ * traces rather than polluting the line's observed speed with them).
+ */
+function traceSpeedKmh(trace: TracePoint[], timestamps: (number | null)[]): number | null {
+  const firstIdx = timestamps.findIndex((t) => t != null);
+  const lastIdx = timestamps.length - 1 - [...timestamps].reverse().findIndex((t) => t != null);
+  if (firstIdx < 0 || lastIdx <= firstIdx) return null;
+  const elapsedMs = (timestamps[lastIdx] as number) - (timestamps[firstIdx] as number);
+  const elapsedHours = elapsedMs / 3_600_000;
+  if (elapsedHours <= 0 || elapsedHours > 3) return null; // >3h is almost certainly a stalled/paused recording
+  const km = traceKm(trace.slice(firstIdx, lastIdx + 1));
+  if (km < 0.3) return null;
+  const speed = km / elapsedHours;
+  return speed >= 3 && speed <= 80 ? speed : null; // outside walking-to-highway range -> bad data
+}
+
 function sanitizeDiscoveryMeta(input: {
   routeCompleteness?: unknown;
   directionConfirmed?: unknown;
   gpsQuality?: unknown;
+  direction?: unknown;
 }): {
   routeCompleteness: "full" | "partial";
   directionConfirmed: boolean;
   gpsQuality: "good" | "ok" | "poor";
+  /** Human-readable direction the contributor traveled, e.g. "Maadi -> Downtown". */
+  direction: string | null;
 } {
   const routeCompleteness = input.routeCompleteness === "partial" ? "partial" : "full";
   const gpsQuality = input.gpsQuality === "poor" || input.gpsQuality === "ok" ? input.gpsQuality : "good";
+  const direction = typeof input.direction === "string" && input.direction.trim() ? input.direction.trim() : null;
   return {
     routeCompleteness,
     directionConfirmed: input.directionConfirmed === true,
     gpsQuality,
+    direction,
   };
 }
 
@@ -280,6 +339,7 @@ async function promoteDiscoveredRoute(params: {
       fromArea: transportReportsTable.fromArea,
       toArea: transportReportsTable.toArea,
       gpsTrace: transportReportsTable.gpsTrace,
+      gpsTimestamps: transportReportsTable.gpsTimestamps,
       priceEgp: transportReportsTable.priceEgp,
       discoveryMeta: transportReportsTable.discoveryMeta,
       createdAt: transportReportsTable.createdAt,
@@ -330,6 +390,22 @@ async function promoteDiscoveredRoute(params: {
     .map((row) => row.priceEgp)
     .filter((p): p is number => typeof p === "number" && Number.isFinite(p))
     .reduce((sum, p, _i, arr) => sum + p / arr.length, 0);
+
+  // Real average speed from riders' timestamped GPS, when enough of them have
+  // timing data. Median is used (not mean) so one rider stuck at a long red
+  // light or a stalled recording doesn't skew the figure used for every
+  // future ETA on this line.
+  const observedSpeeds = candidates
+    .map((row) => {
+      const trace = sanitizeTrace(row.gpsTrace);
+      if (!trace || !row.gpsTimestamps) return null;
+      return traceSpeedKmh(trace, row.gpsTimestamps);
+    })
+    .filter((s): s is number => s != null);
+  const observedSpeedKmh = observedSpeeds.length >= MIN_DISCOVERY_REPORTS
+    ? [...observedSpeeds].sort((a, b) => a - b)[Math.floor(observedSpeeds.length / 2)]
+    : null;
+
   const currentNumbers = isBus && params.transportNumber ? [params.transportNumber] : [];
 
   const existingLines = await db
@@ -338,6 +414,11 @@ async function promoteDiscoveredRoute(params: {
       lineNumber: transitLinesTable.lineNumber,
       routePath: transitLinesTable.routePath,
       nameEn: transitLinesTable.nameEn,
+      fromArea: transitLinesTable.fromArea,
+      toArea: transitLinesTable.toArea,
+      dataSource: transitLinesTable.dataSource,
+      sourcePriority: transitLinesTable.sourcePriority,
+      observedSpeedKmh: transitLinesTable.observedSpeedKmh,
     })
     .from(transitLinesTable)
     .where(eq(transitLinesTable.transportTypeId, params.transportTypeId));
@@ -347,10 +428,36 @@ async function promoteDiscoveredRoute(params: {
     return !!trace && samePath(path, trace);
   });
 
-  const match = existingLines.find((line) => {
+  // Primary: the existing line's geometry genuinely overlaps the freshly-stitched
+  // GPS path. This is the strongest signal and is checked first.
+  const geometricMatch = existingLines.find((line) => {
     const coords = (line.routePath?.coordinates ?? null) as TracePoint[] | null;
     return !!coords && samePath(path, coords);
   });
+
+  // Fallback: a lower-priority (CSV/seed/admin) line describing the SAME named
+  // corridor but whose stored geometry is too broken (e.g. a looping/zigzagging
+  // CSV-generated path) to pass the geometric overlap check above. Without this,
+  // a broken placeholder line and a clean, GPS-verified line would end up living
+  // side by side as duplicates forever, and the broken one could still get
+  // surfaced to riders. Real rider GPS always outranks a guessed path, so once we
+  // recognize it's the same corridor we replace the geometry outright rather than
+  // creating a second entry.
+  const corridorMatch = geometricMatch ? null : existingLines.find((line) => {
+    if ((line.sourcePriority ?? 10) >= 40) return false; // already discovery-grade, don't blindly merge
+    const lineFrom = norm(line.fromArea);
+    const lineTo = norm(line.toArea);
+    const sameOrder = lineFrom === wantedFrom && lineTo === wantedTo;
+    const reversedOrder = lineFrom === wantedTo && lineTo === wantedFrom;
+    if (!sameOrder && !reversedOrder) return false;
+    if (isBus && wantedNumber) {
+      const lineNumbers = splitLineNumbers(line.lineNumber).map(norm);
+      if (lineNumbers.length && !lineNumbers.includes(wantedNumber)) return false;
+    }
+    return true;
+  });
+
+  const match = geometricMatch ?? corridorMatch;
 
   const lineNumber = (() => {
     if (!isBus) return null;
@@ -371,6 +478,7 @@ async function promoteDiscoveredRoute(params: {
 
   if (match) {
     const existingCoords = (match.routePath?.coordinates ?? []) as TracePoint[];
+    const isCorridorFallback = !geometricMatch;
     await db
       .update(transitLinesTable)
       .set({
@@ -379,8 +487,19 @@ async function promoteDiscoveredRoute(params: {
         nameAr: routeName,
         fromArea,
         toArea,
-        routePath: path.length > existingCoords.length ? routePath : match.routePath,
+        // A corridor-fallback match means the existing geometry failed the overlap
+        // check entirely (i.e. it's the broken/looping placeholder we're replacing),
+        // so the fresh GPS path always wins there. For a genuine geometric match,
+        // keep whichever polyline has more detail.
+        routePath: isCorridorFallback || path.length > existingCoords.length ? routePath : match.routePath,
+        // The line always runs fromArea -> toArea by construction (fromArea is derived
+        // from the path's start, toArea from its end), so the direction is "forward".
+        routeDirection: "forward",
         priceEgp,
+        // Only overwrite with a fresh measurement when we have one this run —
+        // never null-out a previously-established speed just because this
+        // particular batch of reports didn't include enough timed traces.
+        observedSpeedKmh: observedSpeedKmh ?? match.observedSpeedKmh,
         hasFixedStops: false,
         isActive: true,
         dataSource: "discovery",
@@ -403,7 +522,9 @@ async function promoteDiscoveredRoute(params: {
       governorate: "Cairo",
       viaStops: [],
       routePath,
+      routeDirection: "forward",
       priceEgp,
+      observedSpeedKmh,
       frequencyMinutes: isMicrobus ? 12 : 18,
       hasFixedStops: false,
       isActive: true,
@@ -440,6 +561,11 @@ router.get("/", requireAdmin, async (req, res) => {
         goodGpsCount: sql<number>`cast(sum(case when ${transportReportsTable.discoveryMeta}->>'gpsQuality' = 'good' then 1 else 0 end) as int)`,
         confidenceScore: sql<number>`least(5, greatest(1, round((1 + least(count(*), 12) / 3.0 + least(avg(jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb))), 120) / 60.0)::numeric, 1)))`,
         recommendationScore: sql<number>`cast(count(*) as int)`,
+        // Pick the GPS trace with the most points within each cluster as the representative
+        // route geometry for the small preview map / full-screen map. Cast to text so the
+        // result always arrives as a predictable JSON string, regardless of how the pg
+        // driver infers the type of a computed jsonb-array subscript expression.
+        routeGeometry: sql<string | null>`((array_agg(${transportReportsTable.gpsTrace} order by jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)) desc nulls last))[1])::text`,
       })
       .from(transportReportsTable)
       .groupBy(
@@ -453,7 +579,27 @@ router.get("/", requireAdmin, async (req, res) => {
         transportReportsTable.toArea,
       )
       .orderBy(desc(sql`count(*)`));
-    return res.json(rows);
+
+    type DiscoveryRawRow = (typeof rows)[number] & { routeGeometry: string | null };
+    const enriched = (rows as DiscoveryRawRow[]).map((row) => {
+      let geometry: TracePoint[] | null = null;
+      if (row.routeGeometry) {
+        try {
+          const parsed = JSON.parse(row.routeGeometry);
+          if (Array.isArray(parsed) && parsed.length >= 2) geometry = parsed as TracePoint[];
+        } catch {
+          geometry = null;
+        }
+      }
+      const mid = geometry ? geometry[Math.floor(geometry.length / 2)] : null;
+      return {
+        ...row,
+        routeGeometry: geometry,
+        centerLng: mid ? mid[0] : null,
+        centerLat: mid ? mid[1] : null,
+      };
+    });
+    return res.json(enriched);
   }
 
   const filters: SQL[] = [];
@@ -471,7 +617,7 @@ router.get("/", requireAdmin, async (req, res) => {
 router.post("/", requireAuth, async (req, res) => {
   const {
     transportName, transportNumber, transportTypeId, fromArea, toArea,
-    gpsTrace, stopsVisited, priceEgp, routeCompleteness, directionConfirmed, gpsQuality,
+    gpsTrace, gpsTimestamps, stopsVisited, priceEgp, routeCompleteness, directionConfirmed, gpsQuality,
   } = req.body;
 
   if (typeof transportName !== "string" || !transportName.trim()) {
@@ -485,8 +631,13 @@ router.post("/", requireAuth, async (req, res) => {
   const cleanTransportNumber = typeof transportNumber === "string" && transportNumber.trim().length ? transportNumber.trim() : null;
   const cleanFromArea = typeof fromArea === "string" && fromArea.trim().length ? fromArea.trim() : null;
   const cleanToArea = typeof toArea === "string" && toArea.trim().length ? toArea.trim() : null;
-  const cleanGpsTrace = sanitizeTrace(gpsTrace);
-  const discoveryMeta = sanitizeDiscoveryMeta({ routeCompleteness, directionConfirmed, gpsQuality });
+  const sanitizedWithTimestamps = sanitizeTraceWithTimestamps(gpsTrace, gpsTimestamps);
+  const cleanGpsTrace = sanitizedWithTimestamps?.trace ?? sanitizeTrace(gpsTrace);
+  const cleanGpsTimestamps = sanitizedWithTimestamps?.timestamps ?? null;
+  // The direction of travel is simply the order the contributor rode the route in —
+  // saved as a readable label so admins and the route engine can tell directions apart.
+  const direction = cleanFromArea && cleanToArea ? `${cleanFromArea} -> ${cleanToArea}` : null;
+  const discoveryMeta = sanitizeDiscoveryMeta({ routeCompleteness, directionConfirmed, gpsQuality, direction });
   const routeName = cleanTransportName.toLowerCase();
   const routeNumber = cleanTransportNumber ?? "";
   const routeFrom = (cleanFromArea ?? "").toLowerCase();
@@ -511,6 +662,7 @@ router.post("/", requireAuth, async (req, res) => {
     fromArea: cleanFromArea,
     toArea: cleanToArea,
     gpsTrace: cleanGpsTrace,
+    gpsTimestamps: cleanGpsTimestamps,
     stopsVisited: Array.isArray(stopsVisited) ? stopsVisited : null,
     discoveryMeta,
     priceEgp: Number.isFinite(price) ? price : null,

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { reportsTable, transitLinesTable } from "@workspace/db";
+import { reportsTable, transitLinesTable, profilesTable } from "@workspace/db";
 import { eq, desc, and, sql, type SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
@@ -8,6 +8,36 @@ import { requireAdmin } from "../middlewares/requireAdmin";
 const router = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Public, read-only service-alert lookup for a single transit line — surfaced
+ * as a live banner during planning/active trips. Deliberately returns only a
+ * count and the most common report type, never the underlying report rows
+ * (description, user, exact location), so this can be safe to call without
+ * admin auth from any rider's device.
+ */
+router.get("/active-alerts/:transitLineId", async (req, res) => {
+  const { transitLineId } = req.params;
+  if (!UUID_RE.test(transitLineId)) return res.json({ count: 0, reportType: null });
+
+  const sinceHours = 6;
+  const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+  const rows = await db
+    .select({ reportType: reportsTable.reportType })
+    .from(reportsTable)
+    .where(and(
+      eq(reportsTable.transitLineId, transitLineId),
+      eq(reportsTable.status, "open"),
+      sql`${reportsTable.createdAt} >= ${since}`,
+    ));
+
+  if (!rows.length) return res.json({ count: 0, reportType: null });
+
+  const counts = new Map<string, number>();
+  for (const r of rows) counts.set(r.reportType, (counts.get(r.reportType) ?? 0) + 1);
+  const topType = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  return res.json({ count: rows.length, reportType: topType });
+});
 
 const REPORT_TYPES = [
   "wrong_route",
@@ -30,8 +60,22 @@ router.get("/", requireAdmin, async (req, res) => {
     filters.push(eq(reportsTable.status, status));
   }
   const rows = await db
-    .select()
+    .select({
+      id: reportsTable.id,
+      reportType: reportsTable.reportType,
+      transitLineId: reportsTable.transitLineId,
+      transportTypeId: reportsTable.transportTypeId,
+      description: reportsTable.description,
+      latitude: reportsTable.latitude,
+      longitude: reportsTable.longitude,
+      status: reportsTable.status,
+      createdAt: reportsTable.createdAt,
+      resolvedAt: reportsTable.resolvedAt,
+      userName: profilesTable.displayName,
+      userPhone: profilesTable.phone,
+    })
     .from(reportsTable)
+    .leftJoin(profilesTable, eq(profilesTable.userId, reportsTable.userId))
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(desc(reportsTable.createdAt));
   res.json(rows);
