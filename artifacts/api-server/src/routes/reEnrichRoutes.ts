@@ -61,6 +61,16 @@ router.post("/", requireAdmin, async (req, res) => {
     Math.max(1, Number(req.query.limit) || DEFAULT_LIMIT),
   );
   const offset = Math.max(0, Number(req.query.offset) || 0);
+  // CSV-imported rows are tagged dataSource="seed" in the DB (seedFromCSV.ts
+  // never sets it explicitly, so it falls through to the schema default) —
+  // "csv" is the colloquial name, not the stored value. Comma-separated list
+  // supported, e.g. ?dataSource=seed,admin to also catch lines an earlier,
+  // pre-fix run of this same endpoint already wrote a bad path into.
+  const dataSourceParam =
+    typeof req.query.dataSource === "string" ? req.query.dataSource.trim() : "";
+  const dataSourceFilter = dataSourceParam
+    ? new Set(dataSourceParam.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean))
+    : null;
 
   // Resolve type ids whose name matches transportMode (substring, case-insensitive).
   const types = await db.select().from(transportTypesTable);
@@ -80,6 +90,16 @@ router.post("/", requireAdmin, async (req, res) => {
 
   let targets = allLines.filter((l) => !l.hasFixedStops);
   if (matchTypeIds) targets = targets.filter((l) => matchTypeIds!.has(l.transportTypeId));
+  if (dataSourceFilter) {
+    // Explicit allow-list — only the requested source(s), e.g. "seed" alone.
+    targets = targets.filter((l) => dataSourceFilter.has((l.dataSource || "seed").toLowerCase()));
+  } else {
+    // No filter given — still NEVER touch discovery-sourced lines by default.
+    // Those carry real rider GPS, which is strictly better than anything this
+    // synthetic geocode-and-snap pipeline could produce; silently overwriting
+    // ground truth with a guess would be a regression, not an improvement.
+    targets = targets.filter((l) => (l.dataSource || "seed").toLowerCase() !== "discovery");
+  }
 
   const totalMatching = targets.length;
   const batch = targets.slice(offset, offset + limit);
@@ -158,6 +178,7 @@ router.post("/", requireAdmin, async (req, res) => {
   const nextOffset = offset + batch.length;
   res.json({
     transportMode: transportMode || "all-board-anywhere",
+    dataSourceFilter: dataSourceFilter ? [...dataSourceFilter] : "all-except-discovery",
     totalMatching,
     offset,
     limit,

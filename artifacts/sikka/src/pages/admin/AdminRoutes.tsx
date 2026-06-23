@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -51,6 +51,11 @@ const AdminRoutes = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [dedupeResult, setDedupeResult] = useState<{ groupsFound: number; duplicateLinesRemoved: number; groups: { keptLabel: string; removedLabels: string[] }[] } | null>(null);
   const [dedupeRunning, setDedupeRunning] = useState(false);
+  const [enrichRunning, setEnrichRunning] = useState(false);
+  const [enrichStop, setEnrichStop] = useState(false);
+  const enrichStopRef = useRef(false);
+  const [enrichProgress, setEnrichProgress] = useState<{ processed: number; total: number; updated: number; skipped: number; failed: number } | null>(null);
+  const [enrichLog, setEnrichLog] = useState<{ line: string | null; status: string; coords?: number }[]>([]);
 
   const fetchRoutes = () => {
     setIsLoading(true);
@@ -135,6 +140,57 @@ const AdminRoutes = () => {
     }
   };
 
+  interface ReEnrichBatchResult {
+    totalMatching: number;
+    processed: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    nextOffset: number;
+    done: boolean;
+    results: { id: string; line: string | null; status: string; coords?: number }[];
+  }
+
+  // Walks every batch automatically (the endpoint is deliberately small-batch
+  // to dodge proxy timeouts — each Nominatim geocode is rate-limited to
+  // ~1/sec, so a route with many breadcrumbs can take a while). "Stop" just
+  // sets a flag the loop checks between batches, so a run in progress can be
+  // halted without losing the batches already applied.
+  const runReEnrich = async (dataSource: string) => {
+    setEnrichRunning(true);
+    setEnrichStop(false);
+    enrichStopRef.current = false;
+    setEnrichLog([]);
+    let offset = 0;
+    let totals = { processed: 0, updated: 0, skipped: 0, failed: 0, total: 0 };
+    try {
+      while (true) {
+        if (enrichStopRef.current) break;
+        const result = await api.post<ReEnrichBatchResult>(
+          `/admin/re-enrich-routes?dataSource=${encodeURIComponent(dataSource)}&limit=5&offset=${offset}`,
+          {},
+        );
+        totals = {
+          processed: totals.processed + result.processed,
+          updated: totals.updated + result.updated,
+          skipped: totals.skipped + result.skipped,
+          failed: totals.failed + result.failed,
+          total: result.totalMatching,
+        };
+        setEnrichProgress(totals);
+        setEnrichLog((prev) => [...prev, ...result.results.map((r) => ({ line: r.line, status: r.status, coords: r.coords }))]);
+        if (result.done || result.processed === 0) break;
+        offset = result.nextOffset;
+      }
+      toast.success(`Re-enrichment finished: ${totals.updated} updated, ${totals.skipped} flagged for review, ${totals.failed} failed`);
+      fetchRoutes();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Re-enrichment failed partway through — you can re-run it, already-processed routes will just be redone');
+    } finally {
+      setEnrichRunning(false);
+    }
+  };
+
   if (isLoading) return <p className="text-muted-foreground text-sm">Loading...</p>;
 
   const typeById = new Map(transportTypes.map(t => [t.id, t]));
@@ -196,6 +252,64 @@ const AdminRoutes = () => {
                   <p className="text-muted-foreground">Removes: {g.removedLabels.join(' · ')}</p>
                 </div>
               ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Re-run the route-generation pipeline (Nominatim + OSRM, with the
+          backtrack-rejection + loop-detection fixes) over CSV-imported
+          ("seed") routes — the fix for routes that loop/zigzag. Discovery
+          (GPS-verified) lines are never touched by the default button. */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="text-sm font-semibold">Re-enrich CSV routes</h3>
+              <p className="text-xs text-muted-foreground">
+                Re-runs the latest routing pipeline over CSV-imported routes only — GPS-verified routes are never touched.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {!enrichRunning ? (
+                <Button size="sm" onClick={() => runReEnrich('seed')}>
+                  Re-route all CSV routes
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => { enrichStopRef.current = true; setEnrichStop(true); }}
+                  disabled={enrichStop}
+                >
+                  {enrichStop ? 'Stopping…' : 'Stop'}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {enrichProgress && (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{enrichProgress.processed} / {enrichProgress.total} processed</span>
+                <span>{enrichProgress.updated} updated · {enrichProgress.skipped} flagged for review · {enrichProgress.failed} failed</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${enrichProgress.total ? Math.min(100, (enrichProgress.processed / enrichProgress.total) * 100) : 0}%` }}
+                />
+              </div>
+              {enrichLog.length > 0 && (
+                <div className="max-h-40 overflow-y-auto space-y-1 pt-1">
+                  {enrichLog.slice(-20).map((r, i) => (
+                    <p key={i} className="text-[11px] text-muted-foreground">
+                      {r.line || '(unnumbered)'} — <span className={r.status === 'updated' ? 'text-green-600' : r.status === 'failed' ? 'text-destructive' : 'text-yellow-600'}>{r.status}</span>
+                      {r.coords ? ` (${r.coords} pts)` : ''}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </CardContent>
