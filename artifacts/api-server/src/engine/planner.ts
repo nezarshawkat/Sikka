@@ -115,6 +115,20 @@ function findClosestPathIndex(path: [number, number][], coord: Coord): number {
   return minIdx;
 }
 
+/**
+ * Same governorate bounding-box rule as the client-side offline planner —
+ * only suggest routes tagged to the governorate the rider is actually in.
+ */
+function governorateOf(point: Coord): string {
+  if (point.lat >= 31.0 && point.lat <= 31.35 && point.lng >= 29.7 && point.lng <= 30.15) {
+    return "Alexandria";
+  }
+  if (point.lat >= 29.6 && point.lat <= 30.35 && point.lng >= 30.9 && point.lng <= 31.95) {
+    return "Cairo";
+  }
+  return "Cairo";
+}
+
 function buildOverlay(
   graph: TransitGraph,
   origin: Coord,
@@ -154,10 +168,12 @@ function buildOverlay(
     }
   };
 
-  for (const s of nearestStops(graph, origin, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT)) {
+  const originGovernorate = governorateOf(origin);
+  const destGovernorate = governorateOf(dest);
+  for (const s of nearestStops(graph, origin, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT, originGovernorate)) {
     connect("origin", s.id, s.distKm);
   }
-  for (const s of nearestStops(graph, dest, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT)) {
+  for (const s of nearestStops(graph, dest, TAXI_CONNECT_KM, ACCESS_STOP_LIMIT, destGovernorate)) {
     connect(s.id, "dest", s.distKm);
   }
 
@@ -375,7 +391,7 @@ export interface PlanRequest {
 }
 
 const UI_ICON: Record<ModeKey, string> = {
-  metro: "metro", monorail: "monorail", train: "train",
+  metro: "metro", monorail: "monorail", lrt: "lrt", brt: "brt", train: "train",
   bus: "bus", serfis: "bus", microbus: "bus",
   taxi: "car", tuktuk: "bike", walk: "walk",
 };
@@ -390,11 +406,11 @@ function plannerLanguage(value: boolean | string): PlannerLanguage {
 }
 
 const modeNames: Record<Exclude<PlannerLanguage, "en" | "ar">, Record<ModeKey, string>> = {
-  fr: { metro: "metro", monorail: "monorail", train: "train", bus: "bus", serfis: "serfis", microbus: "minibus", taxi: "taxi", tuktuk: "tuk-tuk", walk: "marche" },
-  de: { metro: "Metro", monorail: "Monorail", train: "Zug", bus: "Bus", serfis: "Serfis", microbus: "Minibus", taxi: "Taxi", tuktuk: "Tuk-tuk", walk: "Fussweg" },
-  es: { metro: "metro", monorail: "monorriel", train: "tren", bus: "autobus", serfis: "serfis", microbus: "microbus", taxi: "taxi", tuktuk: "tuk-tuk", walk: "caminar" },
-  zh: { metro: "地铁", monorail: "单轨", train: "火车", bus: "公交车", serfis: "合乘车", microbus: "小巴", taxi: "出租车", tuktuk: "嘟嘟车", walk: "步行" },
-  ru: { metro: "метро", monorail: "монорельс", train: "поезд", bus: "автобус", serfis: "серфис", microbus: "маршрутка", taxi: "такси", tuktuk: "тук-тук", walk: "пешком" },
+  fr: { metro: "metro", monorail: "monorail", lrt: "RER leger", brt: "BRT", train: "train", bus: "bus", serfis: "serfis", microbus: "minibus", taxi: "taxi", tuktuk: "tuk-tuk", walk: "marche" },
+  de: { metro: "Metro", monorail: "Monorail", lrt: "Stadtbahn", brt: "Schnellbus", train: "Zug", bus: "Bus", serfis: "Serfis", microbus: "Minibus", taxi: "Taxi", tuktuk: "Tuk-tuk", walk: "Fussweg" },
+  es: { metro: "metro", monorail: "monorriel", lrt: "tren ligero", brt: "autobus rapido", train: "tren", bus: "autobus", serfis: "serfis", microbus: "microbus", taxi: "taxi", tuktuk: "tuk-tuk", walk: "caminar" },
+  zh: { metro: "地铁", monorail: "单轨", lrt: "轻轨", brt: "快速公交", train: "火车", bus: "公交车", serfis: "合乘车", microbus: "小巴", taxi: "出租车", tuktuk: "嘟嘟车", walk: "步行" },
+  ru: { metro: "метро", monorail: "монорельс", lrt: "легкое метро", brt: "скоростной автобус", train: "поезд", bus: "автобус", serfis: "серфис", microbus: "маршрутка", taxi: "такси", tuktuk: "тук-тук", walk: "пешком" },
 };
 
 function localizedCrowd(crowding: PlanLeg["crowding"], lang: Exclude<PlannerLanguage, "en" | "ar">): string {
@@ -566,8 +582,8 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, languageO
   }
 
   // ── Metro / Monorail / Train: gated stations, fixed stops, clear signage ──
-  if (leg.mode === "metro" || leg.mode === "monorail" || leg.mode === "train") {
-    const womenNote = leg.mode === "metro";
+  if (leg.mode === "metro" || leg.mode === "monorail" || leg.mode === "train" || leg.mode === "lrt") {
+    const womenNote = leg.mode === "metro" || leg.mode === "lrt";
     return [...waitLine, ...(isArabic
       ? [
           `روح لمحطة ${start} واشتري تذكرة أو اعمل تاب بالكارت عند الجيت.`,
@@ -582,6 +598,22 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, languageO
           `Board ${name}${ln} toward ${end}, and follow the line's color on the platform signage.`,
           stops > 0 ? `Count about ${stops} stop${stops === 1 ? "" : "s"} — station names are announced and shown on screens inside the car.` : `Stay on the line until ${end}.`,
           `Exit at ${end} station and follow the exit sign for the street or landmark you need — metro stations often have several numbered exits leading to very different streets.`,
+        ])];
+  }
+
+  if (leg.mode === "brt") {
+    return [...waitLine, ...(isArabic
+      ? [
+          `روح لمحطة الباص الترددي عند ${start} — الوصول غالباً من خلال كوبري أو نفق مشاة فوق الطريق الدائري.`,
+          `اعمل تاب بالكارت أو اشتري تذكرة عند البوابة الإلكترونية، زي محطات المترو.`,
+          `اركب الباص في اتجاه ${end} وتابع الشاشات اللي بتوضح وقت وصول الباص التالي.`,
+          `انزل في محطة ${end} واتبع لافتات الخروج.`,
+        ]
+      : [
+          `Head to the BRT station at ${start} — access is usually via a pedestrian bridge or tunnel above the Ring Road.`,
+          `Tap your card or buy a ticket at the electronic gate, similar to a metro station.`,
+          `Board the bus toward ${end} and watch the screens for the next bus's arrival time.`,
+          `Get off at ${end} station and follow the exit signage.`,
         ])];
   }
 

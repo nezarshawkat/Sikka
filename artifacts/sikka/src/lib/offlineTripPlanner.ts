@@ -1,7 +1,16 @@
+// Bundled fallback snapshot — ships inside the app build itself, so a fresh
+// install has routes immediately with ZERO network calls. Regenerate this
+// file (see scripts/exportBundledSnapshot.mjs) before each release so new
+// installs start from current data; after that, the existing manifest/delta
+// check (see getSnapshot below) only ever pulls a small delta, and only when
+// an admin has actually changed something — never a full re-fetch per trip
+// or per install.
+import bundledSnapshotRaw from '@/data/bundledSnapshot.json';
+
 type LngLat = [number, number];
 type Coord = { lat: number; lng: number };
 type PlanKey = "economic" | "comfortable" | "premium";
-type ModeKey = "metro" | "monorail" | "train" | "bus" | "serfis" | "microbus" | "taxi" | "tuktuk" | "walk";
+type ModeKey = "metro" | "monorail" | "lrt" | "brt" | "train" | "bus" | "serfis" | "microbus" | "taxi" | "tuktuk" | "walk";
 type RouteVariantKey = "recommended" | "cheapest" | "fastest" | "fewest_transfers";
 type RouteStatus = "active" | "needs_review" | "inactive" | "pending_discovery";
 
@@ -66,6 +75,8 @@ type OfflineSnapshot = {
     createdAt?: string;
   }[];
 };
+
+const bundledSnapshot = bundledSnapshotRaw as OfflineSnapshot;
 
 type PlannerRequest = {
   startLat: number;
@@ -177,12 +188,16 @@ const ROUTE_OPTION_META: Record<RouteVariantKey, { label: string; description: s
   fastest: { label: "Fastest", description: "Shortest total travel time", color: "#DC2626" },
   fewest_transfers: { label: "Fewest Transfers", description: "Simplest route with fewer vehicle changes", color: "#7C3AED" },
 };
-const streetGeometryCache = new Map<string, LngLat[] | null>();
 
 function modeOfType(nameEn: string): ModeKey {
   const n = nameEn.toLowerCase();
   if (n.includes("metro")) return "metro";
   if (n.includes("monorail")) return "monorail";
+  // Must come before the generic "train"/"bus" checks below, since "LRT"
+  // ("Light Rail Transit") and "BRT" ("Bus Rapid Transit") are their own
+  // distinct fixed-stop systems, not a plain commuter train or city bus.
+  if (n.includes("lrt") || n.includes("light rail")) return "lrt";
+  if (n.includes("brt") || n.includes("rapid transit")) return "brt";
   if (n.includes("train")) return "train";
   if (n.includes("serfis")) return "serfis";
   if (n.includes("microbus")) return "microbus";
@@ -192,10 +207,35 @@ function modeOfType(nameEn: string): ModeKey {
   return "bus";
 }
 
+/**
+ * Determines which governorate a point falls in, using simple bounding
+ * boxes for the governorates that actually have transit data so far. Trips
+ * only ever suggest routes tagged to the rider's own governorate — Cairo and
+ * Alexandria are ~220km apart, so a generic distance filter would mostly
+ * get this right by accident, but an explicit check is the correct, robust
+ * rule rather than relying on that coincidence, and it's what makes the
+ * boundary intentional as more governorates get added later.
+ */
+function governorateOf(point: Coord): string {
+  // Alexandria governorate (coastal strip along the Mediterranean).
+  if (point.lat >= 31.0 && point.lat <= 31.35 && point.lng >= 29.7 && point.lng <= 30.15) {
+    return "Alexandria";
+  }
+  // Greater Cairo (Cairo, Giza, Qalyubia metro area, and the new cities to
+  // the east that Cairo LRT/BRT/Metro extend into).
+  if (point.lat >= 29.6 && point.lat <= 30.35 && point.lng >= 30.9 && point.lng <= 31.95) {
+    return "Cairo";
+  }
+  // Outside any known governorate's bounding box — default to Cairo, since
+  // that's where the overwhelming majority of seeded data lives and a rider
+  // this far out is most likely planning a trip toward/within it anyway.
+  return "Cairo";
+}
+
 function allowedModes(planKey: PlanKey): Set<ModeKey> {
-  if (planKey === "economic") return new Set(["metro", "monorail", "train", "bus", "serfis", "microbus", "tuktuk"]);
-  if (planKey === "comfortable") return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
-  return new Set(["metro", "monorail", "train", "bus", "serfis", "taxi", "tuktuk"]);
+  if (planKey === "economic") return new Set(["metro", "monorail", "lrt", "brt", "train", "bus", "serfis", "microbus", "tuktuk"]);
+  if (planKey === "comfortable") return new Set(["metro", "monorail", "lrt", "brt", "train", "bus", "serfis", "taxi", "tuktuk"]);
+  return new Set(["metro", "monorail", "lrt", "brt", "train", "bus", "serfis", "taxi", "tuktuk"]);
 }
 
 function haversineKm(a: Coord, b: Coord): number {
@@ -276,18 +316,24 @@ function trustBadge(line: OfflineLine): string {
 
 function modePreferencePenalty(mode: ModeKey, planKey: PlanKey): number {
   if (planKey === "economic") {
-    if (mode === "metro" || mode === "train" || mode === "bus") return -12;
+    if (mode === "metro" || mode === "monorail" || mode === "lrt" || mode === "train" || mode === "bus" || mode === "brt") return -12;
     if (mode === "microbus" || mode === "serfis") return 0;
     if (mode === "taxi") return 90;
   }
   if (planKey === "comfortable") {
-    if (mode === "metro" || mode === "train" || mode === "bus") return -18;
+    // BRT belongs in comfortable specifically: dedicated lane, fixed stops,
+    // AC electric buses — a genuinely more comfortable ride than a regular
+    // city bus or microbus, so it gets the same preference bonus as rail.
+    if (mode === "metro" || mode === "monorail" || mode === "lrt" || mode === "train" || mode === "bus" || mode === "brt") return -18;
     if (mode === "microbus") return 85;
     if (mode === "taxi" || mode === "tuktuk") return 18;
   }
   if (planKey === "premium") {
     if (mode === "taxi") return -20;
-    if (mode === "metro" || mode === "train") return -10;
+    // Metro AND monorail (and LRT) get the same premium-tier preference —
+    // fast, modern, fixed-rail options belong in the premium plan too, not
+    // just the cheap one.
+    if (mode === "metro" || mode === "monorail" || mode === "lrt" || mode === "train") return -10;
     if (mode === "microbus") return 120;
   }
   return 0;
@@ -301,69 +347,14 @@ function connectorModeFromSegment(segment: ApiSegment): ModeKey | null {
   return null;
 }
 
-async function fetchStreetGeometry(mode: ModeKey, from: LngLat, to: LngLat, signal: AbortSignal): Promise<LngLat[] | null> {
-  const drivingUrls = [
-    `https://router.project-osrm.org/route/v1/driving/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-    `https://routing.openstreetmap.de/routed-car/route/v1/driving/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-  ];
-  const walkingUrls = [
-    `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-    `https://router.project-osrm.org/route/v1/foot/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-    `https://router.project-osrm.org/route/v1/walking/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=false`,
-  ];
-  const urls = mode === "walk" ? walkingUrls : drivingUrls;
-
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, { signal, cache: "force-cache" });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const coords = data.routes?.[0]?.geometry?.coordinates as LngLat[] | undefined;
-      if (Array.isArray(coords) && coords.length >= 2) return coords.map((p) => [p[0], p[1]] as LngLat);
-    } catch {
-      if (signal.aborted) return null;
-    }
-  }
-  return null;
-}
-
+// Connector legs (walk/taxi/tuktuk) used to call OSRM live, per segment,
+// every single time a trip was planned — meaning every trip, and every
+// fresh install before any cache existed, hit a live network endpoint just
+// to plan a route. That's gone: this now always returns the already-
+// computed on-device geometry, so planning a trip never touches the
+// network at all. Route data syncing (admin changes) is handled separately
+// by the bundled-snapshot + manifest/delta mechanism above.
 async function snapConnectorGeometry(mode: ModeKey, geometry: LngLat[]): Promise<LngLat[]> {
-  if (geometry.length < 2) return geometry;
-  if (mode !== "walk" && mode !== "taxi" && mode !== "tuktuk") return geometry;
-  const from = geometry[0];
-  const to = geometry[geometry.length - 1];
-  const profile = mode === "walk" ? "foot" : "driving";
-  const key = `${profile}:${from[0].toFixed(5)},${from[1].toFixed(5)}:${to[0].toFixed(5)},${to[1].toFixed(5)}`;
-  if (streetGeometryCache.has(key)) return streetGeometryCache.get(key) ?? geometry;
-
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 5000);
-  try {
-    const snapped = await fetchStreetGeometry(mode, from, to, controller.signal);
-    if (snapped?.length) {
-      snapped[0] = from;
-      snapped[snapped.length - 1] = to;
-      const directKm = haversineKm({ lng: from[0], lat: from[1] }, { lng: to[0], lat: to[1] });
-      const snappedKm = pathLengthKm(snapped);
-      if (mode === "walk" && (maxConsecutiveStepKm(snapped) > 0.35 || snappedKm > Math.max(0.15, directKm * 3.2))) {
-        streetGeometryCache.set(key, null);
-        return directKm <= 0.15 ? geometry : [];
-      }
-      if (mode !== "walk" && maxConsecutiveStepKm(snapped) > 1.2) {
-        streetGeometryCache.set(key, null);
-        return geometry;
-      }
-      streetGeometryCache.set(key, snapped);
-      return snapped;
-    }
-  } finally {
-    window.clearTimeout(timer);
-  }
-  streetGeometryCache.set(key, null);
-  if (mode === "walk") {
-    const directKm = haversineKm({ lng: from[0], lat: from[1] }, { lng: to[0], lat: to[1] });
-    return directKm <= 0.15 ? geometry : geometry;
-  }
   return geometry;
 }
 
@@ -458,7 +449,9 @@ function lineFare(type: OfflineType, line: OfflineLine, km: number): number {
 }
 
 function waitMinutes(line: OfflineLine, mode: ModeKey): number {
-  const defaults: Record<ModeKey, number> = { metro: 6, monorail: 8, train: 30, bus: 18, serfis: 10, microbus: 10, taxi: 6, tuktuk: 5, walk: 0 };
+  // BRT headway is ~3 min off-peak / 1.5 min peak per the Ring Road operator;
+  // LRT doesn't have a widely published headway yet, estimated similar to monorail.
+  const defaults: Record<ModeKey, number> = { metro: 6, monorail: 8, lrt: 8, brt: 3, train: 30, bus: 18, serfis: 10, microbus: 10, taxi: 6, tuktuk: 5, walk: 0 };
   return Math.max(0, (line.frequencyMinutes ?? defaults[mode]) / 2);
 }
 
@@ -540,8 +533,8 @@ function rideInstructions(candidate: Candidate, isArabic: boolean): string[] {
 
   let result: string[];
 
-  if (candidate.mode === "metro" || candidate.mode === "monorail" || candidate.mode === "train") {
-    const womenNote = candidate.mode === "metro";
+  if (candidate.mode === "metro" || candidate.mode === "monorail" || candidate.mode === "train" || candidate.mode === "lrt") {
+    const womenNote = candidate.mode === "metro" || candidate.mode === "lrt";
     result = isArabic
       ? [
           `روح لمحطة ${from} واشتري تذكرة أو اعمل تاب بالكارت عند الجيت.`,
@@ -554,6 +547,20 @@ function rideInstructions(candidate: Candidate, isArabic: boolean): string[] {
           ...(womenNote ? [`The middle two cars are reserved for women only, in case that matters for you.`] : []),
           `Board ${name} toward ${to}, and follow the line's color on the platform signage.`,
           `Exit at ${to} station and follow the exit sign for the street/landmark you need — stations often have several exits leading to very different streets.`,
+        ];
+  } else if (candidate.mode === "brt") {
+    result = isArabic
+      ? [
+          `روح لمحطة الباص الترددي عند ${from} — الوصول غالباً من خلال كوبري أو نفق مشاة فوق الطريق الدائري.`,
+          `اعمل تاب بالكارت أو اشتري تذكرة عند البوابة الإلكترونية، زي محطات المترو.`,
+          `اركب الباص في اتجاه ${to} وتابع الشاشات اللي بتوضح وقت وصول الباص التالي.`,
+          `انزل في محطة ${to} واتبع لافتات الخروج.`,
+        ]
+      : [
+          `Head to the BRT station at ${from} — access is usually via a pedestrian bridge or tunnel above the Ring Road.`,
+          `Tap your card or buy a ticket at the electronic gate, similar to a metro station.`,
+          `Board the bus toward ${to} and watch the screens for the next bus's arrival time.`,
+          `Get off at ${to} station and follow the exit signage.`,
         ];
   } else if (candidate.mode === "microbus") {
     result = isArabic
@@ -847,20 +854,45 @@ async function fetchSnapshot(): Promise<OfflineSnapshot | null> {
 
 async function getSnapshot(): Promise<OfflineSnapshot | null> {
   const cached = await readCachedSnapshot().catch(() => null);
-  if (!cached || Date.now() - cached.savedAt > SNAPSHOT_REFRESH_MS) {
+
+  if (!cached) {
+    // Fresh install, nothing in IndexedDB yet: seed instantly from the data
+    // bundled into the app build — zero network calls, works the moment the
+    // app opens for the very first time, even with no signal at all.
+    if (bundledSnapshot.lines?.length) {
+      await writeCachedSnapshot(bundledSnapshot).catch(() => {});
+      // Still worth a single lightweight manifest check in the background so
+      // anything an admin changed since this build was released shows up
+      // without the rider having to wait — but the trip being planned right
+      // now already has data to work with immediately, regardless of result.
+      void fetchSnapshot().catch(() => {});
+      return bundledSnapshot;
+    }
+    // No bundled data at all (e.g. a dev build before the export step has
+    // ever been run) — only in that case fall back to a live fetch so the
+    // app isn't simply unusable.
+    return await fetchSnapshot();
+  }
+
+  if (Date.now() - cached.savedAt > SNAPSHOT_REFRESH_MS) {
     const fresh = await fetchSnapshot();
     if (fresh) return fresh;
   }
-  return cached?.snapshot ?? null;
+  return cached.snapshot;
 }
 
 function buildCandidates(snapshot: OfflineSnapshot, point: Coord, planKey: PlanKey, limit: number): Candidate[] {
   const types = new Map(snapshot.types.map((t) => [t.id, t]));
   const allowed = allowedModes(planKey);
   const maxKm = planKey === "economic" ? 3.5 : 5;
+  const riderGovernorate = governorateOf(point);
   const candidates: Candidate[] = [];
   for (const line of snapshot.lines) {
     if (!line.path || line.path.length < 2) continue;
+    // Only suggest routes that actually serve the governorate the rider is
+    // currently in — a Cairo line should never appear as an option while
+    // planning a trip inside Alexandria, and vice versa.
+    if ((line.governorate || "Cairo") !== riderGovernorate) continue;
     const type = types.get(line.transportTypeId);
     if (!type) continue;
     const mode = modeOfType(type.nameEn);

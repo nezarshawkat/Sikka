@@ -20,6 +20,7 @@ interface TransitLine {
   toArea: string;
   viaStops: string[];
   priceEgp: number;
+  governorate?: string;
   routePath: { type: 'LineString'; coordinates: [number, number][] } | null;
   isActive?: boolean;
   dataSource?: string;
@@ -47,6 +48,7 @@ const AdminRoutes = () => {
   const [typeId, setTypeId] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [governorateFilter, setGovernorateFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [dedupeResult, setDedupeResult] = useState<{ groupsFound: number; duplicateLinesRemoved: number; groups: { keptLabel: string; removedLabels: string[] }[] } | null>(null);
@@ -56,6 +58,10 @@ const AdminRoutes = () => {
   const enrichStopRef = useRef(false);
   const [enrichProgress, setEnrichProgress] = useState<{ processed: number; total: number; updated: number; skipped: number; failed: number } | null>(null);
   const [enrichLog, setEnrichLog] = useState<{ line: string | null; status: string; coords?: number }[]>([]);
+  const [seedingDataset, setSeedingDataset] = useState<string | null>(null);
+  const [seedLog, setSeedLog] = useState<Record<string, { line: string; status: string; coords?: number }[]>>({});
+  const [trainSeedRunning, setTrainSeedRunning] = useState(false);
+  const [trainSeedResult, setTrainSeedResult] = useState<{ count: number } | null>(null);
 
   const fetchRoutes = () => {
     setIsLoading(true);
@@ -78,6 +84,7 @@ const AdminRoutes = () => {
       const typeMatch = typeId === 'all' || route.transportTypeId === typeId;
       const statusMatch = statusFilter === 'all' || (route.routeStatus ?? (route.isActive ? 'active' : 'inactive')) === statusFilter;
       const sourceMatch = sourceFilter === 'all' || (route.dataSource ?? 'seed') === sourceFilter;
+      const governorateMatch = governorateFilter === 'all' || (route.governorate ?? 'Cairo') === governorateFilter;
       const searchMatch = !q ||
         route.lineNumber?.toLowerCase().includes(q) ||
         route.nameEn?.toLowerCase().includes(q) ||
@@ -85,9 +92,9 @@ const AdminRoutes = () => {
         route.fromArea?.toLowerCase().includes(q) ||
         route.toArea?.toLowerCase().includes(q) ||
         route.viaStops?.some((stop: string) => stop.toLowerCase().includes(q));
-      return typeMatch && statusMatch && sourceMatch && searchMatch;
+      return typeMatch && statusMatch && sourceMatch && governorateMatch && searchMatch;
     });
-  }, [query, routes, sourceFilter, statusFilter, typeId]);
+  }, [query, routes, sourceFilter, statusFilter, typeId, governorateFilter]);
 
   const qualitySummary = useMemo(() => {
     const byStatus = new Map<string, number>();
@@ -188,6 +195,51 @@ const AdminRoutes = () => {
       toast.error(err instanceof Error ? err.message : 'Re-enrichment failed partway through — you can re-run it, already-processed routes will just be redone');
     } finally {
       setEnrichRunning(false);
+    }
+  };
+
+  interface SeedTransitBatchResult {
+    done: boolean;
+    totalLines: number;
+    nextOffset?: number;
+    results: { line: string; status: string; coords?: number; geocodedStations?: number; totalStations?: number }[];
+  }
+
+  // Same auto-batching loop shape as runReEnrich — one LINE per call, since
+  // each station in it needs its own rate-limited geocode lookup.
+  const seedTransitSystem = async (dataset: 'lrt' | 'brt' | 'tram') => {
+    setSeedingDataset(dataset);
+    setSeedLog((prev) => ({ ...prev, [dataset]: [] }));
+    let offset = 0;
+    try {
+      while (true) {
+        const result = await api.post<SeedTransitBatchResult>(
+          `/admin/seed-egypt-transit?dataset=${dataset}&offset=${offset}`,
+          {},
+        );
+        setSeedLog((prev) => ({ ...prev, [dataset]: [...(prev[dataset] || []), ...result.results] }));
+        if (result.done) break;
+        offset = result.nextOffset ?? offset + 1;
+      }
+      toast.success(`${dataset.toUpperCase()} seeding finished`);
+      fetchRoutes();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `${dataset.toUpperCase()} seeding failed partway through`);
+    } finally {
+      setSeedingDataset(null);
+    }
+  };
+
+  const seedTrains = async () => {
+    setTrainSeedRunning(true);
+    try {
+      const result = await api.post<{ count: number }>('/trains/seed', {});
+      setTrainSeedResult(result);
+      toast.success(`Seeded/updated ${result.count} train entries`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Train seeding failed');
+    } finally {
+      setTrainSeedRunning(false);
     }
   };
 
@@ -315,7 +367,76 @@ const AdminRoutes = () => {
         </CardContent>
       </Card>
 
-      <div className="grid gap-2 md:grid-cols-[220px_180px_180px_1fr]">
+      {/* Cairo LRT / BRT / Alexandria Tram — real station lists, geocoded
+          and road/rail-snapped at seed time. Each runs in its own governorate
+          and plan tier automatically (LRT: premium, BRT: comfortable, Tram:
+          economic) per the underlying transport type configuration. */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">Seed Cairo LRT / BRT / Alexandria Tram</h3>
+            <p className="text-xs text-muted-foreground">
+              Geocodes each real station and snaps the line to road/rail geometry — no manual drawing. Safe to re-run.
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {(['lrt', 'brt', 'tram'] as const).map((ds) => (
+              <Button
+                key={ds}
+                size="sm"
+                variant={seedingDataset === ds ? 'secondary' : 'outline'}
+                disabled={seedingDataset !== null}
+                onClick={() => seedTransitSystem(ds)}
+              >
+                {seedingDataset === ds ? `Seeding ${ds.toUpperCase()}…` : `Seed ${ds.toUpperCase()}`}
+              </Button>
+            ))}
+          </div>
+          {Object.entries(seedLog).map(([ds, entries]) => entries.length > 0 && (
+            <div key={ds} className="space-y-1 pt-1">
+              <p className="text-xs font-medium text-foreground">{ds.toUpperCase()}</p>
+              {entries.map((r, i) => (
+                <p key={i} className="text-[11px] text-muted-foreground">
+                  {r.line} — <span className={r.status === 'seeded' ? 'text-green-600' : r.status.startsWith('failed') ? 'text-destructive' : 'text-yellow-600'}>{r.status}</span>
+                  {r.coords ? ` (${r.coords} pts, ${r.geocodedStations}/${r.totalStations} stations geocoded)` : ''}
+                </p>
+              ))}
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      {/* Intercity train timetables — two fully-detailed real schedules plus
+          route-level summaries for the other major lines. */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="text-sm font-semibold">Seed train timetables</h3>
+              <p className="text-xs text-muted-foreground">Populates the train search page with real schedule data.</p>
+            </div>
+            <Button size="sm" onClick={seedTrains} disabled={trainSeedRunning}>
+              {trainSeedRunning ? 'Seeding…' : 'Seed trains'}
+            </Button>
+          </div>
+          {trainSeedResult && (
+            <p className="text-xs text-muted-foreground">Seeded/updated {trainSeedResult.count} train entries.</p>
+          )}
+        </CardContent>
+      </Card>
+
+
+      <div className="grid gap-2 md:grid-cols-[180px_220px_180px_180px_1fr]">
+        <Select value={governorateFilter} onValueChange={setGovernorateFilter}>
+          <SelectTrigger>
+            <SelectValue placeholder="Governorate" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All governorates</SelectItem>
+            <SelectItem value="Cairo">Cairo</SelectItem>
+            <SelectItem value="Alexandria">Alexandria</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={typeId} onValueChange={setTypeId}>
           <SelectTrigger>
             <SelectValue placeholder="Transport type" />

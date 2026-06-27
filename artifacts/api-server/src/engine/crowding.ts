@@ -16,6 +16,8 @@ function rushFactor(date = new Date()): number {
 const MODE_BASE: Record<ModeKey, number> = {
   metro: 0.8,
   monorail: 0.4,
+  lrt: 0.45,
+  brt: 0.6,
   train: 0.5,
   bus: 0.7,
   serfis: 0.55,

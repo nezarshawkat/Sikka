@@ -22,6 +22,8 @@ import reEnrichRoutesRouter from "./reEnrichRoutes";
 import intercityRouter from "./intercity";
 import reportsRouter from "./reports";
 import transportReportsRouter from "./transportReports";
+import seedEgyptTransitRouter from "./seedEgyptTransit";
+import trainsRouter from "./trains";
 import { clerkAuth } from "../middlewares/clerkAuth";
 
 const router: IRouter = Router();
@@ -38,6 +40,7 @@ router.use(clerkAuth);
 // Resources: auth enforcement is applied per-method inside each router file
 router.use("/transport-types", transportTypesRouter);
 router.use("/transit-lines", transitLinesRouter);
+router.use("/trains", trainsRouter);
 router.use("/locations", locationsRouter);
 router.use("/mawaqef", mawaqefRouter);
 router.use("/heatmaps", heatmapsRouter);
@@ -65,6 +68,10 @@ router.use("/admin/seed-gtfs", seedGtfsRouter);
 // POST /api/admin/re-enrich-routes?transportMode=bus&limit=N&offset=M
 //   - small incremental batches re-snapping board-anywhere route_path to main streets
 router.use("/admin/re-enrich-routes", reEnrichRoutesRouter);
+// POST /api/admin/seed-egypt-transit?dataset=lrt|brt|tram&offset=N
+//   - geocodes + road/rail-snaps Cairo LRT, Cairo BRT, and Alexandria Tram from
+//     real researched station lists, one line per call (call until done:true)
+router.use("/admin/seed-egypt-transit", seedEgyptTransitRouter);
 
 // User-scoped routes
 router.use("/profile", profileRouter);

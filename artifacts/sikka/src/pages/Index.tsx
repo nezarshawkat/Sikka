@@ -68,6 +68,7 @@ const Index = () => {
   const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationName, setLocationName] = useState('');
+  const [showLocationPrompt, setShowLocationPrompt] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Destination chosen by tapping the map or searching (reverse-geocoded address shown for confirmation)
@@ -90,7 +91,6 @@ const Index = () => {
   const [tripReviewOpen, setTripReviewOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [cancelTripOpen, setCancelTripOpen] = useState(false);
-  const [serviceAlert, setServiceAlert] = useState<{ count: number; reportType: string } | null>(null);
 
   // Bus info dialog (NTA/CTA operator + bus number)
   const [busUsedOpen, setBusUsedOpen] = useState(false);
@@ -158,21 +158,51 @@ const Index = () => {
   }, [mapMode]);
 
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setUserLocation(loc);
-          setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng }));
-          const name = await reverseGeocode(loc.lat, loc.lng, language);
-          setLocationName(name);
-        },
-        () => {
-          setUserLocation({ lat: CAIRO_CENTER.latitude, lng: CAIRO_CENTER.longitude });
-          setLocationName('Cairo, Egypt');
-        }
-      );
+    if (!navigator.geolocation) return;
+
+    // Proactively check permission state (where supported) so the "turn on
+    // location" prompt can appear immediately on load rather than only after
+    // a failed request — most browsers support the Permissions API for this.
+    if ('permissions' in navigator) {
+      navigator.permissions
+        .query({ name: 'geolocation' as PermissionName })
+        .then((status) => {
+          setShowLocationPrompt(status.state !== 'granted');
+          status.onchange = () => setShowLocationPrompt(status.state !== 'granted');
+        })
+        .catch(() => {});
     }
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setUserLocation(loc);
+        setShowLocationPrompt(false);
+        setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng }));
+        const name = await reverseGeocode(loc.lat, loc.lng, language);
+        setLocationName(name);
+      },
+      () => {
+        setUserLocation({ lat: CAIRO_CENTER.latitude, lng: CAIRO_CENTER.longitude });
+        setLocationName('Cairo, Egypt');
+        setShowLocationPrompt(true);
+      }
+    );
+  }, [language]);
+
+  const requestLocation = useCallback(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setUserLocation(loc);
+        setShowLocationPrompt(false);
+        setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng, zoom: 15 }));
+        const name = await reverseGeocode(loc.lat, loc.lng, language);
+        setLocationName(name);
+      },
+      () => toast.error(t('locationStillOff', language)),
+    );
   }, [language]);
 
   const loadRoutes = useCallback((plan: ActiveTripPlan) => {
@@ -247,20 +277,6 @@ const Index = () => {
     progress,
   });
 
-  // Live service-alert banner: check for recent open rider reports on the
-  // current segment's line so the trip sheet can warn about delays etc.
-  useEffect(() => {
-    const lineId = currentSeg?.line_id;
-    if (!lineId) { setServiceAlert(null); return; }
-    let cancelled = false;
-    api
-      .get<{ count: number; reportType: string | null }>(`/reports/active-alerts/${lineId}`)
-      .then((data) => {
-        if (!cancelled) setServiceAlert(data?.count > 0 && data.reportType ? { count: data.count, reportType: data.reportType } : null);
-      })
-      .catch(() => { if (!cancelled) setServiceAlert(null); });
-    return () => { cancelled = true; };
-  }, [currentSeg?.line_id]);
 
   const clearTrip = () => {
     sessionStorage.removeItem('activeTrip');
@@ -410,7 +426,7 @@ const Index = () => {
         const hasNile = NILE_CITY_IDS.has(fromCity.id) && NILE_CITY_IDS.has(toCity.id);
         setPendingTrip({
           planUrl: planUrl(true), intercityUrl,
-          trainUrl: `/travel/train?${travelParams}`,
+          trainUrl: `/trains/search?from=${encodeURIComponent(fromCity.nameEn)}&to=${encodeURIComponent(toCity.nameEn)}`,
           flightUrl: `/travel/flight?${travelParams}`,
           taxiUrl: `/travel/taxi?${travelParams}`,
           nileUrl: `/travel/nile?${travelParams}`,
@@ -605,6 +621,38 @@ const Index = () => {
         </div>
       )}
 
+      {/* "Turn on location" prompt — shown whenever location isn't granted yet,
+          so trip planning can start from the rider's actual position instead
+          of defaulting to the Cairo city center. Never shown during an active
+          trip, to keep the minimized map clean. */}
+      {!activeTrip && showLocationPrompt && (
+        <motion.div
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="absolute top-[5.5rem] left-4 right-4 z-20 safe-area-top"
+        >
+          <div className="glass-panel rounded-[1.75rem] border border-primary/20 shadow-xl p-4 space-y-2">
+            <div className="flex items-start gap-3">
+              <div className="h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                <MapPin className="h-4 w-4 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">{t('locationPromptTitle', language)}</p>
+                <p className="text-xs text-muted-foreground leading-snug mt-0.5">{t('locationPromptBody', language)}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <Button variant="ghost" size="sm" className="flex-1 rounded-full" onClick={() => setShowLocationPrompt(false)}>
+                {t('locationPromptDismiss', language)}
+              </Button>
+              <Button size="sm" className="flex-1 rounded-full" onClick={requestLocation}>
+                {t('locationPromptEnable', language)}
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Active trip guide sheet */}
       {activeTrip ? (
         <>
@@ -647,7 +695,6 @@ const Index = () => {
             onReport={() => setReportOpen(true)}
             language={language}
             isOffRoute={isOffRoute}
-            serviceAlert={serviceAlert}
           />
         </>
       ) : (

@@ -33,6 +33,7 @@ interface TransitLineUpdate {
   viaStops?: string[];
   routePath?: { type: string; coordinates: [number, number][] } | null;
   routeDirection?: string;
+  governorate?: string;
   priceEgp?: number;
   frequencyMinutes?: number | null;
   hasFixedStops?: boolean;
@@ -92,7 +93,7 @@ router.post("/", requireAdmin, async (req, res) => {
 router.put("/:id", requireAdmin, async (req, res) => {
   const allowed: (keyof TransitLineUpdate)[] = [
     "lineNumber", "nameEn", "nameAr", "fromArea", "toArea", "viaStops",
-    "routePath", "routeDirection", "priceEgp", "frequencyMinutes", "hasFixedStops", "isActive", "transportTypeId",
+    "routePath", "routeDirection", "governorate", "priceEgp", "frequencyMinutes", "hasFixedStops", "isActive", "transportTypeId",
     "dataSource", "sourcePriority", "confidenceScore", "routeStatus", "verifiedAt", "lastConfirmedAt", "needsReviewReason", "reviewReportCount",
   ];
   const updates: TransitLineUpdate = { updatedAt: new Date() };

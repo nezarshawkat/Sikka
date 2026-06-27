@@ -19,6 +19,7 @@ import PlanSetup from "./pages/PlanSetup";
 import DiscoverTrip from "./pages/DiscoverTrip";
 import TripResult from "./pages/TripResult";
 import Intercity from "./pages/Intercity";
+import TrainSearch from "./pages/TrainSearch";
 import TravelMode from "./pages/TravelMode";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminTransport from "./pages/admin/AdminTransport";
@@ -158,6 +159,7 @@ function AppRoutes() {
           <Route path="/discover-trip" element={<DiscoverTrip />} />
           <Route path="/trip-result" element={<TripResult />} />
           <Route path="/intercity" element={<Intercity />} />
+          <Route path="/trains/search" element={<TrainSearch />} />
           <Route path="/travel/:mode" element={<TravelMode />} />
           <Route path="/route/:id" element={<RouteDetail />} />
           <Route path="/admin" element={<AdminDashboard />}>

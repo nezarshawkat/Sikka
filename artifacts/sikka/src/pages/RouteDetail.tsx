@@ -54,7 +54,7 @@ interface TransportType {
 }
 
 const ICONS: Record<string, string> = {
-  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
 };
 
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357, zoom: 12 };
@@ -78,7 +78,7 @@ export default function RouteDetail() {
   const [form, setForm] = useState({
     lineNumber: '', nameEn: '', nameAr: '', fromArea: '', toArea: '',
     priceEgp: 0, frequencyMinutes: 0, hasFixedStops: false, isActive: true,
-    routeDirection: 'forward',
+    routeDirection: 'forward', governorate: 'Cairo',
   });
 
   const fitBoundsTo = (mapRef: React.RefObject<MapRef | null>, coords: [number, number][]) => {
@@ -110,6 +110,7 @@ export default function RouteDetail() {
         hasFixedStops: !!data.hasFixedStops,
         isActive: data.isActive !== false,
         routeDirection: data.routeDirection || 'forward',
+        governorate: data.governorate || 'Cairo',
       });
 
       const types = await api.get<TransportType[]>('/transport-types');
@@ -160,6 +161,7 @@ export default function RouteDetail() {
         hasFixedStops: form.hasFixedStops,
         isActive: form.isActive,
         routeDirection: form.routeDirection,
+        governorate: form.governorate,
       });
       setRoute(updated);
       toast.success('Route updated');
@@ -367,6 +369,21 @@ export default function RouteDetail() {
                 <Label className="text-xs text-muted-foreground">To area</Label>
                 <Input value={form.toArea} onChange={(e) => setForm((f) => ({ ...f, toArea: e.target.value }))} />
               </div>
+            </div>
+
+            {/* Governorate — controls which riders this route gets suggested
+                to (only riders currently in the same governorate see it). */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Governorate</Label>
+              <Select value={form.governorate} onValueChange={(v) => setForm((f) => ({ ...f, governorate: v }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Governorate" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Cairo">Cairo</SelectItem>
+                  <SelectItem value="Alexandria">Alexandria</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Direction control */}

@@ -39,7 +39,7 @@ interface Mawaqef {
 }
 
 const ICONS: Record<string, string> = {
-  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
 };
 
 async function snapToRoads(points: [number, number][]): Promise<[number, number][]> {
@@ -125,9 +125,11 @@ const AdminMap = () => {
   const heatmapOnlyTypes = [tuktukType, whiteTaxiType].filter(Boolean);
 
   const governorateOptions = useMemo(() => {
-    // Always offer Cairo so the selector is usable even before any line carries
-    // an explicit governorate value.
-    const set = new Set<string>(['Cairo']);
+    // Always offer Cairo and Alexandria — the two governorates with real
+    // transit data — so the selector is clean and organized even before any
+    // line carries an explicit governorate value, or if a data refresh
+    // hasn't run yet.
+    const set = new Set<string>(['Cairo', 'Alexandria']);
     transitLines.forEach(line => { if (line.governorate) set.add(line.governorate); });
     return Array.from(set).sort();
   }, [transitLines]);

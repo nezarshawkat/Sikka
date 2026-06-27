@@ -113,12 +113,19 @@ export function nearestStops(
   c: Coord,
   radiusKm: number,
   limit: number,
+  governorateFilter?: string,
 ): { id: string; node: GraphNode; distKm: number }[] {
   const ids = stopIdsNear(graph, c, radiusKm);
   const scored: { id: string; node: GraphNode; distKm: number }[] = [];
   for (const id of ids) {
     const node = graph.nodes.get(id);
     if (!node) continue;
+    // Only suggest stops on a line that actually serves the rider's own
+    // governorate — same rule as the client-side offline planner.
+    if (governorateFilter && node.lineId) {
+      const lineGov = graph.lines.get(node.lineId)?.governorate || "Cairo";
+      if (lineGov !== governorateFilter) continue;
+    }
     const d = haversineKm(c, node.coord);
     if (d <= radiusKm) scored.push({ id, node, distKm: d });
   }

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -6,11 +7,12 @@ import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import {
   ChevronUp, ChevronDown, Clock, Wallet, Check, MapPin, ArrowLeft, ArrowRight, Flag, ExternalLink,
-  AlertTriangle, Megaphone,
+  AlertTriangle, Volume2, VolumeX,
 } from 'lucide-react';
+import { useVoiceInstructions } from '@/hooks/useVoiceInstructions';
 
 const ICONS: Record<string, string> = {
-  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', walk: '🚶',
+  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
 };
 
 export interface GuideAlternative {
@@ -43,9 +45,6 @@ interface TripGuideSheetProps {
   /** True when the rider's GPS has drifted meaningfully off the expected
    *  path for the current segment — wrong vehicle, missed turn, etc. */
   isOffRoute?: boolean;
-  /** Recent open rider reports for the current segment's line, surfaced as a
-   *  live service-alert banner (e.g. "3 riders reported this is delayed"). */
-  serviceAlert?: { count: number; reportType: string } | null;
 }
 
 const isTaxiLike = (seg: Pick<GuideSegment, 'icon' | 'transport_name'>) =>
@@ -73,9 +72,25 @@ function formatClock(minsFromNow: number, lang: Language): string {
 export default function TripGuideSheet({
   plan, currentSegIdx, progress, remainingMinutes, expanded, onToggleExpand,
   onNext, onBack, onDone, onClose, onSwap, onReport, language,
-  isOffRoute, serviceAlert,
+  isOffRoute,
 }: TripGuideSheetProps) {
+  const voice = useVoiceInstructions(language);
   const seg = plan.segments[currentSegIdx];
+
+  // Reads the new segment's instructions aloud the moment the rider moves
+  // onto it — this is the whole point of voice guidance: it works even when
+  // the sheet is minimized and nobody's looking at the screen. Off-route and
+  // service-alert warnings take priority and interrupt if they fire instead.
+  useEffect(() => {
+    if (!seg?.instructions?.length) return;
+    if (isOffRoute) {
+      voice.speak(t('offRouteWarning', language));
+      return;
+    }
+    voice.speak(seg.instructions.join('. '));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSegIdx, isOffRoute, language]);
+
   if (!seg) return null;
   const isLast = currentSegIdx >= plan.segments.length - 1;
   const arrival = formatClock(remainingMinutes, language);
@@ -110,16 +125,6 @@ export default function TripGuideSheet({
           <div className="mx-3 mb-2 rounded-xl bg-destructive/10 border border-destructive/25 px-3 py-2 flex items-center gap-2 shrink-0">
             <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
             <p className="text-xs text-destructive font-medium">{t('offRouteWarning', language)}</p>
-          </div>
-        )}
-
-        {/* Live service alert from recent rider reports on this line */}
-        {!isOffRoute && serviceAlert && serviceAlert.count > 0 && (
-          <div className="mx-3 mb-2 rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2 flex items-center gap-2 shrink-0">
-            <Megaphone className="h-4 w-4 text-amber-600 shrink-0" />
-            <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
-              {serviceAlert.count} {t('ridersReported', language)} {t(`rt_${serviceAlert.reportType}`, language)}
-            </p>
           </div>
         )}
 
@@ -202,7 +207,27 @@ export default function TripGuideSheet({
                     </div>
                   ) : seg.instructions && seg.instructions.length > 0 && (
                     <div>
-                      <p className="text-xs font-semibold text-foreground mb-2">{t('instructionsHeader', language)}</p>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-semibold text-foreground">{t('instructionsHeader', language)}</p>
+                        {voice.supported && (
+                          <button
+                            onClick={() => {
+                              if (voice.enabled) {
+                                voice.setVoiceEnabled(false);
+                              } else {
+                                voice.setVoiceEnabled(true);
+                                voice.speak(seg.instructions!.join('. '));
+                              }
+                            }}
+                            className="h-7 w-7 rounded-full bg-primary/10 hover:bg-primary/20 flex items-center justify-center shrink-0"
+                            title={voice.enabled ? t('voiceMute', language) : t('voiceEnable', language)}
+                          >
+                            {voice.enabled
+                              ? <Volume2 className={`h-3.5 w-3.5 text-primary ${voice.speaking ? 'animate-pulse' : ''}`} />
+                              : <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />}
+                          </button>
+                        )}
+                      </div>
                       <ol className="space-y-0.5">
                         {seg.instructions.map((ins, i) => (
                           <li key={i} className="flex items-start gap-2 text-sm text-foreground/85 rounded-[1.25rem] bg-card/45 px-3 py-1">

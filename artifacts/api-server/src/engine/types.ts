@@ -9,6 +9,8 @@ export type Coord = { lat: number; lng: number };
 export type ModeKey =
   | "metro"
   | "monorail"
+  | "lrt"
+  | "brt"
   | "train"
   | "bus"
   | "serfis"

@@ -2,12 +2,12 @@
  * Alexandria APTA (هيئة النقل العام الإسكندرية) bus routes.
  * Source: https://alexapta.gov.eg/خطوط-الأوتوبيس/
  * Alexandria APTA is the government authority (هيئة) equivalent.
- * Routes seeded under "CTA Bus" transport type tagged to Alexandria.
+ * Routes seeded under their own "APTA Bus" transport type, tagged governorate=Alexandria.
  */
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { transportTypesTable, transitLinesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and, like } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAdmin";
 import { buildBusRoutePathAI } from "../utils/busPathEnricher";
 
@@ -56,22 +56,45 @@ router.post("/", requireAdmin, async (req, res) => {
   try {
     const results: string[] = [];
 
-    // Find or create CTA Bus transport type
+    // Find or create APTA Bus transport type. NOTE: this used to look up/reuse
+    // a type literally named "CTA Bus" — but Cairo's seed script creates a
+    // transport type with that exact same name ("CTA" = Cairo Transport
+    // Authority), so every Alexandria bus was silently filed under Cairo's
+    // bus type with no way to tell them apart in admin or in the planner.
+    // Alexandria's real operator is APTA (Alexandria Public Transportation
+    // Authority), so it gets its own distinct type here.
     const existing = await db.select().from(transportTypesTable)
-      .where(eq(transportTypesTable.nameEn, "CTA Bus")).limit(1);
+      .where(eq(transportTypesTable.nameEn, "APTA Bus")).limit(1);
     let typeId: string;
     if (existing.length > 0) {
       typeId = existing[0].id;
-      results.push("Using existing CTA Bus type");
+      results.push("Using existing APTA Bus type");
     } else {
       const [ins] = await db.insert(transportTypesTable).values({
-        nameEn: "CTA Bus", nameAr: "أتوبيس الهيئة",
-        icon: "bus", color: "#DC2626",
+        nameEn: "APTA Bus", nameAr: "أتوبيس هيئة النقل العام بالإسكندرية",
+        icon: "bus", color: "#0D9488",
+        category: "economic", governmentType: "government",
         basePriceEgp: 13, pricePerKmEgp: 0, averageSpeedKmh: 20,
         foreignerAllowed: true, isActive: true,
       }).returning();
       typeId = ins.id;
-      results.push("Created CTA Bus transport type");
+      results.push("Created APTA Bus transport type");
+    }
+
+    // One-time backfill: any Alexandria line that got seeded under the old
+    // misnamed/wrong-governorate setup gets corrected in place rather than
+    // left stranded — this runs every time but is a no-op once already fixed.
+    const oldCtaType = await db.select().from(transportTypesTable)
+      .where(eq(transportTypesTable.nameEn, "CTA Bus")).limit(1);
+    if (oldCtaType.length > 0) {
+      const fixed = await db.update(transitLinesTable)
+        .set({ transportTypeId: typeId, governorate: "Alexandria", updatedAt: new Date() })
+        .where(and(
+          eq(transitLinesTable.transportTypeId, oldCtaType[0].id),
+          like(transitLinesTable.lineNumber, "ALEX-%"),
+        ))
+        .returning({ id: transitLinesTable.id });
+      if (fixed.length) results.push(`Backfilled ${fixed.length} existing Alexandria line(s) onto the correct type + governorate`);
     }
 
     for (const line of ALEX_ROUTES) {
@@ -98,6 +121,10 @@ router.post("/", requireAdmin, async (req, res) => {
         nameEn: `Alex APTA Line ${line.n}: ${fromArea} → ${toArea}`,
         nameAr: `خط الإسكندرية ${line.n}: ${fromArea} - ${toArea}`,
         fromArea, toArea, viaStops,
+        // BUG FIX: this was never set, so every Alexandria route silently
+        // defaulted to the schema's "Cairo" default and never actually
+        // showed up tagged as Alexandria anywhere in admin or planning.
+        governorate: "Alexandria",
         priceEgp: 13, isActive: true,
         frequencyMinutes: 15, hasFixedStops: false,
         routePath: routePath,

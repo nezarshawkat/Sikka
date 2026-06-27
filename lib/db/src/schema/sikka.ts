@@ -230,6 +230,32 @@ export const insertReportSchema = createInsertSchema(reportsTable).omit({ id: tr
 export const insertTransportReportSchema = createInsertSchema(transportReportsTable).omit({ id: true, createdAt: true });
 export const insertHeatmapSchema = createInsertSchema(transportHeatmapsTable).omit({ id: true, createdAt: true });
 
+// ── Intercity trains (Egyptian National Railways) ───────────────────────────
+// Stored separately from transitLinesTable since a train run is a full
+// timetable (many stops, each with its own arrival/departure clock time)
+// rather than a fixed-fare city route — closer in shape to a GTFS trip than
+// a city transit line.
+export const trainsTable = pgTable("trains", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** The train's number as used by Egyptian National Railways, e.g. "980". */
+  trainNumber: text("train_number").notNull(),
+  trainType: text("train_type").notNull().default("Russian"), // Talgo | VIP | AC Russian | Russian | Improved | Mix
+  fromCity: text("from_city").notNull(),
+  toCity: text("to_city").notNull(),
+  /** Ordered list of every stop with its clock-time arrival/departure, e.g.
+   *  [{ name: "Cairo", departure: "08:00" }, { name: "Giza", arrival: "08:20", departure: "08:21" }, ...] */
+  stops: jsonb("stops").$type<{ name: string; nameAr?: string; arrival?: string; departure?: string }[]>().notNull(),
+  /** Free-text operating note, e.g. "Operates daily, excluding Fridays and holidays". */
+  operatingNote: text("operating_note"),
+  operatingNoteAr: text("operating_note_ar"),
+  lastUpdated: text("last_updated"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export const insertTrainSchema = createInsertSchema(trainsTable).omit({ id: true, createdAt: true, updatedAt: true });
+export type Train = typeof trainsTable.$inferSelect;
+
 export type Profile = typeof profilesTable.$inferSelect;
 export type TransportType = typeof transportTypesTable.$inferSelect;
 export type TransitLine = typeof transitLinesTable.$inferSelect;

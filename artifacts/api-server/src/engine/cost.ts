@@ -5,6 +5,9 @@ export function modeOfType(nameEn: string): ModeKey {
   const n = nameEn.toLowerCase();
   if (n.includes("metro")) return "metro";
   if (n.includes("monorail")) return "monorail";
+  // Must come before the generic "train"/"bus" checks below.
+  if (n.includes("lrt") || n.includes("light rail")) return "lrt";
+  if (n.includes("brt") || n.includes("rapid transit")) return "brt";
   if (n.includes("train") || n.includes("قطار")) return "train";
   if (n.includes("serfis") || n.includes("سرفيس")) return "serfis";
   if (n.includes("microbus") || n.includes("ميكروباص")) return "microbus";
@@ -19,6 +22,8 @@ export function modeOfType(nameEn: string): ModeKey {
 const DEFAULT_FREQUENCY: Record<ModeKey, number> = {
   metro: 6,
   monorail: 8,
+  lrt: 8,
+  brt: 3,
   train: 30,
   bus: 18,
   serfis: 10,
@@ -83,6 +88,8 @@ export function directFare(type: TransportTypeInfo, km: number): number {
 export const RELIABILITY: Record<ModeKey, number> = {
   metro: 0.95,
   monorail: 0.95,
+  lrt: 0.9,
+  brt: 0.85,
   train: 0.85,
   bus: 0.65,
   serfis: 0.7,
@@ -119,6 +126,8 @@ export const PROFILES: Record<PlanKey, PlanProfile> = {
       microbus: 0.9,
       metro: 1.0,
       monorail: 1.2,
+      lrt: 1.0,
+      brt: 0.9,
       train: 1.1,
       taxi: 2.2,
       tuktuk: 1.4,
@@ -134,6 +143,10 @@ export const PROFILES: Record<PlanKey, PlanProfile> = {
     modePref: {
       metro: 0.8,
       monorail: 0.85,
+      lrt: 0.85,
+      // BRT belongs in "comfortable" specifically — dedicated lane, AC electric
+      // buses, metro-style gated stations.
+      brt: 0.8,
       train: 0.95,
       bus: 1.0,
       serfis: 1.05,
@@ -152,8 +165,13 @@ export const PROFILES: Record<PlanKey, PlanProfile> = {
     walkW: 3.0,
     modePref: {
       taxi: 0.7,
+      // Metro, monorail, and LRT all get the same strong premium-tier
+      // preference — fast, modern, fixed-rail options belong in the premium
+      // plan too, not just the cheap one.
       metro: 0.9,
       monorail: 0.9,
+      lrt: 0.9,
+      brt: 1.1,
       train: 1.0,
       bus: 1.2,
       serfis: 1.25,
