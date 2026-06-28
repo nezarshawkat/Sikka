@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -123,6 +123,17 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  // The bundled server still reads seed JSON files at runtime with paths like
+  // ../data/egyptTransitSeed.json from dist/index.mjs. In production, that
+  // resolves to artifacts/api-server/data, so copy vendored data there during
+  // every build. Without this, Render starts successfully but crashes on boot
+  // with ENOENT: artifacts/api-server/data/egyptTransitSeed.json.
+  const srcDataDir = path.resolve(artifactDir, "src/data");
+  const runtimeDataDir = path.resolve(artifactDir, "data");
+  await rm(runtimeDataDir, { recursive: true, force: true });
+  await cp(srcDataDir, runtimeDataDir, { recursive: true });
+
 }
 
 buildAll().catch((err) => {

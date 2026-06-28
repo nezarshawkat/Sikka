@@ -1,0 +1,79 @@
+{
+  "source": "Researched from the LRT/BRT operator (RATP Dev Mobility Cairo), Wikipedia, and Egyptian transit news coverage as of mid-2026. Station NAMES and ORDER are cross-referenced across multiple sources; exact coordinates are geocoded at seed time and should be spot-checked by an admin via the Route Detail map, since no single official GTFS feed exists yet for these systems.",
+  "lrt": {
+    "nameEn": "Cairo LRT",
+    "nameAr": "القطار الكهربائي الخفيف",
+    "governorate": "Cairo",
+    "icon": "lrt",
+    "color": "#00A651",
+    "priceEgpBase": 8,
+    "priceEgpPerKm": 0.35,
+    "frequencyMinutes": 8,
+    "branches": [
+      {
+        "branchNameEn": "Cairo LRT — New Administrative Capital branch",
+        "branchNameAr": "القطار الكهربائي الخفيف - فرع العاصمة الإدارية الجديدة",
+        "stationsEn": ["Adly Mansour", "El Obour", "Future", "El Shorouk", "New Heliopolis", "Badr", "El Robaikey", "Hadayek Al Assema", "Capital Airport", "Arts and Culture City"],
+        "stationsAr": ["عدلي منصور", "العبور", "المستقبل", "الشروق", "هليوبوليس الجديدة", "بدر", "الروبيكي", "حدائق العاصمة", "مطار العاصمة", "مدينة الفنون والثقافة"]
+      },
+      {
+        "branchNameEn": "Cairo LRT — 10th of Ramadan branch",
+        "branchNameAr": "القطار الكهربائي الخفيف - فرع العاشر من رمضان",
+        "stationsEn": ["Adly Mansour", "El Obour", "Future", "El Shorouk", "New Heliopolis", "Badr", "El Robaikey", "Hadayek Al Assema", "Industrial Park", "Knowledge City"],
+        "stationsAr": ["عدلي منصور", "العبور", "المستقبل", "الشروق", "هليوبوليس الجديدة", "بدر", "الروبيكي", "حدائق العاصمة", "الحديقة الصناعية", "مدينة المعرفة"]
+      }
+    ]
+  },
+  "brt": {
+    "nameEn": "Cairo BRT",
+    "nameAr": "الباص السريع",
+    "governorate": "Cairo",
+    "icon": "brt",
+    "color": "#F97316",
+    "priceEgpBase": 7,
+    "priceEgpPerKm": 0.3,
+    "frequencyMinutes": 3,
+    "lines": [
+      {
+        "lineNumber": "BRT-1",
+        "nameEn": "Cairo BRT — Ring Road Phase 1 (Adly Mansour ⇄ Alexandria Agricultural Road)",
+        "nameAr": "الباص السريع - الطريق الدائري المرحلة الأولى (عدلي منصور - طريق مصر الإسكندرية الزراعي)",
+        "stationsEn": ["Alexandria Agricultural Road", "El-Sharqaweya", "Bahtim", "Shubra Banha", "Mostorod", "El Khosous", "El Marg", "El Qalag", "Zakat Foundation", "Ibrahim El-Orabi", "El Salam", "Suez Road", "Adly Mansour", "Police Academy"],
+        "stationsAr": ["طريق مصر الإسكندرية الزراعي", "الشرقاوية", "بهتيم", "شبرا بنها", "مسطرد", "الخصوص", "المرج", "القلج", "مؤسسة الزكاة", "إبراهيم العرابي", "السلام", "طريق السويس", "عدلي منصور", "أكاديمية الشرطة"]
+      }
+    ]
+  },
+  "alexandriaTram": {
+    "nameEn": "Alexandria Tram",
+    "nameAr": "ترام الإسكندرية",
+    "governorate": "Alexandria",
+    "icon": "tram",
+    "color": "#0EA5E9",
+    "priceEgpBase": 3,
+    "priceEgpPerKm": 0.2,
+    "frequencyMinutes": 10,
+    "lines": [
+      {
+        "lineNumber": "Route 1",
+        "nameEn": "Alexandria Tram — Route 1 (Victoria ⇄ Raml)",
+        "nameAr": "ترام الإسكندرية - الخط الأول (فيكتوريا - الرمل)",
+        "stationsEn": ["Victoria", "Sidi Bishr", "Bakous", "Cleopatra", "Sporting", "San Stefano", "Mostafa Kamel", "Camp Caesar", "Ibrahimieh", "Glym", "Zezenia", "Bulkley", "Schutz", "Roushdy", "Kafr Abdou", "Fleming", "Gianaclis", "Saba Pasha", "Moharam Bek", "Hadra", "Shatby", "Mazarita", "Gomrok", "Mansheya", "Raml"],
+        "stationsAr": ["فيكتوريا", "سيدي بشر", "باكوس", "كليوباترا", "سبورتنج", "سان ستيفانو", "مصطفى كامل", "كامب شيزار", "الإبراهيمية", "جليم", "زيزينيا", "بولكلي", "شوتس", "رشدي", "كفر عبده", "فليمنج", "جناكليس", "صابا باشا", "محرم بك", "الحضرة", "شاطبي", "مازاريتا", "الجمرك", "المنشية", "الرمل"]
+      },
+      {
+        "lineNumber": "Route 2",
+        "nameEn": "Alexandria Tram — Route 2 (Naser ⇄ Raml)",
+        "nameAr": "ترام الإسكندرية - الخط الثاني (ناصر - الرمل)",
+        "stationsEn": ["Naser", "Sidi Bishr", "Bakous", "Cleopatra", "Sporting", "San Stefano", "Mostafa Kamel", "Camp Caesar", "Ibrahimieh", "Glym", "Zezenia", "Bulkley", "Schutz", "Roushdy", "Kafr Abdou", "Fleming", "Gianaclis", "Saba Pasha", "Moharam Bek", "Hadra", "Shatby", "Mazarita", "Gomrok", "Mansheya", "Raml"],
+        "stationsAr": ["ناصر", "سيدي بشر", "باكوس", "كليوباترا", "سبورتنج", "سان ستيفانو", "مصطفى كامل", "كامب شيزار", "الإبراهيمية", "جليم", "زيزينيا", "بولكلي", "شوتس", "رشدي", "كفر عبده", "فليمنج", "جناكليس", "صابا باشا", "محرم بك", "الحضرة", "شاطبي", "مازاريتا", "الجمرك", "المنشية", "الرمل"]
+      },
+      {
+        "lineNumber": "Route 25/36",
+        "nameEn": "Alexandria Tram — Mixed-track local route (Raml ⇄ El Max area)",
+        "nameAr": "ترام الإسكندرية - خط محلي مشترك (الرمل - منطقة العامرية / المكس)",
+        "stationsEn": ["Raml", "Mansheya", "Gomrok", "Karmouz", "El Max"],
+        "stationsAr": ["الرمل", "المنشية", "الجمرك", "كرموز", "المكس"]
+      }
+    ]
+  }
+}
