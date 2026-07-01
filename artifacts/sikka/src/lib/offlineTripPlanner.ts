@@ -127,6 +127,7 @@ type ApiPlan = {
   route_variant?: RouteVariantKey;
   route_label?: string;
   route_description?: string;
+  rail_recommended?: boolean;
   route_options?: ApiPlan[];
 };
 
@@ -175,7 +176,7 @@ const API_BASE = `${API_ORIGIN}/api`;
 const SNAPSHOT_DB = "sikka-offline";
 const SNAPSHOT_STORE = "snapshots";
 const SNAPSHOT_KEY = "latest";
-const SNAPSHOT_SCHEMA_VERSION = 4;
+const SNAPSHOT_SCHEMA_VERSION = 3;
 const SNAPSHOT_REFRESH_MS = 10 * 60 * 1000;
 const WALK_MAX_KM = 0.8;
 const WALK_TOTAL_MAX_KM = 1.6;
@@ -347,15 +348,95 @@ function connectorModeFromSegment(segment: ApiSegment): ModeKey | null {
   return null;
 }
 
-// Connector legs (walk/taxi/tuktuk) used to call OSRM live, per segment,
-// every single time a trip was planned — meaning every trip, and every
-// fresh install before any cache existed, hit a live network endpoint just
-// to plan a route. That's gone: this now always returns the already-
-// computed on-device geometry, so planning a trip never touches the
-// network at all. Route data syncing (admin changes) is handled separately
-// by the bundled-snapshot + manifest/delta mechanism above.
+const OSRM_CAR_BASE = ((import.meta.env.VITE_OSRM_CAR_URL as string | undefined)
+  || "https://routing.openstreetmap.de/routed-car").replace(/\/+$/, "");
+const OSRM_FOOT_BASE = ((import.meta.env.VITE_OSRM_FOOT_URL as string | undefined)
+  || "https://routing.openstreetmap.de/routed-foot").replace(/\/+$/, "");
+const CONNECTOR_CACHE_KEY = "sikka:connector-road-geometry:v1";
+const CONNECTOR_CACHE_LIMIT = 240;
+const connectorGeometryCache = new Map<string, LngLat[]>();
+const pendingConnectorGeometry = new Map<string, Promise<LngLat[]>>();
+
+function connectorCacheKey(mode: ModeKey, a: LngLat, b: LngLat): string {
+  const profile = mode === "walk" ? "foot" : "car";
+  return `${profile}:${a[0].toFixed(5)},${a[1].toFixed(5)}>${b[0].toFixed(5)},${b[1].toFixed(5)}`;
+}
+
+function loadConnectorCache(): void {
+  if (connectorGeometryCache.size || typeof localStorage === "undefined") return;
+  try {
+    const rows = JSON.parse(localStorage.getItem(CONNECTOR_CACHE_KEY) || "[]") as Array<[string, LngLat[]]>;
+    for (const [key, geometry] of rows) {
+      if (Array.isArray(geometry) && geometry.length >= 2) connectorGeometryCache.set(key, geometry);
+    }
+  } catch {
+    localStorage.removeItem(CONNECTOR_CACHE_KEY);
+  }
+}
+
+function saveConnectorCache(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const rows = [...connectorGeometryCache.entries()].slice(-CONNECTOR_CACHE_LIMIT);
+    localStorage.setItem(CONNECTOR_CACHE_KEY, JSON.stringify(rows));
+  } catch {
+    // The in-memory cache still deduplicates requests if storage is disabled.
+  }
+}
+
+async function fetchRoadGeometry(mode: ModeKey, geometry: LngLat[]): Promise<LngLat[]> {
+  if (geometry.length < 2) return geometry;
+  const a = geometry[0];
+  const b = geometry[geometry.length - 1];
+  const key = connectorCacheKey(mode, a, b);
+  loadConnectorCache();
+  const cached = connectorGeometryCache.get(key);
+  if (cached) return cached;
+  const pending = pendingConnectorGeometry.get(key);
+  if (pending) return pending;
+
+  const request = (async () => {
+    const isFoot = mode === "walk";
+    const base = isFoot ? OSRM_FOOT_BASE : OSRM_CAR_BASE;
+    const profile = isFoot ? "foot" : "car";
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8_000);
+    try {
+      const url = `${base}/route/v1/${profile}/${a[0]},${a[1]};${b[0]},${b[1]}`
+        + "?overview=full&geometries=geojson&steps=false";
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) return geometry;
+      const data = await response.json() as {
+        code?: string;
+        routes?: Array<{ geometry?: { coordinates?: LngLat[] } }>;
+      };
+      const routed = data.code === "Ok" ? data.routes?.[0]?.geometry?.coordinates : null;
+      if (!routed || routed.length < 2) return geometry;
+      const snapped = routed
+        .filter((point) => Number.isFinite(point?.[0]) && Number.isFinite(point?.[1]))
+        .map((point) => [point[0], point[1]] as LngLat);
+      if (snapped.length < 2) return geometry;
+      snapped[0] = a;
+      snapped[snapped.length - 1] = b;
+      connectorGeometryCache.set(key, snapped);
+      saveConnectorCache();
+      return snapped;
+    } catch {
+      return geometry;
+    } finally {
+      window.clearTimeout(timer);
+      pendingConnectorGeometry.delete(key);
+    }
+  })();
+
+  pendingConnectorGeometry.set(key, request);
+  return request;
+}
+
+// Free, keyless connector routing never queries Sikka's database. Cached
+// results also keep repeat trips instant and usable offline.
 async function snapConnectorGeometry(mode: ModeKey, geometry: LngLat[]): Promise<LngLat[]> {
-  return geometry;
+  return fetchRoadGeometry(mode, geometry);
 }
 
 function pointToSegment(point: Coord, a: LngLat, b: LngLat): { coord: Coord; distanceKm: number } {
@@ -748,7 +829,13 @@ async function snapConnectorSegments(segments: ApiSegment[]): Promise<ApiSegment
   }));
 }
 
-async function makePlan(segments: ApiSegment[], request: PlannerRequest, snapshot: OfflineSnapshot, variant: RouteVariantKey = "recommended"): Promise<ApiPlan> {
+async function makePlan(
+  segments: ApiSegment[],
+  request: PlannerRequest,
+  snapshot: OfflineSnapshot,
+  variant: RouteVariantKey = "recommended",
+  railRecommended = false,
+): Promise<ApiPlan> {
   const planKey: PlanKey = request.tripType === "economic" || request.tripType === "premium" ? request.tripType : "comfortable";
   const isArabic = request.language === "ar";
   const streetSegments = await snapConnectorSegments(segments);
@@ -768,6 +855,7 @@ async function makePlan(segments: ApiSegment[], request: PlannerRequest, snapsho
     route_variant: variant,
     route_label: meta.label,
     route_description: meta.description,
+    rail_recommended: railRecommended,
   };
 }
 
@@ -983,35 +1071,48 @@ function scoreForVariant(candidate: PlanCandidate, variant: RouteVariantKey, pla
   return candidate.score + candidate.transfers * 25 + candidate.taxiLegs * (planKey === "premium" ? -15 : 130);
 }
 
-function pickRouteOptions(candidates: PlanCandidate[], planKey: PlanKey): { variant: RouteVariantKey; candidate: PlanCandidate }[] {
+function pickRouteOptions(candidates: PlanCandidate[], planKey: PlanKey): {
+  variant: RouteVariantKey;
+  candidate: PlanCandidate;
+  railRecommended: boolean;
+}[] {
   const variants: RouteVariantKey[] = ["recommended", "cheapest", "fastest", "fewest_transfers"];
-  const picked: { variant: RouteVariantKey; candidate: PlanCandidate }[] = [];
+  const picked: { variant: RouteVariantKey; candidate: PlanCandidate; railRecommended: boolean }[] = [];
   const used = new Set<string>();
-  for (const variant of variants) {
-    const sorted = [...candidates].sort((a, b) => scoreForVariant(a, variant, planKey) - scoreForVariant(b, variant, planKey));
-    const choice = sorted.find((candidate) => !used.has(candidate.signature)) ?? sorted[0];
-    if (!choice) continue;
-    picked.push({ variant, candidate: choice });
-    used.add(choice.signature);
+  const railCandidates = candidates.filter((candidate) => candidate.usesRail);
+  const nonRailCandidates = candidates.filter((candidate) => !candidate.usesRail);
+
+  // Rail gets exactly one comparison card whenever both rail and non-rail
+  // choices exist. The label is dynamic: assign rail to whichever objective it
+  // fits most naturally, measured by its relative score penalty against that
+  // objective's best non-rail option. It may therefore be Cheapest on one trip,
+  // Fastest on another, etc. — never a hard-coded slot.
+  let railVariant: RouteVariantKey | null = null;
+  if (railCandidates.length) {
+    railVariant = variants
+      .map((variant) => {
+        const bestRailScore = Math.min(...railCandidates.map((candidate) => scoreForVariant(candidate, variant, planKey)));
+        const bestNonRailScore = nonRailCandidates.length
+          ? Math.min(...nonRailCandidates.map((candidate) => scoreForVariant(candidate, variant, planKey)))
+          : bestRailScore;
+        return {
+          variant,
+          relativePenalty: (bestRailScore - bestNonRailScore) / Math.max(1, Math.abs(bestNonRailScore)),
+        };
+      })
+      .sort((a, b) => a.relativePenalty - b.relativePenalty)[0]?.variant ?? null;
   }
 
-  // Guarantee a metro/monorail-inclusive option among the four plans whenever one exists,
-  // so riders always see a rail-based way to reach their destination if it's available.
-  const hasRailPick = picked.some((p) => p.candidate.usesRail);
-  if (!hasRailPick) {
-    const railCandidates = candidates.filter((c) => c.usesRail).sort((a, b) => a.score - b.score);
-    const bestRail = railCandidates.find((c) => !used.has(c.signature));
-    if (bestRail) {
-      // Replace the weakest-scoring existing pick (prefer swapping "fewest_transfers", since
-      // a rail ride naturally tends to minimize transfers anyway) with the rail candidate.
-      const swapIndex = picked.findIndex((p) => p.variant === "fewest_transfers");
-      const targetIndex = swapIndex >= 0 ? swapIndex : picked.length - 1;
-      if (targetIndex >= 0) {
-        used.delete(picked[targetIndex].candidate.signature);
-        picked[targetIndex] = { variant: picked[targetIndex].variant, candidate: bestRail };
-        used.add(bestRail.signature);
-      }
-    }
+  for (const variant of variants) {
+    const isRailRecommendation = variant === railVariant;
+    const pool = isRailRecommendation
+      ? railCandidates
+      : nonRailCandidates.length ? nonRailCandidates : candidates;
+    const sorted = [...pool].sort((a, b) => scoreForVariant(a, variant, planKey) - scoreForVariant(b, variant, planKey));
+    const choice = sorted.find((candidate) => !used.has(candidate.signature)) ?? sorted[0];
+    if (!choice) continue;
+    picked.push({ variant, candidate: choice, railRecommended: isRailRecommendation });
+    used.add(choice.signature);
   }
 
   return picked;
@@ -1108,8 +1209,12 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
   if (!candidates.length) return null;
   const picked = pickRouteOptions(candidates, planKey);
   if (!picked.length) return null;
-  const plans = await Promise.all(picked.map(({ variant, candidate }) => makePlan(candidate.segments, request, snapshot, variant)));
-  const primary = plans.find((plan) => plan.route_variant === "recommended") ?? plans[0];
+  const plans = await Promise.all(picked.map(({ variant, candidate, railRecommended }) => (
+    makePlan(candidate.segments, request, snapshot, variant, railRecommended)
+  )));
+  const primary = plans.find((plan) => plan.rail_recommended)
+    ?? plans.find((plan) => plan.route_variant === "recommended")
+    ?? plans[0];
   if (!primary) return null;
   return {
     ...primary,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Wallet, Clock, MapPin, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Wallet, MapPin, ChevronRight } from 'lucide-react';
 
 type TripType = 'economic' | 'comfortable' | 'premium';
 
@@ -22,7 +22,7 @@ const TripPlan = () => {
   const startLng = parseFloat(searchParams.get('lng') || '31.2357');
   const mode = searchParams.get('mode') || undefined;
 
-  const [tripType, setTripType] = useState<TripType>('economic');
+  const [tripType, setTripType] = useState<TripType>('comfortable');
   const [budget, setBudget] = useState('');
 
   const distanceKm = useMemo(() => {
@@ -32,22 +32,6 @@ const TripPlan = () => {
     const a = Math.sin(dLat / 2) ** 2 + Math.cos(startLat * Math.PI / 180) * Math.cos(destLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }, [startLat, startLng, destLat, destLng]);
-
-  const budgetRange = useMemo(() => {
-    const busFare = distanceKm > 25 ? 25 : 13;
-    const metroFare = distanceKm > 23 ? 20 : distanceKm > 9 ? 15 : 8;
-    const taxiFare = 15 + distanceKm * 4.5;
-    const ranges: Record<TripType, { min: number; max: number }> = {
-      economic: { min: Math.round(Math.min(busFare, metroFare)), max: Math.round(Math.max(25, busFare + 15)) },
-      comfortable: { min: Math.round(Math.min(metroFare, 25)), max: Math.round(Math.max(45, metroFare + 30)) },
-      premium: { min: Math.round(taxiFare), max: Math.round(taxiFare * 1.35) },
-    };
-    return ranges[tripType];
-  }, [distanceKm, tripType]);
-
-  useEffect(() => {
-    setBudget(String(budgetRange.min));
-  }, [tripType, budgetRange]);
 
   const tripTypes: { value: TripType; icon: string; color: string }[] = [
     { value: 'economic', icon: '💰', color: 'border-green-400' },
@@ -123,7 +107,7 @@ const TripPlan = () => {
             <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               type="number"
-              placeholder={String(budgetRange.min)}
+              placeholder=""
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
               className="pl-10 h-12 text-base"
@@ -133,10 +117,6 @@ const TripPlan = () => {
               {t('egp', language)}
             </span>
           </div>
-          <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {t('recommendedBudget', language)}: {budgetRange.min}–{budgetRange.max} {t('egp', language)}
-          </p>
         </motion.div>
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>

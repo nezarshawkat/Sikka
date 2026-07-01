@@ -71,6 +71,7 @@ export default function RouteDetail() {
   const [transportType, setTransportType] = useState<TransportType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [viewState, setViewState] = useState(CAIRO_CENTER);
 
@@ -183,6 +184,36 @@ export default function RouteDetail() {
       toast.success(`Route marked as ${status.replace('_', ' ')}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update status');
+    }
+  };
+
+  const handleRegeneratePath = async () => {
+    if (!id || !route) return;
+    if (route.hasFixedStops) {
+      toast.error('Fixed rail routes must keep their verified station geometry');
+      return;
+    }
+    if (route.dataSource === 'discovery') {
+      toast.error('Rider-recorded GPS is already the preferred route geometry');
+      return;
+    }
+
+    setRegenerating(true);
+    try {
+      const result = await api.post<{
+        updated: number;
+        results: Array<{ status: string }>;
+      }>(`/admin/re-enrich-routes?lineId=${encodeURIComponent(id)}&limit=1`, {});
+      if (result.updated < 1) {
+        const reason = result.results?.[0]?.status?.replaceAll('_', ' ') || 'no corrected path was accepted';
+        throw new Error(`Path kept for review: ${reason}`);
+      }
+      await loadRoute();
+      toast.success('Route path regenerated and road-snapped');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to regenerate path');
+    } finally {
+      setRegenerating(false);
     }
   };
 
@@ -480,6 +511,20 @@ export default function RouteDetail() {
             </div>
 
             <div className="flex flex-col gap-2 pt-2">
+              <Button
+                size="sm"
+                className="gap-2"
+                onClick={() => void handleRegeneratePath()}
+                disabled={regenerating || route.hasFixedStops || route.dataSource === 'discovery'}
+                title={route.hasFixedStops
+                  ? 'Fixed rail geometry is locked to verified stations'
+                  : route.dataSource === 'discovery'
+                    ? 'Rider GPS geometry is already preferred'
+                    : 'Regenerate and road-snap this route'}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${regenerating ? 'animate-spin' : ''}`} />
+                {regenerating ? 'Regenerating path…' : 'Regenerate path'}
+              </Button>
               {route.routeStatus !== 'active' && (
                 <Button size="sm" onClick={() => updateStatus('active')}>Verify active</Button>
               )}

@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(SikkaTripNotificationPlugin.class);
+        registerPlugin(SikkaLocationSettingsPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

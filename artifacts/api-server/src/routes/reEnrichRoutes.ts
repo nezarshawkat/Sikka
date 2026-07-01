@@ -54,6 +54,7 @@ function validateSnappedPath(oldPath: [number, number][] | null | undefined, pat
 }
 
 router.post("/", requireAdmin, async (req, res) => {
+  const lineId = typeof req.query.lineId === "string" ? req.query.lineId.trim() : "";
   const transportMode =
     typeof req.query.transportMode === "string" ? req.query.transportMode.trim() : "";
   const limit = Math.min(
@@ -89,6 +90,7 @@ router.post("/", requireAdmin, async (req, res) => {
     .orderBy(asc(transitLinesTable.id));
 
   let targets = allLines.filter((l) => !l.hasFixedStops);
+  if (lineId) targets = targets.filter((l) => l.id === lineId);
   if (matchTypeIds) targets = targets.filter((l) => matchTypeIds!.has(l.transportTypeId));
   if (dataSourceFilter) {
     // Explicit allow-list — only the requested source(s), e.g. "seed" alone.
@@ -177,6 +179,7 @@ router.post("/", requireAdmin, async (req, res) => {
 
   const nextOffset = offset + batch.length;
   res.json({
+    lineId: lineId || null,
     transportMode: transportMode || "all-board-anywhere",
     dataSourceFilter: dataSourceFilter ? [...dataSourceFilter] : "all-except-discovery",
     totalMatching,

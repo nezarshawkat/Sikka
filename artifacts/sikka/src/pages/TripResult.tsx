@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Clock, Wallet, MapPin, Check, Navigation, X, Info, ChevronRight, ShieldCheck, Flag } from 'lucide-react';
+import { ArrowLeft, Clock, Wallet, MapPin, Check, Navigation, X, Info, ChevronRight, ShieldCheck, Flag, Sparkles } from 'lucide-react';
 import ReportDialog from '@/components/ReportDialog';
 import { toast } from 'sonner';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
@@ -27,7 +27,7 @@ interface Segment {
 interface RouteOption {
   segments: Segment[]; total_cost_egp: number; total_duration_minutes: number;
   budget_range: { min: number; max: number }; distance_km: number;
-  route_variant?: string; route_label?: string; route_description?: string;
+  route_variant?: string; route_label?: string; route_description?: string; rail_recommended?: boolean;
 }
 interface Alternative {
   transport_type_id: string; transport_name: string; cost_egp: number; duration_minutes: number; color: string; icon: string; line_id?: string | null; line_number?: string | null; info?: string; instructions?: string[]; route_geometry?: [number, number][] | null;
@@ -36,7 +36,7 @@ interface TripPlanData {
   segments: Segment[]; total_cost_egp: number; total_duration_minutes: number;
   budget_range: { min: number; max: number }; distance_km: number; destination: string;
   tripType: string; startLat: number; startLng: number; destLat: number; destLng: number;
-  route_variant?: string; route_label?: string; route_description?: string; route_options?: RouteOption[];
+  route_variant?: string; route_label?: string; route_description?: string; rail_recommended?: boolean; route_options?: RouteOption[];
 }
 
 const OPTION_COLORS: Record<string, string> = {
@@ -350,10 +350,11 @@ const TripResult = () => {
               const bgGradient = selected ? `linear-gradient(135deg, ${color}15, ${color}08)` : 'transparent';
               const transfers = Math.max(0, option.segments.filter((seg) => seg.line_id).length - 1);
               const taxiHeavy = option.segments.some((seg) => seg.icon === 'car' || /taxi|uber|careem/i.test(seg.transport_name));
+              const railRecommended = option.rail_recommended === true;
               return (
                 <div
                   key={`${option.route_variant || 'route'}-${index}`}
-                  className={`relative min-w-[90%] snap-center [scroll-snap-stop:always] rounded-[2rem] border-2 transition-all ${selected ? 'shadow-xl' : 'opacity-70 hover:opacity-100'}`}
+                  className={`relative min-w-[90%] snap-center [scroll-snap-stop:always] rounded-[2rem] border-2 transition-all ${selected ? 'shadow-xl' : 'opacity-70 hover:opacity-100'} ${railRecommended ? 'ring-4 ring-amber-400/40' : ''}`}
                   style={{ borderColor: color, background: bgGradient }}
                 >
                   {/* Report icon — top right of card */}
@@ -368,6 +369,12 @@ const TripResult = () => {
                     onClick={() => handleSelectOption(option, index)}
                     className="w-full p-6 text-left transform hover:scale-[1.01] transition-transform"
                   >
+                  {railRecommended && (
+                    <div className="mb-3 flex items-center gap-2 rounded-2xl border border-amber-400/40 bg-amber-400/15 px-3 py-2 text-amber-700 dark:text-amber-300">
+                      <Sparkles className="h-4 w-4 shrink-0" />
+                      <span className="text-xs font-bold">Top recommendation · Metro / Monorail</span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-2 pr-8">
                     <Badge className="rounded-full text-sm px-3 py-1" style={{ backgroundColor: color, color: 'white' }}>
                       {option.route_label || 'Route'}

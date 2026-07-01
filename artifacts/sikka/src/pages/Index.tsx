@@ -21,6 +21,7 @@ import ReportDialog from '@/components/ReportDialog';
 import ContributeTransportDialog from '@/components/ContributeTransportDialog';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
+import { openNativeLocationSettings } from '@/lib/nativeLocationSettings';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -160,19 +161,9 @@ const Index = () => {
   useEffect(() => {
     if (!navigator.geolocation) return;
 
-    // Proactively check permission state (where supported) so the "turn on
-    // location" prompt can appear immediately on load rather than only after
-    // a failed request — most browsers support the Permissions API for this.
-    if ('permissions' in navigator) {
-      navigator.permissions
-        .query({ name: 'geolocation' as PermissionName })
-        .then((status) => {
-          setShowLocationPrompt(status.state !== 'granted');
-          status.onchange = () => setShowLocationPrompt(status.state !== 'granted');
-        })
-        .catch(() => {});
-    }
-
+    // Resolve a real position before showing any warning. The previous
+    // permission pre-check made the card flash while an enabled GPS was still
+    // acquiring its first fix.
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
@@ -186,7 +177,8 @@ const Index = () => {
         setUserLocation({ lat: CAIRO_CENTER.latitude, lng: CAIRO_CENTER.longitude });
         setLocationName('Cairo, Egypt');
         setShowLocationPrompt(true);
-      }
+      },
+      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 60_000 },
     );
   }, [language]);
 
@@ -201,7 +193,11 @@ const Index = () => {
         const name = await reverseGeocode(loc.lat, loc.lng, language);
         setLocationName(name);
       },
-      () => toast.error(t('locationStillOff', language)),
+      async () => {
+        const openedSettings = await openNativeLocationSettings();
+        if (!openedSettings) toast.error(t('locationStillOff', language));
+      },
+      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 0 },
     );
   }, [language]);
 

@@ -47,7 +47,7 @@ export default function PlanSetup() {
       destLng: parseFloat(params.get('destLng') || '0'),
       startLat: parseFloat(params.get('lat') || '30.0444'),
       startLng: parseFloat(params.get('lng') || '31.2357'),
-      tripType: params.get('tripType') || 'economic',
+      tripType: params.get('tripType') || 'comfortable',
       budget: params.get('budget') ? parseFloat(params.get('budget') || '') : null,
       mode: params.get('mode') || undefined,
     };

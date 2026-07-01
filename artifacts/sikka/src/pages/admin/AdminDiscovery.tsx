@@ -24,7 +24,7 @@ interface DiscoveryRow {
   fullTraceCount?: number;
   goodGpsCount?: number;
   confidenceScore?: number;
-  routeGeometry?: [number, number][] | null;
+  routeGeometry?: unknown;
   centerLat?: number | null;
   centerLng?: number | null;
 }
@@ -51,8 +51,24 @@ type GeoJSONLine = {
   features: { type: 'Feature'; geometry: { type: 'LineString'; coordinates: [number, number][] }; properties: Record<string, never> }[];
 };
 
-const lineToGeoJSON = (coords: [number, number][] | null | undefined): GeoJSONLine | null => {
-  if (!coords || coords.length < 2) return null;
+const lineToGeoJSON = (value: unknown): GeoJSONLine | null => {
+  let parsed = value;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch { return null; }
+  }
+  if (!Array.isArray(parsed)) return null;
+  const coords = parsed
+    .filter((point): point is [number, number] => (
+      Array.isArray(point)
+      && point.length >= 2
+      && point[0] != null && point[1] != null
+      && Number.isFinite(Number(point[0]))
+      && Number.isFinite(Number(point[1]))
+      && Number(point[0]) >= -180 && Number(point[0]) <= 180
+      && Number(point[1]) >= -90 && Number(point[1]) <= 90
+    ))
+    .map((point) => [Number(point[0]), Number(point[1])] as [number, number]);
+  if (coords.length < 2) return null;
   return {
     type: 'FeatureCollection',
     features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }],
@@ -72,20 +88,30 @@ const AdminDiscovery = () => {
   const fetchData = () => {
     setIsLoading(true);
     setLoadError(null);
-    Promise.all([
+    Promise.allSettled([
       api.get<DiscoveryRow[]>('/transport-reports?discovery=true'),
       api.get<TransportReport[]>('/transport-reports?status=pending'),
     ])
-      .then(([disc, pend]) => {
-        setDiscovery(Array.isArray(disc) ? disc : []);
-        setPending(Array.isArray(pend) ? pend : []);
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : 'Failed to load';
-        setLoadError(message);
-        toast.error(message);
-        setDiscovery([]);
-        setPending([]);
+      .then(([discResult, pendingResult]) => {
+        if (discResult.status === 'fulfilled') {
+          setDiscovery(Array.isArray(discResult.value) ? discResult.value : []);
+        } else {
+          setDiscovery([]);
+        }
+        if (pendingResult.status === 'fulfilled') {
+          setPending(Array.isArray(pendingResult.value) ? pendingResult.value : []);
+        } else {
+          setPending([]);
+        }
+
+        const failures = [discResult, pendingResult]
+          .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+          .map((result) => result.reason instanceof Error ? result.reason.message : 'Failed to load');
+        if (failures.length) {
+          const message = [...new Set(failures)].join(' · ');
+          setLoadError(message);
+          toast.error(message);
+        }
       })
       .finally(() => setIsLoading(false));
   };
