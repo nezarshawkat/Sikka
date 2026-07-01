@@ -19,6 +19,7 @@ import seedHeatmapsRouter from "./seedHeatmaps";
 import seedStopsRouter from "./seedStops";
 import seedGtfsRouter from "./seedGtfs";
 import reEnrichRoutesRouter from "./reEnrichRoutes";
+import routeGeometryRepairRouter from "./routeGeometryRepair";
 import intercityRouter from "./intercity";
 import reportsRouter from "./reports";
 import transportReportsRouter from "./transportReports";
@@ -68,6 +69,8 @@ router.use("/admin/seed-gtfs", seedGtfsRouter);
 // POST /api/admin/re-enrich-routes?transportMode=bus&limit=N&offset=M
 //   - small incremental batches re-snapping board-anywhere route_path to main streets
 router.use("/admin/re-enrich-routes", reEnrichRoutesRouter);
+// Safe route-geometry repair workflow: audit, candidate generation, anchor repair, accept/reject versions.
+router.use("/admin/routes", routeGeometryRepairRouter);
 // POST /api/admin/seed-egypt-transit?dataset=lrt|brt|tram&offset=N
 //   - geocodes + road/rail-snaps Cairo LRT, Cairo BRT, and Alexandria Tram from
 //     real researched station lists, one line per call (call until done:true)

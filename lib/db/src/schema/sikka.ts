@@ -5,6 +5,17 @@ import { z } from "zod/v4";
 export const appRoleEnum = pgEnum("app_role", ["admin", "user"]);
 export const routeStatusEnum = pgEnum("route_status", ["active", "needs_review", "inactive", "pending_discovery"]);
 
+export type RoutePathGeoJson = { type: "LineString" | string; coordinates: [number, number][] };
+export type RouteQualitySnapshot = {
+  qualityScore?: number;
+  confidenceScore?: number;
+  confidenceLevel?: "high" | "medium" | "low";
+  source?: string;
+  generatedAt?: string;
+  metrics?: Record<string, unknown>;
+  warnings?: string[];
+} | null;
+
 export const profilesTable = pgTable("profiles", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id").notNull().unique(),
@@ -52,11 +63,14 @@ export const transitLinesTable = pgTable("transit_lines", {
   governorate: text("governorate").notNull().default("Cairo"),
   viaStops: text("via_stops").array().notNull().default([]),
   stops: jsonb("stops").$type<{ name: string; lat: number; lng: number }[]>(),
-  routePath: jsonb("route_path").$type<{ type: string; coordinates: [number, number][] } | null>(),
+  routePath: jsonb("route_path").$type<RoutePathGeoJson | null>(),
   dataSource: text("data_source").notNull().default("seed"),
   sourcePriority: integer("source_priority").notNull().default(10),
   confidenceScore: real("confidence_score").notNull().default(0.6),
   routeStatus: routeStatusEnum("route_status").notNull().default("active"),
+  geometryLocked: boolean("geometry_locked").notNull().default(false),
+  activeGeometryVersionId: uuid("active_geometry_version_id"),
+  routeQuality: jsonb("route_quality").$type<RouteQualitySnapshot>(),
   verifiedAt: timestamp("verified_at"),
   lastConfirmedAt: timestamp("last_confirmed_at"),
   needsReviewReason: text("needs_review_reason"),
@@ -73,6 +87,58 @@ export const transitLinesTable = pgTable("transit_lines", {
   routeDirection: text("route_direction").notNull().default("forward"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const routeRepairAnchorsTable = pgTable("route_repair_anchors", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transitLineId: uuid("transit_line_id").notNull(),
+  sequence: integer("sequence").notNull(),
+  direction: text("direction").notNull().default("forward"),
+  name: text("name").notNull().default(""),
+  nameAr: text("name_ar"),
+  lat: real("lat").notNull(),
+  lng: real("lng").notNull(),
+  source: text("source").notNull().default("manual_admin"),
+  required: boolean("required").notNull().default(true),
+  confidenceScore: real("confidence_score").notNull().default(0.8),
+  anchorType: text("anchor_type").notNull().default("corridor"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const routeGeometryVersionsTable = pgTable("route_geometry_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transitLineId: uuid("transit_line_id").notNull(),
+  version: integer("version").notNull(),
+  geometry: jsonb("geometry").$type<RoutePathGeoJson>().notNull(),
+  source: text("source").notNull().default("candidate"),
+  status: text("status").notNull().default("candidate"),
+  qualityScore: real("quality_score").notNull().default(0),
+  confidenceScore: real("confidence_score").notNull().default(0),
+  metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}),
+  evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+  createdBy: text("created_by"),
+  acceptedAt: timestamp("accepted_at"),
+  rejectedAt: timestamp("rejected_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const routeRepairSegmentsTable = pgTable("route_repair_segments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  geometryVersionId: uuid("geometry_version_id").notNull(),
+  transitLineId: uuid("transit_line_id").notNull(),
+  fromAnchorId: uuid("from_anchor_id"),
+  toAnchorId: uuid("to_anchor_id"),
+  fromAnchorSequence: integer("from_anchor_sequence"),
+  toAnchorSequence: integer("to_anchor_sequence"),
+  shapeStartIndex: integer("shape_start_index"),
+  shapeEndIndex: integer("shape_end_index"),
+  routingMode: text("routing_mode").notNull().default("osm_snapped"),
+  status: text("status").notNull().default("candidate"),
+  metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}),
+  warnings: text("warnings").array().notNull().default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const locationsTable = pgTable("locations", {
@@ -222,6 +288,9 @@ export const phoneSessionsTable = pgTable("phone_sessions", {
 export const insertProfileSchema = createInsertSchema(profilesTable).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertTransportTypeSchema = createInsertSchema(transportTypesTable).omit({ id: true, createdAt: true });
 export const insertTransitLineSchema = createInsertSchema(transitLinesTable).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertRouteRepairAnchorSchema = createInsertSchema(routeRepairAnchorsTable).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertRouteGeometryVersionSchema = createInsertSchema(routeGeometryVersionsTable).omit({ id: true, createdAt: true });
+export const insertRouteRepairSegmentSchema = createInsertSchema(routeRepairSegmentsTable).omit({ id: true, createdAt: true });
 export const insertLocationSchema = createInsertSchema(locationsTable).omit({ id: true, createdAt: true });
 export const insertMawaqefSchema = createInsertSchema(mawaqefTable).omit({ id: true, createdAt: true });
 export const insertTripSchema = createInsertSchema(tripsTable).omit({ id: true, createdAt: true });
@@ -259,6 +328,9 @@ export type Train = typeof trainsTable.$inferSelect;
 export type Profile = typeof profilesTable.$inferSelect;
 export type TransportType = typeof transportTypesTable.$inferSelect;
 export type TransitLine = typeof transitLinesTable.$inferSelect;
+export type RouteRepairAnchor = typeof routeRepairAnchorsTable.$inferSelect;
+export type RouteGeometryVersion = typeof routeGeometryVersionsTable.$inferSelect;
+export type RouteRepairSegment = typeof routeRepairSegmentsTable.$inferSelect;
 export type Location = typeof locationsTable.$inferSelect;
 export type Mawaqef = typeof mawaqefTable.$inferSelect;
 export type Trip = typeof tripsTable.$inferSelect;

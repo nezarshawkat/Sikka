@@ -37,6 +37,8 @@ interface TransitLine {
   governorate: string;
   dataSource?: string;
   sourcePriority?: number;
+  geometryLocked?: boolean;
+  activeGeometryVersionId?: string | null;
   confidenceScore?: number;
   routeStatus?: 'active' | 'needs_review' | 'inactive' | 'pending_discovery';
   needsReviewReason?: string | null;
@@ -53,11 +55,42 @@ interface TransportType {
   color: string;
 }
 
+interface GeometryVersion {
+  id: string;
+  version: number;
+  geometry: { type: string; coordinates: [number, number][] };
+  source: string;
+  status: string;
+  qualityScore: number;
+  confidenceScore: number;
+  metrics?: {
+    confidenceLevel?: string;
+    pointCount?: number;
+    lengthKm?: number;
+    maxStepKm?: number;
+    warnings?: string[];
+  };
+  createdAt?: string;
+  acceptedAt?: string | null;
+}
+
 const ICONS: Record<string, string> = {
   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
 };
 
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357, zoom: 12 };
+
+function isProtectedGeometry(route: TransitLine, type: TransportType | null): string | null {
+  const source = (route.dataSource ?? '').toLowerCase();
+  const typeName = `${type?.nameEn ?? ''} ${type?.nameAr ?? ''}`.toLowerCase();
+  if (route.geometryLocked) return 'This route geometry is locked';
+  if (source === 'gtfs') return 'GTFS routes must keep their imported geometry';
+  if (source.includes('discovery') || source.includes('gps')) return 'Rider-recorded GPS is already the preferred geometry';
+  if (['metro', 'monorail', 'lrt', 'tram', 'train', 'rail'].some((term) => typeName.includes(term))) {
+    return 'Fixed-guideway routes must keep their verified station geometry';
+  }
+  return null;
+}
 
 export default function RouteDetail() {
   const { id } = useParams<{ id: string }>();
@@ -72,8 +105,11 @@ export default function RouteDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [geometryVersions, setGeometryVersions] = useState<GeometryVersion[]>([]);
+  const [versionBusy, setVersionBusy] = useState<string | null>(null);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [viewState, setViewState] = useState(CAIRO_CENTER);
+  const isAdmin = Boolean((user as { isAdmin?: boolean } | null)?.isAdmin);
 
   // Editable fields — all route management controls live in this single form
   const [form, setForm] = useState({
@@ -130,7 +166,20 @@ export default function RouteDetail() {
     }
   };
 
+  const loadGeometryVersions = async () => {
+    if (!id || !isAdmin) return;
+    try {
+      const data = await api.get<{ versions: GeometryVersion[] }>(`/admin/routes/${id}/geometry-candidates`);
+      setGeometryVersions(data.versions ?? []);
+    } catch {
+      // Candidate history is an admin helper; route loading should not fail if
+      // this endpoint is unavailable during a deploy/migration window.
+      setGeometryVersions([]);
+    }
+  };
+
   useEffect(() => { void loadRoute(); }, [id]);
+  useEffect(() => { void loadGeometryVersions(); }, [id, isAdmin]);
 
   useEffect(() => {
     const coords = route?.routePath?.coordinates;
@@ -145,6 +194,7 @@ export default function RouteDetail() {
       const timeout = setTimeout(() => fitBoundsTo(fullMapRef, coords), 100);
       return () => clearTimeout(timeout);
     }
+    return undefined;
   }, [fullscreenOpen, route]);
 
   const handleSave = async () => {
@@ -189,12 +239,9 @@ export default function RouteDetail() {
 
   const handleRegeneratePath = async () => {
     if (!id || !route) return;
-    if (route.hasFixedStops) {
-      toast.error('Fixed rail routes must keep their verified station geometry');
-      return;
-    }
-    if (route.dataSource === 'discovery') {
-      toast.error('Rider-recorded GPS is already the preferred route geometry');
+    const protectedReason = isProtectedGeometry(route, transportType);
+    if (protectedReason) {
+      toast.error(protectedReason);
       return;
     }
 
@@ -205,11 +252,13 @@ export default function RouteDetail() {
         results: Array<{ status: string }>;
       }>(`/admin/re-enrich-routes?lineId=${encodeURIComponent(id)}&limit=1`, {});
       if (result.updated < 1) {
+        await loadGeometryVersions();
         const reason = result.results?.[0]?.status?.replaceAll('_', ' ') || 'no corrected path was accepted';
         throw new Error(`Path kept for review: ${reason}`);
       }
       await loadRoute();
-      toast.success('Route path regenerated and road-snapped');
+      await loadGeometryVersions();
+      toast.success('High-confidence route path accepted and road-snapped');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to regenerate path');
     } finally {
@@ -221,6 +270,11 @@ export default function RouteDetail() {
   const handleFlipDirection = async () => {
     if (!id || !route?.routePath?.coordinates?.length) {
       toast.error('No route geometry to flip');
+      return;
+    }
+    const protectedReason = isProtectedGeometry(route, transportType);
+    if (protectedReason) {
+      toast.error(protectedReason);
       return;
     }
     setSaving(true);
@@ -242,8 +296,37 @@ export default function RouteDetail() {
     }
   };
 
+  const handleAcceptVersion = async (versionId: string) => {
+    if (!id) return;
+    setVersionBusy(versionId);
+    try {
+      await api.post(`/admin/routes/${id}/geometry/${versionId}/accept`, {});
+      await loadRoute();
+      await loadGeometryVersions();
+      toast.success('Geometry candidate accepted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to accept candidate');
+    } finally {
+      setVersionBusy(null);
+    }
+  };
+
+  const handleRejectVersion = async (versionId: string) => {
+    if (!id) return;
+    setVersionBusy(versionId);
+    try {
+      await api.post(`/admin/routes/${id}/geometry/${versionId}/reject`, {});
+      await loadGeometryVersions();
+      toast.success('Geometry candidate rejected');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reject candidate');
+    } finally {
+      setVersionBusy(null);
+    }
+  };
+
   const handleDelete = async () => {
-    if (!id || !route || !user?.isAdmin) return;
+    if (!id || !route || !isAdmin) return;
     if (!confirm('Are you sure you want to delete this route? This cannot be undone.')) return;
     try {
       await api.delete(`/transit-lines/${id}`);
@@ -310,7 +393,7 @@ export default function RouteDetail() {
               <p className="text-xs text-muted-foreground">{route.nameAr}</p>
             </div>
           </div>
-          {user?.isAdmin && (
+          {isAdmin && (
             <Button variant="destructive" size="sm" onClick={handleDelete} className="gap-2">
               <Trash2 className="w-4 h-4" />
               Delete
@@ -540,6 +623,81 @@ export default function RouteDetail() {
               </Button>
             </div>
           </motion.div>
+
+          {isAdmin && geometryVersions.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="rounded-[1.5rem] bg-card p-6 shadow-sm border space-y-4"
+            >
+              <div>
+                <h3 className="font-bold text-base">Geometry candidates</h3>
+                <p className="text-xs text-muted-foreground">
+                  Candidates are saved first; only accepted versions publish to trip planning.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {geometryVersions.slice(0, 6).map((version) => {
+                  const confidence = version.metrics?.confidenceLevel ?? (version.confidenceScore >= 0.82 ? 'high' : 'medium');
+                  const warnings = version.metrics?.warnings ?? [];
+                  const isActiveVersion = route.activeGeometryVersionId === version.id || version.status === 'accepted';
+                  const canAccept = !isActiveVersion && version.status !== 'rejected' && version.status !== 'superseded';
+                  return (
+                    <div key={version.id} className="rounded-xl border p-3 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">Version {version.version}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {version.source.replaceAll('_', ' ')} · {version.geometry?.coordinates?.length ?? 0} pts
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge variant={isActiveVersion ? 'secondary' : version.status === 'needs_review' ? 'destructive' : 'outline'}>
+                            {isActiveVersion ? 'accepted' : version.status}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {confidence} · {Math.round((version.confidenceScore ?? 0) * 100)}%
+                          </span>
+                        </div>
+                      </div>
+
+                      {warnings.length > 0 && (
+                        <p className="text-xs text-yellow-600 line-clamp-2">
+                          {warnings.slice(0, 3).map((w) => w.replaceAll('_', ' ')).join(', ')}
+                        </p>
+                      )}
+
+                      <div className="flex gap-2">
+                        {canAccept && (
+                          <Button
+                            size="sm"
+                            className="h-8 flex-1"
+                            disabled={versionBusy === version.id}
+                            onClick={() => void handleAcceptVersion(version.id)}
+                          >
+                            Accept
+                          </Button>
+                        )}
+                        {version.status !== 'rejected' && !isActiveVersion && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 flex-1"
+                            disabled={versionBusy === version.id}
+                            onClick={() => void handleRejectVersion(version.id)}
+                          >
+                            Reject
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
         </div>
       </div>
 
