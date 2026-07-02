@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Route, Search, ShieldAlert } from 'lucide-react';
+import { deleteLocalTransitLines, getLocalRouteCatalog, saveLocalTransitLine } from '@/lib/localRouteStore';
 
 interface TransitLine {
   id: string;
@@ -59,19 +60,19 @@ const AdminRoutes = () => {
   const [enrichProgress, setEnrichProgress] = useState<{ processed: number; total: number; updated: number; skipped: number; failed: number } | null>(null);
   const [enrichLog, setEnrichLog] = useState<{ line: string | null; status: string; coords?: number }[]>([]);
   const [seedingDataset, setSeedingDataset] = useState<string | null>(null);
-  const [seedLog, setSeedLog] = useState<Record<string, { line: string; status: string; coords?: number }[]>>({});
+  const [seedLog, setSeedLog] = useState<Record<string, { line: string; status: string; coords?: number; geocodedStations?: number; totalStations?: number }[]>>({});
   const [trainSeedRunning, setTrainSeedRunning] = useState(false);
   const [trainSeedResult, setTrainSeedResult] = useState<{ count: number } | null>(null);
 
-  const fetchRoutes = () => {
+  const fetchRoutes = async () => {
     setIsLoading(true);
-    Promise.all([api.get<TransitLine[]>('/transit-lines'), api.get<TransportType[]>('/transport-types')])
-      .then(([lines, types]) => {
-        setRoutes(lines || []);
-        setTransportTypes(types || []);
-      })
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
+    try {
+      const catalog = await getLocalRouteCatalog<TransitLine, TransportType>();
+      setRoutes(catalog.routes);
+      setTransportTypes(catalog.transportTypes);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -119,6 +120,7 @@ const AdminRoutes = () => {
         ? { routeStatus: status, needsReviewReason: null, verifiedAt: new Date().toISOString(), reviewReportCount: 0 }
         : { routeStatus: status, needsReviewReason: status === 'needs_review' ? 'admin review requested' : route.needsReviewReason };
       const updated = await api.put<TransitLine>(`/transit-lines/${route.id}`, payload);
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
       setRoutes((prev) => prev.map((item) => (item.id === route.id ? { ...item, ...updated } : item)));
       toast.success('Route quality updated');
     } catch (err) {
@@ -129,14 +131,16 @@ const AdminRoutes = () => {
   const runDedupe = async (apply: boolean) => {
     setDedupeRunning(true);
     try {
-      const result = await api.post<{ groupsFound: number; duplicateLinesRemoved: number; groups: { keptLabel: string; removedLabels: string[] }[] }>(
+      const result = await api.post<{ groupsFound: number; duplicateLinesRemoved: number; groups: { keptLabel: string; removedIds: string[]; removedLabels: string[] }[] }>(
         `/transit-lines/dedupe?apply=${apply}`,
         {},
       );
       setDedupeResult(result);
       if (apply) {
+        const removedIds = result.groups.flatMap((group) => group.removedIds);
+        await deleteLocalTransitLines(removedIds);
+        setRoutes((previous) => previous.filter((route) => !removedIds.includes(route.id)));
         toast.success(`Merged ${result.duplicateLinesRemoved} duplicate route${result.duplicateLinesRemoved === 1 ? '' : 's'}`);
-        fetchRoutes();
       } else {
         toast(result.groupsFound > 0 ? `Found ${result.groupsFound} duplicate group(s) — review below before applying` : 'No duplicates found');
       }
@@ -155,7 +159,7 @@ const AdminRoutes = () => {
     failed: number;
     nextOffset: number;
     done: boolean;
-    results: { id: string; line: string | null; status: string; coords?: number }[];
+    results: { id: string; line: string | null; status: string; coords?: number; route?: TransitLine }[];
   }
 
   // Walks every batch automatically (the endpoint is deliberately small-batch
@@ -186,11 +190,14 @@ const AdminRoutes = () => {
         };
         setEnrichProgress(totals);
         setEnrichLog((prev) => [...prev, ...result.results.map((r) => ({ line: r.line, status: r.status, coords: r.coords }))]);
+        for (const item of result.results) {
+          if (item.route) await saveLocalTransitLine(item.route as unknown as Record<string, unknown>);
+        }
         if (result.done || result.processed === 0) break;
         offset = result.nextOffset;
       }
       toast.success(`Re-enrichment finished: ${totals.updated} updated, ${totals.skipped} flagged for review, ${totals.failed} failed`);
-      fetchRoutes();
+      await fetchRoutes();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Re-enrichment failed partway through — you can re-run it, already-processed routes will just be redone');
     } finally {

@@ -76,7 +76,7 @@ type OfflineSnapshot = {
   }[];
 };
 
-const bundledSnapshot = bundledSnapshotRaw as OfflineSnapshot;
+const bundledSnapshot = bundledSnapshotRaw as unknown as OfflineSnapshot;
 
 type PlannerRequest = {
   startLat: number;
@@ -170,14 +170,9 @@ type PlanCandidate = {
   usesRail: boolean;
 };
 
-const DEFAULT_API_ORIGIN = "https://sikka-mq6w.onrender.com";
-const API_ORIGIN = ((import.meta.env.VITE_API_URL as string | undefined) || DEFAULT_API_ORIGIN).replace(/\/+$/, "");
-const API_BASE = `${API_ORIGIN}/api`;
 const SNAPSHOT_DB = "sikka-offline";
 const SNAPSHOT_STORE = "snapshots";
 const SNAPSHOT_KEY = "latest";
-const SNAPSHOT_SCHEMA_VERSION = 3;
-const SNAPSHOT_REFRESH_MS = 10 * 60 * 1000;
 const WALK_MAX_KM = 0.8;
 const WALK_TOTAL_MAX_KM = 1.6;
 const WALK_SPEED_KMH = 4.5;
@@ -891,55 +886,6 @@ async function writeCachedSnapshot(snapshot: OfflineSnapshot): Promise<void> {
   });
 }
 
-function mergeSnapshotDelta(cached: OfflineSnapshot | null, delta: OfflineSnapshot): OfflineSnapshot {
-  if (!cached || cached.schemaVersion !== delta.schemaVersion) return delta;
-  const lineMap = new Map(cached.lines.map((line) => [line.id, line]));
-  for (const line of delta.lines) lineMap.set(line.id, line);
-  const typeMap = new Map(cached.types.map((type) => [type.id, type]));
-  for (const type of delta.types) typeMap.set(type.id, type);
-  const heatMap = new Map((cached.heatmaps ?? []).map((heat) => [heat.id, heat]));
-  for (const heat of delta.heatmaps ?? []) heatMap.set(heat.id, heat);
-  return {
-    ...delta,
-    types: [...typeMap.values()],
-    lines: [...lineMap.values()].filter((line) => line.routeStatus !== "inactive" && line.routeStatus !== "pending_discovery"),
-    heatmaps: [...heatMap.values()],
-  };
-}
-
-async function fetchSnapshot(): Promise<OfflineSnapshot | null> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 6000);
-  try {
-    const cached = await readCachedSnapshot().catch(() => null);
-    const manifestRes = await fetch(`${API_BASE}/offline/manifest`, { signal: controller.signal, cache: "no-cache" });
-    if (manifestRes.ok) {
-      const manifest = (await manifestRes.json()) as { schemaVersion: number; revision: string };
-      if (manifest.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) return null;
-      if (cached?.snapshot?.revision === manifest.revision && cached.snapshot.lines?.length) return cached.snapshot;
-      const deltaRes = await fetch(`${API_BASE}/offline/delta?sinceRevision=${encodeURIComponent(cached?.snapshot?.revision ?? "")}`, { signal: controller.signal, cache: "no-cache" });
-      if (!deltaRes.ok) return cached?.snapshot ?? null;
-      const delta = (await deltaRes.json()) as OfflineSnapshot;
-      if (delta.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) return null;
-      const snapshot = mergeSnapshotDelta(cached?.snapshot ?? null, delta);
-      if (!snapshot.lines?.length) return cached?.snapshot ?? null;
-      await writeCachedSnapshot(snapshot);
-      return snapshot;
-    }
-
-    const res = await fetch(`${API_BASE}/offline/snapshot`, { signal: controller.signal, cache: "no-cache" });
-    if (!res.ok) return cached?.snapshot ?? null;
-    const snapshot = (await res.json()) as OfflineSnapshot;
-    if (snapshot.schemaVersion !== SNAPSHOT_SCHEMA_VERSION || !snapshot.lines?.length) return null;
-    await writeCachedSnapshot(snapshot);
-    return snapshot;
-  } catch {
-    return null;
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
-
 async function getSnapshot(): Promise<OfflineSnapshot | null> {
   const cached = await readCachedSnapshot().catch(() => null);
 
@@ -953,18 +899,12 @@ async function getSnapshot(): Promise<OfflineSnapshot | null> {
       // anything an admin changed since this build was released shows up
       // without the rider having to wait — but the trip being planned right
       // now already has data to work with immediately, regardless of result.
-      void fetchSnapshot().catch(() => {});
       return bundledSnapshot;
     }
     // No bundled data at all (e.g. a dev build before the export step has
     // ever been run) — only in that case fall back to a live fetch so the
     // app isn't simply unusable.
-    return await fetchSnapshot();
-  }
-
-  if (Date.now() - cached.savedAt > SNAPSHOT_REFRESH_MS) {
-    const fresh = await fetchSnapshot();
-    if (fresh) return fresh;
+    return null;
   }
   return cached.snapshot;
 }
@@ -976,6 +916,7 @@ function buildCandidates(snapshot: OfflineSnapshot, point: Coord, planKey: PlanK
   const riderGovernorate = governorateOf(point);
   const candidates: Candidate[] = [];
   for (const line of snapshot.lines) {
+    if (line.routeStatus === "inactive" || line.routeStatus === "pending_discovery") continue;
     if (!line.path || line.path.length < 2) continue;
     // Only suggest routes that actually serve the governorate the rider is
     // currently in — a Cairo line should never appear as an option while

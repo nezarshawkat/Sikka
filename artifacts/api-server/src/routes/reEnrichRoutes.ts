@@ -109,6 +109,7 @@ router.post("/", requireAdmin, async (req, res) => {
     confidenceLevel?: string;
     versionId?: string;
     warnings?: string[];
+    route?: TransitLine;
   }> = [];
 
   for (const line of batch) {
@@ -131,6 +132,9 @@ router.post("/", requireAdmin, async (req, res) => {
       else if (generated.status === "failed") failed++;
       else skipped++;
 
+      const [savedRoute] = "accepted" in result && result.accepted
+        ? await db.select().from(transitLinesTable).where(eq(transitLinesTable.id, line.id)).limit(1)
+        : [];
       results.push({
         id: line.id,
         line: line.lineNumber,
@@ -140,6 +144,7 @@ router.post("/", requireAdmin, async (req, res) => {
         confidenceLevel: result.confidenceLevel,
         versionId: "versionId" in result ? result.versionId : undefined,
         warnings: result.warnings,
+        route: savedRoute,
       });
     } catch (err) {
       await markNeedsReview(line, "route_repair_exception");

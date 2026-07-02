@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { Plus } from 'lucide-react';
+import { getLocalRouteCatalog, saveLocalTransportType } from '@/lib/localRouteStore';
 
 interface TransportType {
   id: string;
@@ -29,8 +30,8 @@ const AdminTransport = () => {
 
   const fetchTypes = async () => {
     try {
-      const data = await api.get<TransportType[]>('/transport-types');
-      setTypes(data ?? []);
+      const catalog = await getLocalRouteCatalog<unknown, TransportType>();
+      setTypes(catalog.transportTypes);
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to load'); }
     setIsLoading(false);
   };
@@ -39,8 +40,9 @@ const AdminTransport = () => {
 
   const updateType = async (id: string, updates: Partial<TransportType>) => {
     try {
-      await api.put(`/transport-types/${id}`, updates);
-      setTypes(prev => prev.map(tt => tt.id === id ? { ...tt, ...updates } : tt));
+      const updated = await api.put<TransportType>(`/transport-types/${id}`, updates);
+      await saveLocalTransportType(updated as unknown as Record<string, unknown>);
+      setTypes(prev => prev.map(tt => tt.id === id ? updated : tt));
       toast.success('Updated');
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to update'); }
   };
@@ -51,6 +53,7 @@ const AdminTransport = () => {
         nameEn: 'New Transport', nameAr: 'مواصلات جديدة',
         icon: 'bus', averageSpeedKmh: 30, basePriceEgp: 5, pricePerKmEgp: 1, color: '#3B82F6',
       });
+      await saveLocalTransportType(row as unknown as Record<string, unknown>);
       setTypes(prev => [...prev, row]);
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to add'); }
   };

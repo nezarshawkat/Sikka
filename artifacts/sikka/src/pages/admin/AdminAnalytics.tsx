@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Users, Route, Star, Train, TrendingUp, MessageSquare, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { getLocalRouteCatalog } from '@/lib/localRouteStore';
 
 interface AnalyticsStats { users: number; trips: number; reviews: number; routes: number }
 interface Review { rating: number; transportTypeId: string | null; createdAt: string }
@@ -23,7 +24,7 @@ const AdminAnalytics = () => {
       .catch(() => {});
     api.get<Review[]>('/reviews').then((d) => setReviews(d ?? [])).catch(() => {});
     api.get<Report[]>('/reports').then((d) => setReports(d ?? [])).catch(() => {});
-    api.get<TransportType[]>('/transport-types').then((d) => setTypes(d ?? [])).catch(() => {});
+    getLocalRouteCatalog<unknown, TransportType>().then((catalog) => setTypes(catalog.transportTypes)).catch(() => {});
   }, []);
 
   const cards = [

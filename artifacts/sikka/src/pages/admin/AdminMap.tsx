@@ -11,6 +11,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { MAP_STYLE_DARK } from '@/hooks/useIsDark';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { deleteLocalTransitLine, getLocalRouteCatalog, saveLocalTransitLine } from '@/lib/localRouteStore';
 
 interface GeoJSONLineString {
   type: 'LineString';
@@ -90,7 +91,6 @@ const AdminMap = () => {
   const [drawPoints, setDrawPoints] = useState<[number, number][]>([]);
   const [isSnapping, setIsSnapping] = useState(false);
   const [generatedPaths, setGeneratedPaths] = useState<Record<string, GeoJSONLineString>>({});
-  const generatingRef = useRef(new Set<string>());
   const geocodeCacheRef = useRef<Record<string, [number, number] | null>>({});
 
   const [showForm, setShowForm] = useState(false);
@@ -104,14 +104,13 @@ const AdminMap = () => {
 
   const fetchData = useCallback(async () => {
     try {
-      const [tt, tl, hm, mw] = await Promise.all([
-        api.get('/transport-types'),
-        api.get('/transit-lines'),
+      const [catalog, hm, mw] = await Promise.all([
+        getLocalRouteCatalog<TransitLine, TransportType>(),
         api.get('/heatmaps'),
         api.get('/mawaqef'),
       ]);
-      setTransportTypes((tt || []) as TransportType[]);
-      setTransitLines((tl || []) as TransitLine[]);
+      setTransportTypes(catalog.transportTypes);
+      setTransitLines(catalog.routes);
       setHeatmapData((hm || []) as HeatmapPoint[]);
       setMawaqef((mw || []) as Mawaqef[]);
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to load data'); }
@@ -208,29 +207,6 @@ const AdminMap = () => {
       return typeMatch && govMatch && stationMatch && searchMatch;
     });
   }, [activeTypeId, activeGovernorate, activeStationId, searchQuery, transitLines]);
-
-  useEffect(() => {
-    const limit = activeTypeId === 'all' && !searchQuery && activeStationId === 'all' ? 25 : 45;
-    const missing = filteredLines
-      .filter(line => !line.routePath?.coordinates?.length && !generatedPaths[line.id] && !generatingRef.current.has(line.id))
-      .slice(0, limit);
-    if (!missing.length) return;
-
-    let cancelled = false;
-    (async () => {
-      for (const line of missing) {
-        if (cancelled) break;
-        generatingRef.current.add(line.id);
-        const path = await buildPathFromLineText(line);
-        generatingRef.current.delete(line.id);
-        if (path?.coordinates?.length && !cancelled) {
-          setGeneratedPaths(prev => ({ ...prev, [line.id]: path }));
-          api.put(`/transit-lines/${line.id}`, { routePath: path }).catch(() => undefined);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [activeTypeId, buildPathFromLineText, filteredLines, generatedPaths, searchQuery, activeStationId]);
 
   const getLineGeometry = (line: TransitLine) => line.routePath?.coordinates?.length ? line.routePath : generatedPaths[line.id];
   const visibleLines = filteredLines.filter(line => getLineGeometry(line));
@@ -378,27 +354,29 @@ const AdminMap = () => {
     };
 
     try {
-      if (editingLine) {
-        await api.put(`/transit-lines/${editingLine.id}`, payload);
-      } else {
-        await api.post('/transit-lines', payload);
-      }
+      const updated = editingLine
+        ? await api.put<TransitLine>(`/transit-lines/${editingLine.id}`, payload)
+        : await api.post<TransitLine>('/transit-lines', payload);
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
+      setTransitLines((previous) => editingLine
+        ? previous.map((item) => item.id === updated.id ? updated : item)
+        : [...previous, updated]);
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to save route'); return; }
     toast.success(editingLine ? 'Route updated and snapped to roads' : 'Route added and snapped to roads');
     setShowForm(false);
     setDrawPoints([]);
     setIsDrawing(false);
     setEditingLine(null);
-    fetchData();
   };
 
   const deleteLine = async (id: string) => {
     try {
       await api.delete(`/transit-lines/${id}`);
+      await deleteLocalTransitLine(id);
+      setTransitLines((previous) => previous.filter((line) => line.id !== id));
       toast.success('Deleted');
       setDetailLine(null);
       setSelectedLine(null);
-      fetchData();
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to delete route'); }
   };
 
@@ -644,11 +622,13 @@ const AdminMap = () => {
                     const path = await buildPathFromLineText(detailLine);
                     if (!path) { toast.error('Could not geocode the stops — add more via stops'); return; }
                     try {
-                      await api.put(`/transit-lines/${detailLine.id}`, { routePath: path });
+                      const updated = await api.put<TransitLine>(`/transit-lines/${detailLine.id}`, { routePath: path });
+                      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
+                      setTransitLines((previous) => previous.map((line) => line.id === updated.id ? updated : line));
+                      setDetailLine(updated);
                     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to regenerate path'); return; }
                     toast.success('Path regenerated and snapped to roads');
-                    setGeneratedPaths(prev => ({ ...prev, [detailLine.id]: path }));
-                    fetchData();
+                    setGeneratedPaths(prev => ({ ...prev, [detailLine.id]: path as GeoJSONLineString }));
                   }}><RouteIcon className="h-3 w-3" /> Regenerate path</Button>
                   <Button variant="outline" size="sm" className="gap-1" onClick={() => { setDetailLine(null); openEditForm(detailLine); }}><Pencil className="h-3 w-3" /> Edit</Button>
                   <Button variant="destructive" size="sm" className="gap-1" onClick={() => deleteLine(detailLine.id)}><Trash2 className="h-3 w-3" /> Delete</Button>

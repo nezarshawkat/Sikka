@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';;
+import { getLocalRouteCatalog } from '@/lib/localRouteStore';
 import { Star, Trash2, Check, X, Filter, MapPin, User } from 'lucide-react';
 
 const FACES = ['😞', '😐', '🙂', '😊', '🤩'];
@@ -67,13 +68,12 @@ const AdminReviews = () => {
   useEffect(() => {
     Promise.all([
       api.get<Review[]>('/reviews'),
-      api.get<TransportType[]>('/transport-types'),
-      api.get<TransitLine[]>('/transit-lines'),
+      getLocalRouteCatalog<TransitLine, TransportType>(),
     ])
-      .then(([data, types, lines]) => {
+      .then(([data, catalog]) => {
         setReviews(data ?? []);
-        setTransportTypes(types ?? []);
-        setTransitLines(lines ?? []);
+        setTransportTypes(catalog.transportTypes);
+        setTransitLines(catalog.routes);
       })
       .catch((err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to load reviews'))
       .finally(() => setIsLoading(false));

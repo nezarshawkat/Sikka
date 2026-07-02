@@ -18,6 +18,7 @@ import { api } from '@/lib/api';
 import { useMapStyle } from '@/hooks/useMapStyle';
 import { toast } from 'sonner';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { deleteLocalTransitLine, getLocalTransitLine, saveLocalTransitLine } from '@/lib/localRouteStore';
 
 interface TransitLine {
   id: string;
@@ -134,7 +135,9 @@ export default function RouteDetail() {
     if (!id) return;
     setLoading(true);
     try {
-      const data = await api.get<TransitLine>(`/transit-lines/${id}`);
+      const local = await getLocalTransitLine<TransitLine, TransportType>(id);
+      const data = local.route;
+      if (!data) throw new Error('Route is not available in the saved app snapshot');
       setRoute(data);
       setForm({
         lineNumber: data.lineNumber || '',
@@ -150,8 +153,7 @@ export default function RouteDetail() {
         governorate: data.governorate || 'Cairo',
       });
 
-      const types = await api.get<TransportType[]>('/transport-types');
-      setTransportType(types.find((t) => t.id === data.transportTypeId) ?? null);
+      setTransportType(local.transportType);
 
       const coords = data.routePath?.coordinates;
       if (coords?.length) {
@@ -179,7 +181,6 @@ export default function RouteDetail() {
   };
 
   useEffect(() => { void loadRoute(); }, [id]);
-  useEffect(() => { void loadGeometryVersions(); }, [id, isAdmin]);
 
   useEffect(() => {
     const coords = route?.routePath?.coordinates;
@@ -214,6 +215,7 @@ export default function RouteDetail() {
         routeDirection: form.routeDirection,
         governorate: form.governorate,
       });
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
       setRoute(updated);
       toast.success('Route updated');
     } catch (err) {
@@ -230,6 +232,7 @@ export default function RouteDetail() {
         routeStatus: status,
         ...(status === 'active' ? { verifiedAt: new Date().toISOString(), needsReviewReason: null } : {}),
       });
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
       setRoute(updated);
       toast.success(`Route marked as ${status.replace('_', ' ')}`);
     } catch (err) {
@@ -249,14 +252,16 @@ export default function RouteDetail() {
     try {
       const result = await api.post<{
         updated: number;
-        results: Array<{ status: string }>;
+        results: Array<{ status: string; route?: TransitLine }>;
       }>(`/admin/re-enrich-routes?lineId=${encodeURIComponent(id)}&limit=1`, {});
       if (result.updated < 1) {
-        await loadGeometryVersions();
         const reason = result.results?.[0]?.status?.replaceAll('_', ' ') || 'no corrected path was accepted';
         throw new Error(`Path kept for review: ${reason}`);
       }
-      await loadRoute();
+      const updated = result.results?.[0]?.route;
+      if (!updated) throw new Error('The corrected route was not returned by the backend');
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
+      setRoute(updated);
       await loadGeometryVersions();
       toast.success('High-confidence route path accepted and road-snapped');
     } catch (err) {
@@ -286,6 +291,7 @@ export default function RouteDetail() {
         toArea: form.fromArea,
         routeDirection: form.routeDirection === 'forward' ? 'reverse' : 'forward',
       });
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
       setRoute(updated);
       setForm((f) => ({ ...f, fromArea: f.toArea, toArea: f.fromArea, routeDirection: updated.routeDirection }));
       toast.success('Direction flipped');
@@ -301,8 +307,13 @@ export default function RouteDetail() {
     setVersionBusy(versionId);
     try {
       await api.post(`/admin/routes/${id}/geometry/${versionId}/accept`, {});
-      await loadRoute();
-      await loadGeometryVersions();
+      const version = geometryVersions.find((item) => item.id === versionId);
+      if (route && version) {
+        const updated = { ...route, routePath: version.geometry, activeGeometryVersionId: versionId, confidenceScore: version.confidenceScore };
+        await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
+        setRoute(updated);
+      }
+      setGeometryVersions((previous) => previous.map((item) => ({ ...item, status: item.id === versionId ? 'accepted' : item.status === 'accepted' ? 'superseded' : item.status })));
       toast.success('Geometry candidate accepted');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to accept candidate');
@@ -316,7 +327,7 @@ export default function RouteDetail() {
     setVersionBusy(versionId);
     try {
       await api.post(`/admin/routes/${id}/geometry/${versionId}/reject`, {});
-      await loadGeometryVersions();
+      setGeometryVersions((previous) => previous.map((item) => item.id === versionId ? { ...item, status: 'rejected' } : item));
       toast.success('Geometry candidate rejected');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to reject candidate');
@@ -330,6 +341,7 @@ export default function RouteDetail() {
     if (!confirm('Are you sure you want to delete this route? This cannot be undone.')) return;
     try {
       await api.delete(`/transit-lines/${id}`);
+      await deleteLocalTransitLine(id);
       toast.success('Route deleted');
       navigate('/admin/routes');
     } catch (err) {
