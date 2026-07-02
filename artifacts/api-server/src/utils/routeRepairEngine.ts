@@ -111,6 +111,7 @@ interface RouterAttempt {
   geometry: LngLat[] | null;
   mode: "valhalla_trace" | "valhalla_route";
   warning?: string;
+  controlAnchors?: RepairAnchor[];
 }
 
 const EGYPT_BOUNDS = {
@@ -150,7 +151,8 @@ const TRUSTED_DATA_SOURCES = [
 ];
 
 const ROUTER_TIMEOUT_MS = 25_000;
-const VALHALLA_MAX_LOCATIONS = Number(process.env.VALHALLA_MAX_LOCATIONS || 180);
+const VALHALLA_TRACE_MAX_POINTS = Math.max(2, Number(process.env.VALHALLA_TRACE_MAX_POINTS || 160));
+const VALHALLA_ROUTE_MAX_LOCATIONS = Math.max(2, Number(process.env.VALHALLA_ROUTE_MAX_LOCATIONS || 20));
 
 function normalize(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -187,6 +189,25 @@ function totalLengthKm(points: LngLat[]): number {
   let sum = 0;
   for (let i = 1; i < points.length; i++) sum += haversineKm(points[i - 1], points[i]);
   return sum;
+}
+
+function densifyRoute(points: LngLat[], maxSpacingKm = 0.45): LngLat[] {
+  if (points.length < 2) return points;
+  const dense: LngLat[] = [points[0]];
+  for (let index = 1; index < points.length; index++) {
+    const from = points[index - 1];
+    const to = points[index];
+    const distance = haversineKm(from, to);
+    const sections = Math.max(1, Math.ceil(distance / maxSpacingKm));
+    for (let section = 1; section <= sections; section++) {
+      const ratio = section / sections;
+      dense.push([
+        from[0] + (to[0] - from[0]) * ratio,
+        from[1] + (to[1] - from[1]) * ratio,
+      ]);
+    }
+  }
+  return dense;
 }
 
 function maxStepKm(points: LngLat[]): number {
@@ -560,7 +581,7 @@ function extractValhallaShape(data: unknown): LngLat[] | null {
 }
 
 async function valhallaTraceRoute(points: LngLat[], typeName: string): Promise<RouterAttempt> {
-  const sampled = sampleEvery(points, Math.min(VALHALLA_MAX_LOCATIONS, 160));
+  const sampled = sampleEvery(points, VALHALLA_TRACE_MAX_POINTS);
   if (sampled.length < 2) {
     return { ok: false, geometry: null, mode: "valhalla_trace", warning: "too_few_trace_points" };
   }
@@ -580,7 +601,12 @@ async function valhallaTraceRoute(points: LngLat[], typeName: string): Promise<R
 }
 
 async function valhallaRouteThroughAnchors(anchors: RepairAnchor[], typeName: string): Promise<RouterAttempt> {
-  const usable = dedupeAnchors(anchors).slice(0, VALHALLA_MAX_LOCATIONS);
+  const deduped = dedupeAnchors(anchors);
+  const usable = deduped.length <= VALHALLA_ROUTE_MAX_LOCATIONS
+    ? deduped
+    : Array.from({ length: VALHALLA_ROUTE_MAX_LOCATIONS }, (_, index) =>
+        deduped[Math.round((index * (deduped.length - 1)) / (VALHALLA_ROUTE_MAX_LOCATIONS - 1))],
+      );
   if (usable.length < 2) {
     return { ok: false, geometry: null, mode: "valhalla_route", warning: "too_few_anchors" };
   }
@@ -601,7 +627,7 @@ async function valhallaRouteThroughAnchors(anchors: RepairAnchor[], typeName: st
   });
   const geometry = extractValhallaShape(data);
   if (!geometry) return { ok: false, geometry: null, mode: "valhalla_route", warning: "valhalla_route_failed" };
-  return { ok: true, geometry, mode: "valhalla_route" };
+  return { ok: true, geometry, mode: "valhalla_route", controlAnchors: usable };
 }
 
 function nearestDistanceToPathKm(point: LngLat, path: LngLat[]): { distanceKm: number; index: number } {
@@ -724,6 +750,11 @@ function classifyCandidate(metrics: Omit<RepairMetrics, "confidenceLevel" | "pub
   warnings: string[];
 } {
   const warnings = unique([...metrics.warnings]);
+  const loopLikeRoute =
+    metrics.straightLineKm < 5 &&
+    ((metrics.lengthRatio > 4 && metrics.lengthKm > 4) ||
+      (metrics.straightLineKm < 0.3 && metrics.lengthKm > 1)) &&
+    metrics.anchorHitRate >= 0.8;
   const hardReject =
     metrics.pointCount < 2 ||
     !metrics.governorateBoundsOk ||
@@ -731,11 +762,11 @@ function classifyCandidate(metrics: Omit<RepairMetrics, "confidenceLevel" | "pub
     metrics.maxStepKm > 1.4 ||
     metrics.failedSegmentCount > 0 ||
     metrics.manualAnchorMisses > 0 ||
-    !metrics.anchorOrderMonotonic ||
+    (!loopLikeRoute && !metrics.anchorOrderMonotonic) ||
     metrics.anchorHitRate < 0.65 ||
-    metrics.lengthRatio > 5.5 ||
+    (!loopLikeRoute && metrics.lengthRatio > 5.5) ||
     metrics.repeatedSegmentRatio > 0.35 ||
-    metrics.backtrackRatio > 0.48 ||
+    (!loopLikeRoute && metrics.backtrackRatio > 0.48) ||
     (metrics.endpointStartDistanceKm !== null && metrics.endpointStartDistanceKm > 1.5) ||
     (metrics.endpointEndDistanceKm !== null && metrics.endpointEndDistanceKm > 1.5);
 
@@ -928,6 +959,24 @@ export async function generateRepairCandidate(
   if (routeMode !== "anchors" && oldUsable && oldUsable.length >= 2) {
     attempt = await valhallaTraceRoute(oldUsable, typeName);
     if (!attempt.ok) warnings.push(attempt.warning ?? "valhalla_trace_failed");
+    if (attempt.ok && attempt.geometry) {
+      const traceAnchors = anchorMetrics(anchors, attempt.geometry);
+      const traceStartMissKm = haversineKm(anchors[0].point, attempt.geometry[0]);
+      const traceEndMissKm = haversineKm(
+        anchors[anchors.length - 1].point,
+        attempt.geometry[attempt.geometry.length - 1],
+      );
+      const traceMissedControls =
+        traceStartMissKm > 0.35 ||
+        traceEndMissKm > 0.35 ||
+        traceAnchors.hitRate < 0.6 ||
+        (traceAnchors.maxDistanceKm ?? 0) > 1.2 ||
+        !traceAnchors.orderMonotonic;
+      if (traceMissedControls) {
+        warnings.push("trace_incomplete_retrying_through_control_anchors");
+        attempt = null;
+      }
+    }
   }
 
   if (!attempt?.ok) {
@@ -963,11 +1012,15 @@ export async function generateRepairCandidate(
     };
   }
 
+  if (source === "valhalla_trace" || source === "valhalla_route") {
+    candidate = densifyRoute(candidate);
+  }
+
   const modeCompatibilityOk = !isFixedGuideway(typeName, line);
   const { metrics, qualityScore, confidenceScore } = buildMetrics(
     source,
     candidate,
-    anchors,
+    attempt?.controlAnchors ?? anchors,
     oldUsable,
     warnings,
     badSections,

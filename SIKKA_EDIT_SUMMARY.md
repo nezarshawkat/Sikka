@@ -1,52 +1,29 @@
 # Sikka edit package
 
-Extract this ZIP into the root of the Sikka repository and allow it to
-overwrite the matching files. The paths inside the archive already begin with
-`artifacts/`.
+Generated against snapshot revision `3-1782906418628-13-623-62`.
 
-## Included edits
+## Route repair result
 
-- Location is checked before the enable-location prompt is shown.
-- On Android, a denied location request can open Sikka's system app-settings
-  page through a registered Capacitor plugin.
-- Walking uses free OSRM foot routing; taxi and tuktuk use free OSRM car routing.
-  Connector geometry is cached locally and does not query the Sikka database.
-- Trip Review defaults to Comfortable and leaves the budget field empty.
-- When metro/monorail is possible, exactly one comparison option is assigned
-  the rail route (when non-rail alternatives exist). The label is chosen
-  dynamically from Recommended, Cheapest, Fastest, or Fewest Transfers based on
-  which objective the rail candidate fits best. That card is highlighted and
-  initially selected as the top recommendation.
-- Route Detail includes single-route path regeneration for eligible
-  bus/microbus/serfis geometry. Fixed rail and rider-recorded Discovery GPS are
-  protected from synthetic replacement.
-- Discovery loading tolerates one failed endpoint and rejects malformed GPS
-  coordinates instead of collapsing the page.
-- The frontend snapshot schema expectation now matches the bundled/API schema.
+- Docker Desktop and WSL 2 repaired and verified with `hello-world`.
+- Local Valhalla 3.7.0 built from the Egypt OpenStreetMap extract.
+- 622 current lines audited.
+- 596 eligible non-GTFS road routes regenerated.
+- 6 GTFS routes and 20 fixed-guideway routes were excluded.
+- Final independent audit after local OSM-name matching: 437 high-confidence routes, 159 medium review candidates, 0 low-confidence routes.
+- Every generated geometry passed local Valhalla road-correlation sampling.
+- The final audit downgraded 11 attempted OSM-name upgrades that did not independently pass.
 
-## CSV street-accuracy proposal (not implemented in this ZIP)
+High-confidence candidates are publishable. Medium candidates remain review-only, including endpoint-only fallbacks where the original corridor evidence was corrupted.
 
-1. Treat ordered CSV stops as constraints, not as the final geometry.
-2. Prefer coordinates supplied in the CSV or the maintained stop dictionary;
-   geocode only missing stops and cache the result once during import.
-3. Generate multiple paths between consecutive anchors against a locally run,
-   free Egypt OpenStreetMap graph (OSRM or Valhalla), with bus/microbus road-class
-   rules. Do this at import/regeneration time, never during a rider trip.
-4. Score candidates using stop distance, endpoint preservation, direction,
-   backtracking, path-length ratio, road class, geometry jumps, and agreement
-   with GTFS/Discovery GPS.
-5. Automatically accept only a high-confidence path. Send uncertain lines to
-   an admin map for waypoint correction; never silently publish a guess.
-6. Save the accepted `route_path` once and export it into the versioned offline
-   snapshot. Trip planning then reads the snapshot on-device with no per-trip DB
-   request.
+## Database application
 
-## Verification performed
+1. Apply `scripts/route-repair-schema.sql` to the target PostgreSQL database.
+2. Build the API server with `node artifacts/api-server/build.mjs`.
+3. Set `DATABASE_URL` to the Render PostgreSQL external connection string.
+4. Run `node artifacts/api-server/dist/scripts/importOfflineRoadCandidates.mjs`.
 
-- Backend production esbuild completed successfully.
-- Every edited TypeScript/TSX file passed esbuild parsing.
-- Live OSRM car and foot endpoints returned valid multi-point geometry.
-- Full frontend Vite launch on this Windows machine was blocked by the existing
-  workspace override that excludes Rollup's Windows native package.
-- Android Java compilation requires a configured JDK/JAVA_HOME, which was not
-  available in this environment.
+The importer is idempotent by snapshot revision. It publishes only independently verified high-confidence routes and saves medium routes as review candidates.
+
+## Runtime routing
+
+Set `VALHALLA_URL=http://localhost:8002` when running the backend locally. The Valhalla container is named `sikka-valhalla` and has `--restart unless-stopped`.
