@@ -35,10 +35,10 @@ export const MAP_MODES: Record<MapMode, { labelEn: string; labelAr: string; desc
 };
 
 const MAP_STYLE_URLS: Record<MapMode, string> = {
-  standard: 'https://demotiles.maplibre.org/style.json',
-  bright: 'https://demotiles.maplibre.org/style.json',
-  minimal: 'https://demotiles.maplibre.org/style.json',
-  dark: 'https://demotiles.maplibre.org/style.json',
+  standard: 'https://tiles.openfreemap.org/styles/liberty',
+  bright: 'https://tiles.openfreemap.org/styles/positron',
+  minimal: 'https://tiles.openfreemap.org/styles/positron',
+  dark: 'https://tiles.openfreemap.org/styles/dark',
 };
 
 const STORAGE_KEY = 'sikka_map_mode';

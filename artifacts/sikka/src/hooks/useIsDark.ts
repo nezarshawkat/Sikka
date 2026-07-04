@@ -21,5 +21,5 @@ export function useIsDark(): boolean {
   return isDark;
 }
 
-export const MAP_STYLE_LIGHT = 'https://demotiles.maplibre.org/style.json';
-export const MAP_STYLE_DARK = 'https://demotiles.maplibre.org/style.json';
+export const MAP_STYLE_LIGHT = 'https://tiles.openfreemap.org/styles/liberty';
+export const MAP_STYLE_DARK = 'https://tiles.openfreemap.org/styles/dark';
