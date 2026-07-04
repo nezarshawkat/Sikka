@@ -19,11 +19,11 @@ const AdminAnalytics = () => {
   const [types, setTypes] = useState<TransportType[]>([]);
 
   useEffect(() => {
-    api.get<AnalyticsStats>('/analytics')
+    api.getStatic<AnalyticsStats>('/analytics')
       .then((data) => setStats(data ?? { users: 0, trips: 0, reviews: 0, routes: 0 }))
       .catch(() => {});
-    api.get<Review[]>('/reviews').then((d) => setReviews(d ?? [])).catch(() => {});
-    api.get<Report[]>('/reports').then((d) => setReports(d ?? [])).catch(() => {});
+    api.getStatic<Review[]>('/reviews').then((d) => setReviews(d ?? [])).catch(() => {});
+    api.getStatic<Report[]>('/reports').then((d) => setReports(d ?? [])).catch(() => {});
     getLocalRouteCatalog<unknown, TransportType>().then((catalog) => setTypes(catalog.transportTypes)).catch(() => {});
   }, []);
 

@@ -1,0 +1,79 @@
+{
+  "generatedAt": "2026-07-03T16:12:49.705Z",
+  "dryRun": false,
+  "lines": [
+    {
+      "lineNumber": "MR-E",
+      "lengthKm": 54.2601799018863,
+      "coordinateCount": 481,
+      "stopCount": 22,
+      "endpoints": [
+        [
+          31.3173719,
+          30.0719584
+        ],
+        [
+          31.7705992,
+          30.0062913
+        ]
+      ],
+      "id": "810976bf-f354-47fe-9115-7d620d62f785",
+      "version": 2
+    },
+    {
+      "lineNumber": "MR-W",
+      "lengthKm": 42.22226227669238,
+      "coordinateCount": 259,
+      "stopCount": 13,
+      "endpoints": [
+        [
+          30.8406047,
+          29.9074824
+        ],
+        [
+          31.203991,
+          30.0607239
+        ]
+      ],
+      "id": "83d2472f-1d4c-4efb-9200-b9da10fd374c",
+      "version": 2
+    },
+    {
+      "lineNumber": "LRT-1",
+      "lengthKm": 58.04470046988633,
+      "coordinateCount": 2115,
+      "stopCount": 10,
+      "endpoints": [
+        [
+          31.42132,
+          30.14646
+        ],
+        [
+          31.72502,
+          30.01378
+        ]
+      ],
+      "id": "f2d2d231-8343-4622-958d-9a344d7fdd53",
+      "version": 2
+    },
+    {
+      "lineNumber": "LRT-2",
+      "lengthKm": 38.092713795848624,
+      "coordinateCount": 686,
+      "stopCount": 8,
+      "endpoints": [
+        [
+          31.42132,
+          30.14646
+        ],
+        [
+          31.691546700000004,
+          30.2306896
+        ]
+      ],
+      "id": "b9fc65da-fcd7-4cd7-abf1-df9ac4fcc6ad",
+      "version": 1
+    }
+  ],
+  "retiredSyntheticMonorailSegments": 14
+}

@@ -89,8 +89,8 @@ const AdminDiscovery = () => {
     setIsLoading(true);
     setLoadError(null);
     Promise.allSettled([
-      api.get<DiscoveryRow[]>('/transport-reports?discovery=true'),
-      api.get<TransportReport[]>('/transport-reports?status=pending'),
+      api.getStatic<DiscoveryRow[]>('/transport-reports?discovery=true'),
+      api.getStatic<TransportReport[]>('/transport-reports?status=pending'),
     ])
       .then(([discResult, pendingResult]) => {
         if (discResult.status === 'fulfilled') {
@@ -123,7 +123,6 @@ const AdminDiscovery = () => {
       await api.put(`/transport-reports/${id}`, { status });
       setPending((prev) => prev.filter((r) => r.id !== id));
       toast.success(t('planUpdated', language));
-      fetchData();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to update');
     }

@@ -28,6 +28,7 @@ interface BusUsedDialogProps {
   fromArea?: string;
   toArea?: string;
   language: Language;
+  onSwitchToMicrobus?: () => void;
 }
 
 export default function BusUsedDialog({
@@ -38,6 +39,7 @@ export default function BusUsedDialog({
   fromArea,
   toArea,
   language,
+  onSwitchToMicrobus,
 }: BusUsedDialogProps) {
   const [busNumber, setBusNumber] = useState('');
   const [operator, setOperator] = useState<Operator>('nta');
@@ -101,6 +103,11 @@ export default function BusUsedDialog({
 
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">{t('busUsedQuestion', language)}</p>
+          {onSwitchToMicrobus && (
+            <button type="button" className="w-full text-center text-[11px] text-primary hover:underline" onClick={onSwitchToMicrobus}>
+              {t('tookMicrobusInstead', language)}
+            </button>
+          )}
 
           <div>
             <label className="text-xs text-muted-foreground">{t('operatorLabel', language)}</label>

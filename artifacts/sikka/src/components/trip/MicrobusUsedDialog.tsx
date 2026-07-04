@@ -16,6 +16,7 @@ interface MicrobusUsedDialogProps {
   fromArea?: string;
   toArea?: string;
   language: Language;
+  onSwitchToBus?: () => void;
 }
 
 interface TransportType {
@@ -31,9 +32,11 @@ export default function MicrobusUsedDialog({
   fromArea,
   toArea,
   language,
+  onSwitchToBus,
 }: MicrobusUsedDialogProps) {
   const [boardingArea, setBoardingArea] = useState('');
   const [routeEnd, setRouteEnd] = useState('');
+  const [microbusNumber, setMicrobusNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [transportTypes, setTransportTypes] = useState<TransportType[]>([]);
 
@@ -41,6 +44,7 @@ export default function MicrobusUsedDialog({
     if (!open) return;
     setBoardingArea(fromArea || '');
     setRouteEnd(toArea || '');
+    setMicrobusNumber('');
     let cancelled = false;
     api
       .get('/transport-types')
@@ -71,7 +75,7 @@ export default function MicrobusUsedDialog({
 
       await api.post('/transport-reports', {
         transportName: transportName || 'Microbus',
-        transportNumber: null,
+        transportNumber: microbusNumber.trim() || null,
         transportTypeId,
         fromArea: boardingArea.trim(),
         toArea: routeEnd.trim(),
@@ -100,6 +104,16 @@ export default function MicrobusUsedDialog({
           <p className="text-sm text-muted-foreground">
             {t('busUsedQuestion', language)}
           </p>
+          {onSwitchToBus && (
+            <button type="button" className="w-full text-center text-[11px] text-primary hover:underline" onClick={onSwitchToBus}>
+              {t('tookBusInstead', language)}
+            </button>
+          )}
+
+          <div>
+            <label className="text-xs text-muted-foreground">{t('microbusNumberOptional', language)}</label>
+            <Input value={microbusNumber} onChange={(e) => setMicrobusNumber(e.target.value)} className="text-sm mt-1" />
+          </div>
 
           <div>
             <label className="text-xs text-muted-foreground">

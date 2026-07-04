@@ -11,6 +11,9 @@ type QueuedPost = {
 };
 
 let authTokenProvider: AuthTokenProvider | null = null;
+const staticGetCache = new Map<string, Promise<unknown>>();
+const ADMIN_CACHE_DB = 'sikka-admin-static-cache';
+const ADMIN_CACHE_STORE = 'responses';
 const OFFLINE_QUEUE_KEY = "sikka-offline-post-queue";
 const QUEUEABLE_POSTS = new Set(["/reports", "/reviews", "/transport-reports"]);
 
@@ -117,14 +120,117 @@ export async function apiFetch<T = unknown>(
   return res.json() as Promise<T>;
 }
 
+function openAdminCache(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = indexedDB.open(ADMIN_CACHE_DB, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(ADMIN_CACHE_STORE)) {
+        request.result.createObjectStore(ADMIN_CACHE_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  });
+}
+
+async function readPersistentStatic<T>(path: string): Promise<{ found: boolean; value?: T }> {
+  const db = await openAdminCache();
+  if (!db) return { found: false };
+  return new Promise((resolve) => {
+    const transaction = db.transaction(ADMIN_CACHE_STORE, 'readonly');
+    const request = transaction.objectStore(ADMIN_CACHE_STORE).get(path);
+    request.onsuccess = () => {
+      const row = request.result as { value?: T } | undefined;
+      resolve(row ? { found: true, value: row.value } : { found: false });
+    };
+    request.onerror = () => resolve({ found: false });
+    transaction.oncomplete = () => db.close();
+  });
+}
+
+async function writePersistentStatic(path: string, value: unknown): Promise<void> {
+  const db = await openAdminCache();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    const transaction = db.transaction(ADMIN_CACHE_STORE, 'readwrite');
+    transaction.objectStore(ADMIN_CACHE_STORE).put({ value, savedAt: Date.now() }, path);
+    transaction.oncomplete = () => { db.close(); resolve(); };
+    transaction.onerror = () => { db.close(); resolve(); };
+  });
+}
+
+function staticGet<T>(path: string): Promise<T> {
+  const existing = staticGetCache.get(path);
+  if (existing) return existing as Promise<T>;
+  const request = (async () => {
+    const persisted = await readPersistentStatic<T>(path);
+    if (persisted.found) return persisted.value as T;
+    const value = await apiFetch<T>(path);
+    await writePersistentStatic(path, value);
+    return value;
+  })().catch((error) => {
+      staticGetCache.delete(path);
+      throw error;
+    });
+  staticGetCache.set(path, request);
+  return request;
+}
+
+async function invalidatePersistentStatic(root?: string): Promise<void> {
+  const db = await openAdminCache();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    const transaction = db.transaction(ADMIN_CACHE_STORE, 'readwrite');
+    const store = transaction.objectStore(ADMIN_CACHE_STORE);
+    if (!root) store.clear();
+    else {
+      const cursor = store.openCursor();
+      cursor.onsuccess = () => {
+        const row = cursor.result;
+        if (!row) return;
+        const key = String(row.key);
+        if (key === root || key.startsWith(`${root}/`) || key.startsWith(`${root}?`) || key === '/analytics') row.delete();
+        row.continue();
+      };
+    }
+    transaction.oncomplete = () => { db.close(); resolve(); };
+    transaction.onerror = () => { db.close(); resolve(); };
+  });
+}
+
+async function invalidateStaticReads(path?: string): Promise<void> {
+  if (!path) {
+    staticGetCache.clear();
+    await invalidatePersistentStatic();
+    return;
+  }
+  const root = `/${path.split('/').filter(Boolean)[0] || ''}`;
+  for (const key of staticGetCache.keys()) {
+    if (key === root || key.startsWith(`${root}/`) || key.startsWith(`${root}?`)) staticGetCache.delete(key);
+  }
+  // These dashboards aggregate several collections and must refresh after an
+  // actual edit, but never merely because the admin changed tabs.
+  staticGetCache.delete('/analytics');
+  await invalidatePersistentStatic(root);
+}
+
+async function mutate<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown): Promise<T> {
+  const result = await apiFetch<T>(path, {
+    method,
+    ...(method !== 'DELETE' ? { body: JSON.stringify(body) } : {}),
+  });
+  await invalidateStaticReads(path);
+  return result;
+}
+
 export const api = {
   get: <T = unknown>(path: string) => apiFetch<T>(path),
-  post: <T = unknown>(path: string, body: unknown) =>
-    apiFetch<T>(path, { method: "POST", body: JSON.stringify(body) }),
-  put: <T = unknown>(path: string, body: unknown) =>
-    apiFetch<T>(path, { method: "PUT", body: JSON.stringify(body) }),
-  delete: <T = unknown>(path: string) =>
-    apiFetch<T>(path, { method: "DELETE" }),
+  getStatic: <T = unknown>(path: string) => staticGet<T>(path),
+  invalidateStatic: invalidateStaticReads,
+  post: <T = unknown>(path: string, body: unknown) => mutate<T>(path, 'POST', body),
+  put: <T = unknown>(path: string, body: unknown) => mutate<T>(path, 'PUT', body),
+  delete: <T = unknown>(path: string) => mutate<T>(path, 'DELETE'),
 };
 
 if (typeof window !== "undefined") {

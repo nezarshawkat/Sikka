@@ -15,6 +15,9 @@ interface ContributeTransportDialogProps {
   initialTrace?: [number, number][];
   initialTimestamps?: number[];
   initialOperator?: Operator;
+  initialFromArea?: string;
+  initialToArea?: string;
+  initialRouteCompleteness?: 'full' | 'partial';
   onSubmitted?: () => void;
 }
 
@@ -36,6 +39,9 @@ export default function ContributeTransportDialog({
   initialTrace,
   initialTimestamps,
   initialOperator = 'microbus',
+  initialFromArea = '',
+  initialToArea = '',
+  initialRouteCompleteness = 'full',
   onSubmitted,
 }: ContributeTransportDialogProps) {
   const isTraceSubmit = !!initialTrace?.length;
@@ -58,6 +64,9 @@ export default function ContributeTransportDialog({
   useEffect(() => {
     if (!open) return;
     setOperator(initialOperator);
+    setRouteCompleteness(initialRouteCompleteness);
+    setFromArea(initialFromArea);
+    setToArea(initialToArea);
     let cancelled = false;
     api
       .get('/transport-types')
@@ -68,7 +77,13 @@ export default function ContributeTransportDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, initialOperator]);
+  }, [open, initialOperator, initialRouteCompleteness]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (initialFromArea) setFromArea((current) => current || initialFromArea);
+    if (initialToArea) setToArea((current) => current || initialToArea);
+  }, [open, initialFromArea, initialToArea]);
 
   const reset = () => {
     setTransportNumber('');
@@ -188,6 +203,15 @@ export default function ContributeTransportDialog({
                 </Button>
               ))}
             </div>
+            <button
+              type="button"
+              className="mt-1.5 w-full text-center text-[11px] text-primary hover:underline"
+              onClick={() => setOperator((value) => value === 'bus' ? 'microbus' : 'bus')}
+            >
+              {operator === 'bus'
+                ? t('tookMicrobusInstead', language)
+                : t('tookBusInstead', language)}
+            </button>
           </div>
           {operator === 'bus' && (
             <>
@@ -212,6 +236,12 @@ export default function ContributeTransportDialog({
                 <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm rounded-[2rem]" />
               </div>
             </>
+          )}
+          {operator === 'microbus' && (
+            <div>
+              <label className="text-xs text-muted-foreground">{t('microbusNumberOptional', language)}</label>
+              <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm rounded-[2rem]" />
+            </div>
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>

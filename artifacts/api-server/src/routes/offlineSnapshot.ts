@@ -4,7 +4,11 @@ import { asc, eq } from "drizzle-orm";
 
 const router = Router();
 const SNAPSHOT_VERSION = 3;
-const MAX_ROUTE_POINTS = 120;
+// A 120-point uniform stride cut across curves, flyovers and roundabouts.
+// Keep a generous on-device budget and simplify by perpendicular error so
+// straight sections collapse while the actual street shape is preserved.
+const MAX_ROUTE_POINTS = 1200;
+const INITIAL_SIMPLIFY_TOLERANCE_METERS = 2.5;
 const PATH_SUSPECT_STEP_KM = 0.5;
 const ACCEPTED_ROUTE_STATUSES = new Set(["active", "needs_review"]);
 
@@ -12,19 +16,70 @@ function roundCoord(value: number): number {
   return Math.round(value * 100000) / 100000;
 }
 
+function perpendicularMeters(point: [number, number], start: [number, number], end: [number, number]): number {
+  const meanLat = ((start[1] + end[1] + point[1]) / 3) * Math.PI / 180;
+  const scaleX = 111_320 * Math.cos(meanLat);
+  const scaleY = 110_540;
+  const ax = start[0] * scaleX;
+  const ay = start[1] * scaleY;
+  const bx = end[0] * scaleX;
+  const by = end[1] * scaleY;
+  const px = point[0] * scaleX;
+  const py = point[1] * scaleY;
+  const dx = bx - ax;
+  const dy = by - ay;
+  if (dx === 0 && dy === 0) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function simplifyDouglasPeucker(path: [number, number][], toleranceMeters: number): [number, number][] {
+  if (path.length <= 2) return path;
+  const keep = new Uint8Array(path.length);
+  keep[0] = 1;
+  keep[path.length - 1] = 1;
+  const stack: [number, number][] = [[0, path.length - 1]];
+  while (stack.length) {
+    const [startIndex, endIndex] = stack.pop()!;
+    let furthest = -1;
+    let maxDistance = toleranceMeters;
+    for (let index = startIndex + 1; index < endIndex; index++) {
+      const distance = perpendicularMeters(path[index], path[startIndex], path[endIndex]);
+      if (distance > maxDistance) {
+        maxDistance = distance;
+        furthest = index;
+      }
+    }
+    if (furthest >= 0) {
+      keep[furthest] = 1;
+      stack.push([startIndex, furthest], [furthest, endIndex]);
+    }
+  }
+  return path.filter((_, index) => keep[index] === 1);
+}
+
 function compactPath(path: [number, number][] | null | undefined): [number, number][] | null {
   if (!path || path.length < 2) return null;
-  const step = Math.max(1, Math.ceil(path.length / MAX_ROUTE_POINTS));
-  const out: [number, number][] = [];
-  for (let i = 0; i < path.length; i += step) {
-    const p = path[i];
-    if (Number.isFinite(p?.[0]) && Number.isFinite(p?.[1])) out.push([roundCoord(p[0]), roundCoord(p[1])]);
+  const valid = path.filter((point): point is [number, number] =>
+    Array.isArray(point) && Number.isFinite(point[0]) && Number.isFinite(point[1]),
+  );
+  if (valid.length < 2) return null;
+  let tolerance = INITIAL_SIMPLIFY_TOLERANCE_METERS;
+  let simplified = simplifyDouglasPeucker(valid, tolerance);
+  while (simplified.length > MAX_ROUTE_POINTS && tolerance < 100) {
+    tolerance *= 1.5;
+    simplified = simplifyDouglasPeucker(valid, tolerance);
   }
-  const last = path[path.length - 1];
-  const compactLast: [number, number] = [roundCoord(last[0]), roundCoord(last[1])];
-  const prev = out[out.length - 1];
-  if (!prev || prev[0] !== compactLast[0] || prev[1] !== compactLast[1]) out.push(compactLast);
-  return out.length >= 2 ? out : null;
+  // This fallback is only for exceptionally complex country-scale lines.
+  // It samples the already shape-preserving result, never the raw geometry.
+  if (simplified.length > MAX_ROUTE_POINTS) {
+    const sampled: [number, number][] = [];
+    for (let index = 0; index < MAX_ROUTE_POINTS; index++) {
+      sampled.push(simplified[Math.round(index * (simplified.length - 1) / (MAX_ROUTE_POINTS - 1))]);
+    }
+    simplified = sampled;
+  }
+  return simplified.map(([lng, lat]) => [roundCoord(lng), roundCoord(lat)]);
 }
 
 function haversineKm(a: [number, number], b: [number, number]): number {
@@ -84,7 +139,7 @@ function revisionStamp(revision: unknown): number {
   return Number.isFinite(stamp) ? stamp : 0;
 }
 
-async function buildOfflinePayload(sinceRevision?: string) {
+export async function buildOfflinePayload(sinceRevision?: string) {
   const sinceMs = revisionStamp(sinceRevision);
   const [typeRows, allLineRows, heatRows] = await Promise.all([
     db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true)).orderBy(asc(transportTypesTable.nameEn)),

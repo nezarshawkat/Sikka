@@ -37,6 +37,7 @@ type OfflineLine = {
   toArea: string;
   governorate: string;
   viaStops: string[];
+  stops?: { name: string; nameAr?: string; lat: number; lng: number }[] | null;
   path: LngLat[];
   pathPointCount?: number;
   pathSuspect?: boolean;
@@ -400,24 +401,27 @@ async function fetchRoadGeometry(mode: ModeKey, geometry: LngLat[]): Promise<Lng
       const url = `${base}/route/v1/${profile}/${a[0]},${a[1]};${b[0]},${b[1]}`
         + "?overview=full&geometries=geojson&steps=false";
       const response = await fetch(url, { signal: controller.signal });
-      if (!response.ok) return geometry;
+      if (!response.ok) return geometry.length > 2 ? geometry : [];
       const data = await response.json() as {
         code?: string;
         routes?: Array<{ geometry?: { coordinates?: LngLat[] } }>;
       };
       const routed = data.code === "Ok" ? data.routes?.[0]?.geometry?.coordinates : null;
-      if (!routed || routed.length < 2) return geometry;
+      if (!routed || routed.length < 2) return geometry.length > 2 ? geometry : [];
       const snapped = routed
         .filter((point) => Number.isFinite(point?.[0]) && Number.isFinite(point?.[1]))
         .map((point) => [point[0], point[1]] as LngLat);
-      if (snapped.length < 2) return geometry;
+      if (snapped.length < 2) return geometry.length > 2 ? geometry : [];
       snapped[0] = a;
       snapped[snapped.length - 1] = b;
       connectorGeometryCache.set(key, snapped);
       saveConnectorCache();
       return snapped;
     } catch {
-      return geometry;
+      // Never draw a two-point displacement as if it were a street route.
+      // If offline routing is unavailable, the UI leaves this connector
+      // undrawn instead of showing a false line through blocks/buildings.
+      return geometry.length > 2 ? geometry : [];
     } finally {
       window.clearTimeout(timer);
       pendingConnectorGeometry.delete(key);
@@ -592,10 +596,10 @@ function connectorSegment(connector: Connector, startName: string, endName: stri
   };
 }
 
-function rideInstructions(candidate: Candidate, isArabic: boolean): string[] {
+function rideInstructions(candidate: Candidate, isArabic: boolean, boardingName: string, alightingName: string): string[] {
   const name = transportName(candidate.type, candidate.line, isArabic);
-  const from = candidate.line.fromArea;
-  const to = candidate.line.toArea;
+  const from = boardingName;
+  const to = alightingName;
   const cost = lineFare(candidate.type, candidate.line, Math.max(0.2, pathLengthKm(candidate.line.path)));
   const lineLabel = candidate.line.lineNumber || (isArabic ? candidate.line.nameAr : candidate.line.nameEn);
 
@@ -714,8 +718,59 @@ function effectiveSpeedKmh(line: OfflineLine, type: OfflineType, mode: ModeKey):
   return base;
 }
 
+/** Names the exact boarding/alighting portion instead of showing the full
+ * line endpoints. Structured fixed-transit stops are authoritative. For
+ * informal road services, ordered corridor labels are mapped to route
+ * progress so instructions still describe the ridden portion. */
+function segmentEndpointLabels(
+  line: OfflineLine,
+  fromIndex: number,
+  toIndex: number,
+  isArabic: boolean,
+): { start: string; end: string } {
+  const stops = (line.stops ?? []).filter((stop) =>
+    Number.isFinite(stop.lat) && Number.isFinite(stop.lng) && stop.name,
+  );
+  if (stops.length >= 2 && line.path.length >= 2) {
+    const indexed = stops.map((stop) => ({
+      stop,
+      pathIndex: closestPointOnPath(line.path, { lat: stop.lat, lng: stop.lng }).index,
+    })).sort((a, b) => a.pathIndex - b.pathIndex);
+    const nearest = (target: number) => indexed.reduce((best, current) =>
+      Math.abs(current.pathIndex - target) < Math.abs(best.pathIndex - target) ? current : best,
+    );
+    let start = nearest(fromIndex);
+    let end = nearest(toIndex);
+    if (start === end && indexed.length > 1) {
+      const position = indexed.indexOf(start);
+      if (toIndex >= fromIndex && position < indexed.length - 1) end = indexed[position + 1];
+      else if (position > 0) start = indexed[position - 1];
+    }
+    const stopName = (value: typeof start) => isArabic && value.stop.nameAr ? value.stop.nameAr : value.stop.name;
+    return { start: stopName(start), end: stopName(end) };
+  }
+
+  const corridor = [line.fromArea, ...(line.viaStops ?? []), line.toArea].filter(Boolean);
+  if (corridor.length >= 2 && line.path.length >= 2) {
+    const labelAt = (pathIndex: number) => corridor[Math.max(0, Math.min(
+      corridor.length - 1,
+      Math.round((pathIndex / (line.path.length - 1)) * (corridor.length - 1)),
+    ))];
+    let start = labelAt(fromIndex);
+    let end = labelAt(toIndex);
+    if (start === end) {
+      const startPosition = corridor.indexOf(start);
+      if (toIndex >= fromIndex && startPosition < corridor.length - 1) end = corridor[startPosition + 1];
+      else if (startPosition > 0) start = corridor[startPosition - 1];
+    }
+    return { start, end };
+  }
+  return { start: line.fromArea, end: line.toArea };
+}
+
 function rideSegment(candidate: Candidate, from: ClosestPoint, to: ClosestPoint, isArabic: boolean): ApiSegment {
   const route = slicePath(candidate.line.path, from.index, to.index);
+  const labels = segmentEndpointLabels(candidate.line, from.index, to.index, isArabic);
   const km = Math.max(0.2, pathLengthKm(route));
   const speed = effectiveSpeedKmh(candidate.line, candidate.type, candidate.mode);
   const minutes = waitMinutes(candidate.line, candidate.mode) + (km / Math.max(speed, 8)) * 60;
@@ -724,8 +779,8 @@ function rideSegment(candidate: Candidate, from: ClosestPoint, to: ClosestPoint,
     transport_name: transportName(candidate.type, candidate.line, isArabic),
     government_type: candidate.type.governmentType,
     category: candidate.type.category,
-    start_name: candidate.line.fromArea,
-    end_name: candidate.line.toArea,
+    start_name: labels.start,
+    end_name: labels.end,
     cost_egp: lineFare(candidate.type, candidate.line, km),
     duration_minutes: Math.max(2, Math.round(minutes)),
     color: candidate.type.color,
@@ -737,7 +792,7 @@ function rideSegment(candidate: Candidate, from: ClosestPoint, to: ClosestPoint,
     info: isArabic
       ? `محسوبة على الهاتف من بيانات Sikka المحفوظة. الثقة: ${trustBadge(candidate.line)}.`
       : `Calculated on this phone from the synced Sikka route snapshot. Trust: ${trustBadge(candidate.line)}.`,
-    instructions: rideInstructions(candidate, isArabic),
+    instructions: rideInstructions(candidate, isArabic, labels.start, labels.end),
     route_geometry: route,
     alternatives: [],
   };

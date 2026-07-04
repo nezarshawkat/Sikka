@@ -254,3 +254,19 @@
   to { transform: translate3d(12%, -10%, 0) scale(1.08); }
 }
 
+/* The native Google map extends behind the existing bottom location/trip
+   banner. This keeps Google's attribution attached to the map viewport while
+   placing it under the persistent in-app banner approved for this layout. */
+html.native-google-map-active,
+body.native-google-map-active,
+html.native-google-map-active #root,
+.native-google-map-shell {
+  background: transparent !important;
+  overflow: hidden !important;
+}
+
+capacitor-google-map {
+  display: block;
+  width: 100%;
+  min-height: calc(100% + 7rem);
+}

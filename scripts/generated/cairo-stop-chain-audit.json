@@ -1,0 +1,1228 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-04T02:15:42.063Z",
+  "provider": "Google Directions API",
+  "storagePermissionReference": "email-study-permission-confirmed-2026-07-02",
+  "dryRun": false,
+  "stopChainAuditOnly": true,
+  "totals": {
+    "selected": 9,
+    "saved": 0,
+    "failed": 0,
+    "protectedGuideway": 0
+  },
+  "routes": [
+    {
+      "lineId": "705c97ad-78ec-4d04-8d04-8ad317910928",
+      "label": "NTA Bus /216",
+      "status": "stop_chain_rejected",
+      "reason": "isolated_outside_resolution",
+      "coherentOutbound": false,
+      "outsideCount": 1,
+      "outsideIndexes": [
+        3
+      ],
+      "anchorCount": 7,
+      "directKm": 18.325884160400733,
+      "chainKm": 212.26823990888502,
+      "chainToDirectRatio": 11.582974008291632,
+      "maximumGapKm": 95.9064366200413,
+      "duplicateCount": 0,
+      "largeGapCount": 3,
+      "suspiciousCount": 3,
+      "suspicious": [
+        {
+          "index": 2,
+          "name": "طريق شبين القناطر / قليوب, Cairo, Egypt",
+          "incomingKm": 20.72446315852427,
+          "outgoingKm": 95.9064366200413,
+          "bypassKm": 79.1173775859271,
+          "localExcessKm": 37.513522192638476,
+          "localDetourRatio": 1.4741502225841108
+        },
+        {
+          "index": 3,
+          "name": "القاهرة / اسكندريه الزراعى, Cairo, Egypt",
+          "incomingKm": 95.9064366200413,
+          "outgoingKm": 91.70746688870149,
+          "bypassKm": 4.2032586655807656,
+          "localExcessKm": 183.41064484316203,
+          "localDetourRatio": 44.63534567716644
+        },
+        {
+          "index": 4,
+          "name": "كوبري المظلات, Cairo, Egypt",
+          "incomingKm": 91.70746688870149,
+          "outgoingKm": 1.3454145363677648,
+          "bypassKm": 92.82176791087198,
+          "localExcessKm": 0.23111351419727555,
+          "localDetourRatio": 1.0024898633089945
+        }
+      ],
+      "largeGaps": [
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "طنان الزهويين, Cairo, Egypt",
+          "to": "طريق شبين القناطر / قليوب, Cairo, Egypt",
+          "distanceKm": 20.72446315852427
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "طريق شبين القناطر / قليوب, Cairo, Egypt",
+          "to": "القاهرة / اسكندريه الزراعى, Cairo, Egypt",
+          "distanceKm": 95.9064366200413
+        },
+        {
+          "fromIndex": 3,
+          "toIndex": 4,
+          "from": "القاهرة / اسكندريه الزراعى, Cairo, Egypt",
+          "to": "كوبري المظلات, Cairo, Egypt",
+          "distanceKm": 91.70746688870149
+        }
+      ],
+      "segments": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "السد, Cairo, Egypt",
+          "to": "طنان الزهويين, Cairo, Egypt",
+          "distanceKm": 1.8532559671216762
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "طنان الزهويين, Cairo, Egypt",
+          "to": "طريق شبين القناطر / قليوب, Cairo, Egypt",
+          "distanceKm": 20.72446315852427
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "طريق شبين القناطر / قليوب, Cairo, Egypt",
+          "to": "القاهرة / اسكندريه الزراعى, Cairo, Egypt",
+          "distanceKm": 95.9064366200413
+        },
+        {
+          "fromIndex": 3,
+          "toIndex": 4,
+          "from": "القاهرة / اسكندريه الزراعى, Cairo, Egypt",
+          "to": "كوبري المظلات, Cairo, Egypt",
+          "distanceKm": 91.70746688870149
+        },
+        {
+          "fromIndex": 4,
+          "toIndex": 5,
+          "from": "كوبري المظلات, Cairo, Egypt",
+          "to": "شارع شبرا, Cairo, Egypt",
+          "distanceKm": 1.3454145363677648
+        },
+        {
+          "fromIndex": 5,
+          "toIndex": 6,
+          "from": "شارع شبرا, Cairo, Egypt",
+          "to": "عتبة (الجنينة), Cairo, Egypt",
+          "distanceKm": 0.731202738128496
+        }
+      ],
+      "anchors": [
+        {
+          "index": 0,
+          "name": "السد, Cairo, Egypt",
+          "lat": 30.253574,
+          "lng": 31.2575321,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 1,
+          "name": "طنان الزهويين, Cairo, Egypt",
+          "lat": 30.2624982,
+          "lng": 31.2738284,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 2,
+          "name": "طريق شبين القناطر / قليوب, Cairo, Egypt",
+          "lat": 30.0761409,
+          "lng": 31.2704955,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 3,
+          "name": "القاهرة / اسكندريه الزراعى, Cairo, Egypt",
+          "lat": 30.8128601,
+          "lng": 30.750244,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 4,
+          "name": "كوبري المظلات, Cairo, Egypt",
+          "lat": 30.1075751,
+          "lng": 31.24623,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 5,
+          "name": "شارع شبرا, Cairo, Egypt",
+          "lat": 30.0954946,
+          "lng": 31.2454444,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 6,
+          "name": "عتبة (الجنينة), Cairo, Egypt",
+          "lat": 30.089238,
+          "lng": 31.243105,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        }
+      ]
+    },
+    {
+      "lineId": "13fba015-3080-488f-aca9-f954ef34ac51",
+      "label": "NTA Bus 1055",
+      "status": "stop_chain_rejected",
+      "reason": "isolated_outside_resolution",
+      "coherentOutbound": false,
+      "outsideCount": 1,
+      "outsideIndexes": [
+        2
+      ],
+      "anchorCount": 4,
+      "directKm": 2.446199012327487,
+      "chainKm": 193.21560468952708,
+      "chainToDirectRatio": 78.98605294002145,
+      "maximumGapKm": 95.86766507678544,
+      "duplicateCount": 0,
+      "largeGapCount": 2,
+      "suspiciousCount": 2,
+      "suspicious": [
+        {
+          "index": 1,
+          "name": "الطريق الدائرى, Cairo, Egypt",
+          "incomingKm": 6.785144221981482,
+          "outgoingKm": 90.56279539076014,
+          "bypassKm": 97.34149903688139,
+          "localExcessKm": 0.006440575860239051,
+          "localDetourRatio": 1.0000661647490943
+        },
+        {
+          "index": 2,
+          "name": "طريق القاهرة الاسكندرية الزراعي المؤسسة, Cairo, Egypt",
+          "incomingKm": 90.56279539076014,
+          "outgoingKm": 95.86766507678544,
+          "bypassKm": 5.733988013529758,
+          "localExcessKm": 180.6964724540158,
+          "localDetourRatio": 32.51322814551573
+        }
+      ],
+      "largeGaps": [
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "الطريق الدائرى, Cairo, Egypt",
+          "to": "طريق القاهرة الاسكندرية الزراعي المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.56279539076014
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "طريق القاهرة الاسكندرية الزراعي المؤسسة, Cairo, Egypt",
+          "to": "احمد حلمى, Cairo, Egypt",
+          "distanceKm": 95.86766507678544
+        }
+      ],
+      "segments": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "مؤسسة الزكاة, Cairo, Egypt",
+          "to": "الطريق الدائرى, Cairo, Egypt",
+          "distanceKm": 6.785144221981482
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "الطريق الدائرى, Cairo, Egypt",
+          "to": "طريق القاهرة الاسكندرية الزراعي المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.56279539076014
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "طريق القاهرة الاسكندرية الزراعي المؤسسة, Cairo, Egypt",
+          "to": "احمد حلمى, Cairo, Egypt",
+          "distanceKm": 95.86766507678544
+        }
+      ],
+      "anchors": [
+        {
+          "index": 0,
+          "name": "مؤسسة الزكاة, Cairo, Egypt",
+          "lat": 30.0440314,
+          "lng": 31.235753,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 1,
+          "name": "الطريق الدائرى, Cairo, Egypt",
+          "lat": 30.0964108,
+          "lng": 31.1995819,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 2,
+          "name": "طريق القاهرة الاسكندرية الزراعي المؤسسة, Cairo, Egypt",
+          "lat": 30.8128601,
+          "lng": 30.750244,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 3,
+          "name": "احمد حلمى, Cairo, Egypt",
+          "lat": 30.0641395,
+          "lng": 31.2460626,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        }
+      ]
+    },
+    {
+      "lineId": "9f671576-7c45-4d12-830b-c80f3559db8f",
+      "label": "NTA Bus 211",
+      "status": "stop_chain_rejected",
+      "reason": "isolated_outside_resolution",
+      "coherentOutbound": false,
+      "outsideCount": 1,
+      "outsideIndexes": [
+        1
+      ],
+      "anchorCount": 5,
+      "directKm": 12.282613868048514,
+      "chainKm": 177.1790583337078,
+      "chainToDirectRatio": 14.425191594975894,
+      "maximumGapKm": 90.25915412787393,
+      "duplicateCount": 0,
+      "largeGapCount": 2,
+      "suspiciousCount": 2,
+      "suspicious": [
+        {
+          "index": 1,
+          "name": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "incomingKm": 82.6443835265793,
+          "outgoingKm": 90.25915412787393,
+          "bypassKm": 8.152420227298787,
+          "localExcessKm": 164.75111742715444,
+          "localDetourRatio": 21.208859802819912
+        },
+        {
+          "index": 2,
+          "name": "ميدان المؤسسة, Cairo, Egypt",
+          "incomingKm": 90.25915412787393,
+          "outgoingKm": 1.9328537240767365,
+          "bypassKm": 91.94805602108603,
+          "localExcessKm": 0.24395183086463135,
+          "localDetourRatio": 1.0026531483254926
+        }
+      ],
+      "largeGaps": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "قليوب البلد, Cairo, Egypt",
+          "to": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 82.6443835265793
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "to": "ميدان المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.25915412787393
+        }
+      ],
+      "segments": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "قليوب البلد, Cairo, Egypt",
+          "to": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 82.6443835265793
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "to": "ميدان المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.25915412787393
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "ميدان المؤسسة, Cairo, Egypt",
+          "to": "شارع كورنيش النيل, Cairo, Egypt",
+          "distanceKm": 1.9328537240767365
+        },
+        {
+          "fromIndex": 3,
+          "toIndex": 4,
+          "from": "شارع كورنيش النيل, Cairo, Egypt",
+          "to": "عبد المنعم رياض ()1, Cairo, Egypt",
+          "distanceKm": 2.3426669551777923
+        }
+      ],
+      "anchors": [
+        {
+          "index": 0,
+          "name": "قليوب البلد, Cairo, Egypt",
+          "lat": 30.1946688,
+          "lng": 31.2291345,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 1,
+          "name": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "lat": 30.8128601,
+          "lng": 30.750244,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 2,
+          "name": "ميدان المؤسسة, Cairo, Egypt",
+          "lat": 30.1228714,
+          "lng": 31.2463061,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 3,
+          "name": "شارع كورنيش النيل, Cairo, Egypt",
+          "lat": 30.1055024,
+          "lng": 31.2471,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 4,
+          "name": "عبد المنعم رياض ()1, Cairo, Egypt",
+          "lat": 30.0873789,
+          "lng": 31.2595166,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        }
+      ]
+    },
+    {
+      "lineId": "aa694eb2-87a5-4abb-8023-35d21f9491b7",
+      "label": "NTA Bus 212",
+      "status": "stop_chain_rejected",
+      "reason": "isolated_outside_resolution",
+      "coherentOutbound": false,
+      "outsideCount": 1,
+      "outsideIndexes": [
+        1
+      ],
+      "anchorCount": 6,
+      "directKm": 15.900174366751363,
+      "chainKm": 179.3948928728759,
+      "chainToDirectRatio": 11.28257393503848,
+      "maximumGapKm": 95.98976011381156,
+      "duplicateCount": 0,
+      "largeGapCount": 2,
+      "suspiciousCount": 2,
+      "suspicious": [
+        {
+          "index": 1,
+          "name": "مصر / الاسكندرية الزراعي, Cairo, Egypt",
+          "incomingKm": 77.75893604827218,
+          "outgoingKm": 95.98976011381156,
+          "bypassKm": 18.241159945828777,
+          "localExcessKm": 155.50753621625495,
+          "localDetourRatio": 9.525090327482983
+        },
+        {
+          "index": 2,
+          "name": "كورنيش النيل, Cairo, Egypt",
+          "incomingKm": 95.98976011381156,
+          "outgoingKm": 1.3707777522458198,
+          "bypassKm": 95.79667450999267,
+          "localExcessKm": 1.5638633560647008,
+          "localDetourRatio": 1.0163248188318017
+        }
+      ],
+      "largeGaps": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "القناطر الخيرية, Cairo, Egypt",
+          "to": "مصر / الاسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 77.75893604827218
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "مصر / الاسكندرية الزراعي, Cairo, Egypt",
+          "to": "كورنيش النيل, Cairo, Egypt",
+          "distanceKm": 95.98976011381156
+        }
+      ],
+      "segments": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "القناطر الخيرية, Cairo, Egypt",
+          "to": "مصر / الاسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 77.75893604827218
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "مصر / الاسكندرية الزراعي, Cairo, Egypt",
+          "to": "كورنيش النيل, Cairo, Egypt",
+          "distanceKm": 95.98976011381156
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "كورنيش النيل, Cairo, Egypt",
+          "to": "القللي, Cairo, Egypt",
+          "distanceKm": 1.3707777522458198
+        },
+        {
+          "fromIndex": 3,
+          "toIndex": 4,
+          "from": "القللي, Cairo, Egypt",
+          "to": "شارع نجيب الريحاني, Cairo, Egypt",
+          "distanceKm": 0.653033580535663
+        },
+        {
+          "fromIndex": 4,
+          "toIndex": 5,
+          "from": "شارع نجيب الريحاني, Cairo, Egypt",
+          "to": "عتبة (الجنينة), Cairo, Egypt",
+          "distanceKm": 3.622385378010665
+        }
+      ],
+      "anchors": [
+        {
+          "index": 0,
+          "name": "القناطر الخيرية, Cairo, Egypt",
+          "lat": 30.1966159,
+          "lng": 31.133908,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 1,
+          "name": "مصر / الاسكندرية الزراعي, Cairo, Egypt",
+          "lat": 30.8128601,
+          "lng": 30.750244,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 2,
+          "name": "كورنيش النيل, Cairo, Egypt",
+          "lat": 30.05488,
+          "lng": 31.229404,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 3,
+          "name": "القللي, Cairo, Egypt",
+          "lat": 30.0622941,
+          "lng": 31.2407834,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 4,
+          "name": "شارع نجيب الريحاني, Cairo, Egypt",
+          "lat": 30.0566629,
+          "lng": 31.2427099,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 5,
+          "name": "عتبة (الجنينة), Cairo, Egypt",
+          "lat": 30.089238,
+          "lng": 31.243105,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        }
+      ]
+    },
+    {
+      "lineId": "d67e41a0-c0f1-4139-9cec-4c1c96b141fc",
+      "label": "NTA Bus 216",
+      "status": "stop_chain_rejected",
+      "reason": "isolated_outside_resolution",
+      "coherentOutbound": false,
+      "outsideCount": 1,
+      "outsideIndexes": [
+        2
+      ],
+      "anchorCount": 7,
+      "directKm": 18.19017733778397,
+      "chainKm": 179.39261645016694,
+      "chainToDirectRatio": 9.862059787484268,
+      "maximumGapKm": 90.25915412787393,
+      "duplicateCount": 0,
+      "largeGapCount": 2,
+      "suspiciousCount": 3,
+      "suspicious": [
+        {
+          "index": 1,
+          "name": "طريق منيا القمح, Cairo, Egypt",
+          "incomingKm": 8.601126702498858,
+          "outgoingKm": 76.75577506022901,
+          "bypassKm": 79.2413909454046,
+          "localExcessKm": 6.115510817323269,
+          "localDetourRatio": 1.0771757126466484
+        },
+        {
+          "index": 2,
+          "name": "القاهرة اسكندرية الزراعي, Cairo, Egypt",
+          "incomingKm": 76.75577506022901,
+          "outgoingKm": 90.25915412787393,
+          "bypassKm": 22.458096558105552,
+          "localExcessKm": 144.5568326299974,
+          "localDetourRatio": 7.436735733858268
+        },
+        {
+          "index": 3,
+          "name": "ميدان المؤسسة, Cairo, Egypt",
+          "incomingKm": 90.25915412787393,
+          "outgoingKm": 2.1112048260237177,
+          "bypassKm": 92.0376440190738,
+          "localExcessKm": 0.33271493482385495,
+          "localDetourRatio": 1.0036149875235278
+        }
+      ],
+      "largeGaps": [
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "طريق منيا القمح, Cairo, Egypt",
+          "to": "القاهرة اسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 76.75577506022901
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "القاهرة اسكندرية الزراعي, Cairo, Egypt",
+          "to": "ميدان المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.25915412787393
+        }
+      ],
+      "segments": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "طنان, Cairo, Egypt",
+          "to": "طريق منيا القمح, Cairo, Egypt",
+          "distanceKm": 8.601126702498858
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "طريق منيا القمح, Cairo, Egypt",
+          "to": "القاهرة اسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 76.75577506022901
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "القاهرة اسكندرية الزراعي, Cairo, Egypt",
+          "to": "ميدان المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.25915412787393
+        },
+        {
+          "fromIndex": 3,
+          "toIndex": 4,
+          "from": "ميدان المؤسسة, Cairo, Egypt",
+          "to": "كوبري المظلات, Cairo, Egypt",
+          "distanceKm": 2.1112048260237177
+        },
+        {
+          "fromIndex": 4,
+          "toIndex": 5,
+          "from": "كوبري المظلات, Cairo, Egypt",
+          "to": "شارع شبرا, Cairo, Egypt",
+          "distanceKm": 0.9341529954129354
+        },
+        {
+          "fromIndex": 5,
+          "toIndex": 6,
+          "from": "شارع شبرا, Cairo, Egypt",
+          "to": "عتبة (الجنينة), Cairo, Egypt",
+          "distanceKm": 0.731202738128496
+        }
+      ],
+      "anchors": [
+        {
+          "index": 0,
+          "name": "طنان, Cairo, Egypt",
+          "lat": 30.2521075,
+          "lng": 31.2608226,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 1,
+          "name": "طريق منيا القمح, Cairo, Egypt",
+          "lat": 30.317536,
+          "lng": 31.3086036,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 2,
+          "name": "القاهرة اسكندرية الزراعي, Cairo, Egypt",
+          "lat": 30.8128601,
+          "lng": 30.750244,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 3,
+          "name": "ميدان المؤسسة, Cairo, Egypt",
+          "lat": 30.1228714,
+          "lng": 31.2463061,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 4,
+          "name": "كوبري المظلات, Cairo, Egypt",
+          "lat": 30.1038898,
+          "lng": 31.2458064,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 5,
+          "name": "شارع شبرا, Cairo, Egypt",
+          "lat": 30.0954946,
+          "lng": 31.2454444,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 6,
+          "name": "عتبة (الجنينة), Cairo, Egypt",
+          "lat": 30.089238,
+          "lng": 31.243105,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        }
+      ]
+    },
+    {
+      "lineId": "f8900daf-2d24-4086-89d3-2e7939047921",
+      "label": "NTA Bus 917",
+      "status": "stop_chain_rejected",
+      "reason": "isolated_outside_resolution",
+      "coherentOutbound": false,
+      "outsideCount": 1,
+      "outsideIndexes": [
+        1
+      ],
+      "anchorCount": 7,
+      "directKm": 11.800089906745661,
+      "chainKm": 176.70340294935016,
+      "chainToDirectRatio": 14.974750560869504,
+      "maximumGapKm": 90.25915412787393,
+      "duplicateCount": 0,
+      "largeGapCount": 2,
+      "suspiciousCount": 2,
+      "suspicious": [
+        {
+          "index": 1,
+          "name": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "incomingKm": 82.6443835265793,
+          "outgoingKm": 90.25915412787393,
+          "bypassKm": 8.152420227298787,
+          "localExcessKm": 164.75111742715444,
+          "localDetourRatio": 21.208859802819912
+        },
+        {
+          "index": 2,
+          "name": "ميدان المؤسسة, Cairo, Egypt",
+          "incomingKm": 90.25915412787393,
+          "outgoingKm": 1.7511442210047337,
+          "bypassKm": 91.64131981263013,
+          "localExcessKm": 0.36897853624853383,
+          "localDetourRatio": 1.0040263337215456
+        }
+      ],
+      "largeGaps": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "قليوب البلد, Cairo, Egypt",
+          "to": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 82.6443835265793
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "to": "ميدان المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.25915412787393
+        }
+      ],
+      "segments": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "قليوب البلد, Cairo, Egypt",
+          "to": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 82.6443835265793
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "to": "ميدان المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.25915412787393
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "ميدان المؤسسة, Cairo, Egypt",
+          "to": "شارع مجلس المدينة, Cairo, Egypt",
+          "distanceKm": 1.7511442210047337
+        },
+        {
+          "fromIndex": 3,
+          "toIndex": 4,
+          "from": "شارع مجلس المدينة, Cairo, Egypt",
+          "to": "شارع كورنيش النيل, Cairo, Egypt",
+          "distanceKm": 0.43136495577752515
+        },
+        {
+          "fromIndex": 4,
+          "toIndex": 5,
+          "from": "شارع كورنيش النيل, Cairo, Egypt",
+          "to": "شارع شبرا, Cairo, Egypt",
+          "distanceKm": 0.8861533799861843
+        },
+        {
+          "fromIndex": 5,
+          "toIndex": 6,
+          "from": "شارع شبرا, Cairo, Egypt",
+          "to": "عتبة (الجنينة), Cairo, Egypt",
+          "distanceKm": 0.731202738128496
+        }
+      ],
+      "anchors": [
+        {
+          "index": 0,
+          "name": "قليوب البلد, Cairo, Egypt",
+          "lat": 30.1946688,
+          "lng": 31.2291345,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 1,
+          "name": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "lat": 30.8128601,
+          "lng": 30.750244,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 2,
+          "name": "ميدان المؤسسة, Cairo, Egypt",
+          "lat": 30.1228714,
+          "lng": 31.2463061,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 3,
+          "name": "شارع مجلس المدينة, Cairo, Egypt",
+          "lat": 30.1072261,
+          "lng": 31.2442261,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 4,
+          "name": "شارع كورنيش النيل, Cairo, Egypt",
+          "lat": 30.1033553,
+          "lng": 31.2439284,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 5,
+          "name": "شارع شبرا, Cairo, Egypt",
+          "lat": 30.0954946,
+          "lng": 31.2454444,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 6,
+          "name": "عتبة (الجنينة), Cairo, Egypt",
+          "lat": 30.089238,
+          "lng": 31.243105,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        }
+      ]
+    },
+    {
+      "lineId": "f3cee45d-fff8-47a2-840f-336a4731e93e",
+      "label": "NTA Bus 918",
+      "status": "stop_chain_rejected",
+      "reason": "isolated_outside_resolution",
+      "coherentOutbound": false,
+      "outsideCount": 1,
+      "outsideIndexes": [
+        1
+      ],
+      "anchorCount": 5,
+      "directKm": 25.84099419221611,
+      "chainKm": 176.30162891756217,
+      "chainToDirectRatio": 6.822555959192475,
+      "maximumGapKm": 89.5107063875406,
+      "duplicateCount": 0,
+      "largeGapCount": 2,
+      "suspiciousCount": 2,
+      "suspicious": [
+        {
+          "index": 1,
+          "name": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "incomingKm": 77.75612152827694,
+          "outgoingKm": 89.5107063875406,
+          "bypassKm": 21.697377215981284,
+          "localExcessKm": 145.56945069983627,
+          "localDetourRatio": 7.709080514700023
+        },
+        {
+          "index": 2,
+          "name": "شبرا الخيمة, Cairo, Egypt",
+          "incomingKm": 89.5107063875406,
+          "outgoingKm": 2.8927016531410885,
+          "bypassKm": 87.17849394982349,
+          "localExcessKm": 5.224914090858192,
+          "localDetourRatio": 1.0599335209193388
+        }
+      ],
+      "largeGaps": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "شبين القناطر, Cairo, Egypt",
+          "to": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 77.75612152827694
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "to": "شبرا الخيمة, Cairo, Egypt",
+          "distanceKm": 89.5107063875406
+        }
+      ],
+      "segments": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "شبين القناطر, Cairo, Egypt",
+          "to": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 77.75612152827694
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "to": "شبرا الخيمة, Cairo, Egypt",
+          "distanceKm": 89.5107063875406
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "شبرا الخيمة, Cairo, Egypt",
+          "to": "شارع عرابي, Cairo, Egypt",
+          "distanceKm": 2.8927016531410885
+        },
+        {
+          "fromIndex": 3,
+          "toIndex": 4,
+          "from": "شارع عرابي, Cairo, Egypt",
+          "to": "عتبة (الجنينة), Cairo, Egypt",
+          "distanceKm": 6.142099348603532
+        }
+      ],
+      "anchors": [
+        {
+          "index": 0,
+          "name": "شبين القناطر, Cairo, Egypt",
+          "lat": 30.3125348,
+          "lng": 31.317601,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 1,
+          "name": "مصر / إسكندرية الزراعي, Cairo, Egypt",
+          "lat": 30.8128601,
+          "lng": 30.750244,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 2,
+          "name": "شبرا الخيمة, Cairo, Egypt",
+          "lat": 30.1285988,
+          "lng": 31.242218,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 3,
+          "name": "شارع عرابي, Cairo, Egypt",
+          "lat": 30.1386016,
+          "lng": 31.2144507,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 4,
+          "name": "عتبة (الجنينة), Cairo, Egypt",
+          "lat": 30.089238,
+          "lng": 31.243105,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        }
+      ]
+    },
+    {
+      "lineId": "f3e53dfd-dd47-43d7-9f0b-3ad8ea51eea3",
+      "label": "NTA Bus 923",
+      "status": "stop_chain_rejected",
+      "reason": "isolated_outside_resolution",
+      "coherentOutbound": false,
+      "outsideCount": 1,
+      "outsideIndexes": [
+        1
+      ],
+      "anchorCount": 5,
+      "directKm": 30.601621831075562,
+      "chainKm": 159.1614989668978,
+      "chainToDirectRatio": 5.201080512839725,
+      "maximumGapKm": 90.25915412787393,
+      "duplicateCount": 1,
+      "largeGapCount": 2,
+      "suspiciousCount": 2,
+      "suspicious": [
+        {
+          "index": 1,
+          "name": "طريق الاسكندرية الزراعي, Cairo, Egypt",
+          "incomingKm": 64.7464814841449,
+          "outgoingKm": 90.25915412787393,
+          "bypassKm": 26.46490129630949,
+          "localExcessKm": 128.54073431570933,
+          "localDetourRatio": 5.8570267796023945
+        },
+        {
+          "index": 2,
+          "name": "ميدان المؤسسة, Cairo, Egypt",
+          "incomingKm": 90.25915412787393,
+          "outgoingKm": 4.155863354878996,
+          "bypassKm": 94.20023950699535,
+          "localExcessKm": 0.21477797575757052,
+          "localDetourRatio": 1.0022800151770488
+        }
+      ],
+      "largeGaps": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "طوخ, Cairo, Egypt",
+          "to": "طريق الاسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 64.7464814841449
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "طريق الاسكندرية الزراعي, Cairo, Egypt",
+          "to": "ميدان المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.25915412787393
+        }
+      ],
+      "segments": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "طوخ, Cairo, Egypt",
+          "to": "طريق الاسكندرية الزراعي, Cairo, Egypt",
+          "distanceKm": 64.7464814841449
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "طريق الاسكندرية الزراعي, Cairo, Egypt",
+          "to": "ميدان المؤسسة, Cairo, Egypt",
+          "distanceKm": 90.25915412787393
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "from": "ميدان المؤسسة, Cairo, Egypt",
+          "to": "شارع أحمد حلمي, Cairo, Egypt",
+          "distanceKm": 4.155863354878996
+        },
+        {
+          "fromIndex": 3,
+          "toIndex": 4,
+          "from": "شارع أحمد حلمي, Cairo, Egypt",
+          "to": "احمد حلمي, Cairo, Egypt",
+          "distanceKm": 0
+        }
+      ],
+      "anchors": [
+        {
+          "index": 0,
+          "name": "طوخ, Cairo, Egypt",
+          "lat": 30.348333,
+          "lng": 31.158056,
+          "source": "osm_context_disambiguated",
+          "required": true
+        },
+        {
+          "index": 1,
+          "name": "طريق الاسكندرية الزراعي, Cairo, Egypt",
+          "lat": 30.8128601,
+          "lng": 30.750244,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 2,
+          "name": "ميدان المؤسسة, Cairo, Egypt",
+          "lat": 30.1228714,
+          "lng": 31.2463061,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 3,
+          "name": "شارع أحمد حلمي, Cairo, Egypt",
+          "lat": 30.0864173,
+          "lng": 31.2558351,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 4,
+          "name": "احمد حلمي, Cairo, Egypt",
+          "lat": 30.0864173,
+          "lng": 31.2558351,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        }
+      ]
+    },
+    {
+      "lineId": "63ea5453-b5ce-4005-8340-15972682a207",
+      "label": "Serfis 1",
+      "status": "stop_chain_rejected",
+      "reason": "isolated_outside_resolution",
+      "coherentOutbound": false,
+      "outsideCount": 1,
+      "outsideIndexes": [
+        0
+      ],
+      "anchorCount": 3,
+      "directKm": 133.97510542772775,
+      "chainKm": 136.17895020471497,
+      "chainToDirectRatio": 1.016449658837373,
+      "maximumGapKm": 134.92294676349923,
+      "duplicateCount": 0,
+      "largeGapCount": 1,
+      "suspiciousCount": 1,
+      "suspicious": [
+        {
+          "index": 1,
+          "name": "بحيرة عين الصيرة, Cairo, Egypt",
+          "incomingKm": 134.92294676349923,
+          "outgoingKm": 1.2560034412157313,
+          "bypassKm": 133.97510542772775,
+          "localExcessKm": 2.2038447769872107,
+          "localDetourRatio": 1.016449658837373
+        }
+      ],
+      "largeGaps": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "عزية خير الله, Cairo, Egypt",
+          "to": "بحيرة عين الصيرة, Cairo, Egypt",
+          "distanceKm": 134.92294676349923
+        }
+      ],
+      "segments": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "from": "عزية خير الله, Cairo, Egypt",
+          "to": "بحيرة عين الصيرة, Cairo, Egypt",
+          "distanceKm": 134.92294676349923
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "from": "بحيرة عين الصيرة, Cairo, Egypt",
+          "to": "السيدة عائشة, Cairo, Egypt",
+          "distanceKm": 1.2560034412157313
+        }
+      ],
+      "anchors": [
+        {
+          "index": 0,
+          "name": "عزية خير الله, Cairo, Egypt",
+          "lat": 31.2061232,
+          "lng": 30.9671188,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 1,
+          "name": "بحيرة عين الصيرة, Cairo, Egypt",
+          "lat": 30.017331,
+          "lng": 31.2495792,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        },
+        {
+          "index": 2,
+          "name": "السيدة عائشة, Cairo, Egypt",
+          "lat": 30.027177,
+          "lng": 31.2559728,
+          "source": "google_resolved_named_corridor",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

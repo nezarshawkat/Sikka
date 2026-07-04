@@ -171,7 +171,7 @@ export default function RouteDetail() {
   const loadGeometryVersions = async () => {
     if (!id || !isAdmin) return;
     try {
-      const data = await api.get<{ versions: GeometryVersion[] }>(`/admin/routes/${id}/geometry-candidates`);
+      const data = await api.getStatic<{ versions: GeometryVersion[] }>(`/admin/routes/${id}/geometry-candidates`);
       setGeometryVersions(data.versions ?? []);
     } catch {
       // Candidate history is an admin helper; route loading should not fail if

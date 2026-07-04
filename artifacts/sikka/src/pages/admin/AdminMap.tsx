@@ -106,8 +106,8 @@ const AdminMap = () => {
     try {
       const [catalog, hm, mw] = await Promise.all([
         getLocalRouteCatalog<TransitLine, TransportType>(),
-        api.get('/heatmaps'),
-        api.get('/mawaqef'),
+        api.getStatic('/heatmaps'),
+        api.getStatic('/mawaqef'),
       ]);
       setTransportTypes(catalog.transportTypes);
       setTransitLines(catalog.routes);

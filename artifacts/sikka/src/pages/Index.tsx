@@ -21,7 +21,13 @@ import ReportDialog from '@/components/ReportDialog';
 import ContributeTransportDialog from '@/components/ContributeTransportDialog';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
-import { openNativeLocationSettings } from '@/lib/nativeLocationSettings';
+import { nativeLocationIsEnabled, openNativeAppSettings, openNativeLocationSettings } from '@/lib/nativeLocationSettings';
+import {
+  acknowledgeNativeDiscoveryTrip,
+  getPendingNativeDiscoveryTrips,
+  startNativeDiscovery,
+  type NativeDiscoveryTrip,
+} from '@/lib/nativeDiscovery';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -86,6 +92,9 @@ const Index = () => {
   const [contributionDialogOpen, setContributionDialogOpen] = useState(false);
   const [contributionOperator, setContributionOperator] = useState<'microbus' | 'bus'>('microbus');
   const contributionWatchRef = useRef<number | null>(null);
+  const [pendingNativeDiscovery, setPendingNativeDiscovery] = useState<NativeDiscoveryTrip | null>(null);
+  const [pendingNativeFromArea, setPendingNativeFromArea] = useState('');
+  const [pendingNativeToArea, setPendingNativeToArea] = useState('');
 
   const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -146,6 +155,40 @@ const Index = () => {
     }
   }, []);
 
+  const loadPendingNativeDiscovery = useCallback(async () => {
+    if (activeTrip || contributionDialogOpen) return;
+    const trips = await getPendingNativeDiscoveryTrips();
+    if (!trips.length) return;
+    const trip = trips[0];
+    setPendingNativeDiscovery(trip);
+    const first = trip.trace[0];
+    const last = trip.trace[trip.trace.length - 1];
+    void Promise.all([
+      reverseGeocode(first[1], first[0], language),
+      reverseGeocode(last[1], last[0], language),
+    ]).then(([from, to]) => {
+      setPendingNativeFromArea(from);
+      setPendingNativeToArea(to);
+    });
+    // Neutral initial choice only: the rider can switch to bus or microbus in
+    // the classification dialog before the trace is submitted.
+    setContributionOperator('microbus');
+    setContributionDialogOpen(true);
+  }, [activeTrip, contributionDialogOpen, language]);
+
+  useEffect(() => {
+    void loadPendingNativeDiscovery();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void loadPendingNativeDiscovery();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [loadPendingNativeDiscovery]);
+
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle('dark', mapMode === 'dark');
@@ -172,10 +215,11 @@ const Index = () => {
         setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng }));
         const name = await reverseGeocode(loc.lat, loc.lng, language);
         setLocationName(name);
+        void startNativeDiscovery();
       },
       () => {
-        setUserLocation({ lat: CAIRO_CENTER.latitude, lng: CAIRO_CENTER.longitude });
-        setLocationName('Cairo, Egypt');
+        setUserLocation(null);
+        setLocationName('');
         setShowLocationPrompt(true);
       },
       { enableHighAccuracy: true, timeout: 12_000, maximumAge: 60_000 },
@@ -192,29 +236,35 @@ const Index = () => {
         setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng, zoom: 15 }));
         const name = await reverseGeocode(loc.lat, loc.lng, language);
         setLocationName(name);
+        void startNativeDiscovery();
       },
-      async () => {
-        const openedSettings = await openNativeLocationSettings();
+      async (error) => {
+        const openedSettings = error.code === error.PERMISSION_DENIED
+          ? await openNativeAppSettings()
+          : await openNativeLocationSettings();
         if (!openedSettings) toast.error(t('locationStillOff', language));
       },
       { enableHighAccuracy: true, timeout: 12_000, maximumAge: 0 },
     );
   }, [language]);
 
+  useEffect(() => {
+    const retryAfterSystemDialog = async () => {
+      if (!showLocationPrompt) return;
+      const enabled = await nativeLocationIsEnabled();
+      if (enabled) requestLocation();
+    };
+    window.addEventListener('focus', retryAfterSystemDialog);
+    return () => window.removeEventListener('focus', retryAfterSystemDialog);
+  }, [requestLocation, showLocationPrompt]);
+
   const loadRoutes = useCallback((plan: ActiveTripPlan) => {
     const results: { segIndex: number; coords: [number, number][] }[] = [];
-    const segCount = plan.segments.length;
-    for (let i = 0; i < segCount; i++) {
+    for (let i = 0; i < plan.segments.length; i++) {
       const seg = plan.segments[i];
       if (seg.route_geometry && seg.route_geometry.length >= 2) {
         results.push({ segIndex: i, coords: seg.route_geometry });
-        continue;
       }
-      const startLng = plan.startLng + (plan.destLng - plan.startLng) * (i / segCount);
-      const startLat = plan.startLat + (plan.destLat - plan.startLat) * (i / segCount);
-      const endLng = plan.startLng + (plan.destLng - plan.startLng) * ((i + 1) / segCount);
-      const endLat = plan.startLat + (plan.destLat - plan.startLat) * ((i + 1) / segCount);
-      results.push({ segIndex: i, coords: [[startLng, startLat], [endLng, endLat]] });
     }
     setRouteCoords(results);
   }, []);
@@ -443,6 +493,7 @@ const Index = () => {
     if (activeTrip || choiceOpen) return;
     const { lat, lng } = evt.lngLat;
     setPickedDest({ lat, lng, name: '', loading: true });
+    setViewState((value) => ({ ...value, latitude: lat, longitude: lng, zoom: 15 }));
     // Fly to clicked location
     if (mapRef.current) {
       mapRef.current.flyTo({ center: [lng, lat], zoom: 15, duration: 600 });
@@ -456,6 +507,7 @@ const Index = () => {
     if (activeTrip) return; // readonly when trip active — handled by destination intercity check
     const lat = suggestion.center[1];
     const lng = suggestion.center[0];
+    setViewState((value) => ({ ...value, latitude: lat, longitude: lng, zoom: 15 }));
     // Fly map to search result
     if (mapRef.current) {
       mapRef.current.flyTo({ center: [lng, lat], zoom: 15, duration: 600 });
@@ -577,10 +629,9 @@ const Index = () => {
         )}
       </Map>
 
-      {/* Search bar — hidden when trip is minimized to keep the map clean */}
-      {(!activeTrip || expanded) && (
-        <div className="absolute top-0 left-0 right-0 p-4 safe-area-top z-20">
-          <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="flex items-center gap-2">
+      {/* Search bar stays visible across the trip experience so the rider can keep exploring or re-plan quickly. */}
+      <div className="absolute top-0 left-0 right-0 p-4 safe-area-top z-20">
+        <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="flex items-center gap-2">
             <LocationAutocomplete
               value={searchQuery}
               onChange={setSearchQuery}
@@ -613,9 +664,8 @@ const Index = () => {
                 <User className="h-5 w-5" />
               </Button>
             )}
-          </motion.div>
-        </div>
-      )}
+        </motion.div>
+      </div>
 
       {/* "Turn on location" prompt — shown whenever location isn't granted yet,
           so trip planning can start from the rider's actual position instead
@@ -661,15 +711,13 @@ const Index = () => {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0, opacity: 0 }}
               transition={{ delay: 0.2 }}
-              className="absolute right-4 bottom-28 z-20"
+              className="absolute right-4 bottom-40 z-20"
             >
               <Button
                 size="icon"
-                className="h-12 w-12 rounded-full shadow-xl border border-white/20 glass-panel"
+                className="h-12 w-12 rounded-full shadow-[0_10px_35px_rgba(0,0,0,0.22)] border border-white/35 bg-background/70 dark:bg-slate-900/70 backdrop-blur-2xl"
                 onClick={() => {
-                  if (mapRef.current && userPos) {
-                    setViewState(v => ({ ...v, latitude: userPos.lat, longitude: userPos.lng, zoom: 15 }));
-                  }
+                  if (userPos) setViewState(v => ({ ...v, latitude: userPos.lat, longitude: userPos.lng, zoom: 15 }));
                 }}
                 title={t('focusOnLocation', language) || 'Focus on my location'}
               >
@@ -819,10 +867,22 @@ const Index = () => {
       <ContributeTransportDialog
         open={contributionDialogOpen}
         onClose={() => setContributionDialogOpen(false)}
-        onSubmitted={clearContributionFlow}
-        initialTrace={contributionTrace}
-        initialTimestamps={contributionTimestamps}
+        onSubmitted={() => {
+          const pendingId = pendingNativeDiscovery?.id;
+          if (pendingId) {
+            void acknowledgeNativeDiscoveryTrip(pendingId).then(() => {
+              setPendingNativeDiscovery(null);
+              void loadPendingNativeDiscovery();
+            });
+          }
+          clearContributionFlow();
+        }}
+        initialTrace={pendingNativeDiscovery?.trace ?? contributionTrace}
+        initialTimestamps={pendingNativeDiscovery?.timestamps ?? contributionTimestamps}
         initialOperator={contributionOperator}
+        initialFromArea={pendingNativeFromArea}
+        initialToArea={pendingNativeToArea}
+        initialRouteCompleteness={pendingNativeDiscovery ? 'partial' : 'full'}
         language={language}
       />
 
@@ -838,6 +898,13 @@ const Index = () => {
         fromArea={busUsedFrom}
         toArea={busUsedTo}
         language={language}
+        onSwitchToMicrobus={() => {
+          setBusUsedOpen(false);
+          setMicrobusUsedName(busUsedName);
+          setMicrobusUsedFrom(busUsedFrom);
+          setMicrobusUsedTo(busUsedTo);
+          setMicrobusUsedOpen(true);
+        }}
       />
 
       {/* Microbus info dialog — collecting operator/route info only; rating is never required here */}
@@ -852,6 +919,13 @@ const Index = () => {
         fromArea={microbusUsedFrom}
         toArea={microbusUsedTo}
         language={language}
+        onSwitchToBus={() => {
+          setMicrobusUsedOpen(false);
+          setBusUsedName(microbusUsedName);
+          setBusUsedFrom(microbusUsedFrom);
+          setBusUsedTo(microbusUsedTo);
+          setBusUsedOpen(true);
+        }}
       />
 
       {/* Intercity vs Serfis choice */}

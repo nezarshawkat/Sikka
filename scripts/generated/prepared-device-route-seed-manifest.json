@@ -1,0 +1,28 @@
+{
+  "ready": true,
+  "preparedAt": "2026-07-04T02:36:42.189Z",
+  "preparedPath": "C:\\Users\\Nezar\\Desktop\\Sikka\\scripts\\generated\\prepared-device-route-seed.json",
+  "targetWhenSeeded": "C:\\Users\\Nezar\\Desktop\\Sikka\\artifacts\\sikka\\src\\data\\bundledSnapshot.json",
+  "sha256": "27f4a4bc6d2929189dd988692557d9888b320b7d997f794699831a336cdc02ed",
+  "routeCount": 521,
+  "transportTypeCount": 13,
+  "selectionPolicy": "independent-audit-pass plus explicit current-Metro acceptance",
+  "excludedReviewCount": 13,
+  "excludedFailedRoadCount": 72,
+  "excludedUnacceptedFixedGuidewayFailures": [
+    "Alexandria Tram Route 1",
+    "Alexandria Tram Route 2",
+    "Alexandria Tram Route 25/36"
+  ],
+  "counts": {
+    "Cairo / NTA Bus": 150,
+    "Cairo / Serfis": 53,
+    "Cairo / CTA Bus": 125,
+    "Cairo / Microbus": 161,
+    "Alexandria / APTA Bus": 24,
+    "Cairo / Cairo BRT": 1,
+    "Cairo / Cairo LRT": 2,
+    "Cairo / Metro": 3,
+    "Cairo / Monorail": 2
+  }
+}

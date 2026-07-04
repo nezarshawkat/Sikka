@@ -33,7 +33,7 @@ const AdminReports = () => {
   const fetchReports = (status: string) => {
     setIsLoading(true);
     const path = status === 'all' ? '/reports' : `/reports?status=${status}`;
-    api.get<Report[]>(path)
+    api.getStatic<Report[]>(path)
       .then((data) => setReports(data ?? []))
       .catch((err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to load reports'))
       .finally(() => setIsLoading(false));

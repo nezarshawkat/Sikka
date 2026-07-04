@@ -9,6 +9,9 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(SikkaTripNotificationPlugin.class);
         registerPlugin(SikkaLocationSettingsPlugin.class);
+        registerPlugin(SikkaDiscoveryPlugin.class);
+        registerPlugin(SikkaMapUiPlugin.class);
         super.onCreate(savedInstanceState);
+        SikkaDiscoveryService.ensureStarted(this);
     }
 }

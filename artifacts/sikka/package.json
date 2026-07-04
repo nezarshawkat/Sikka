@@ -83,6 +83,7 @@
   "dependencies": {
     "@capacitor/android": "^8.0.0",
     "@capacitor/core": "^8.0.0",
+    "@capacitor/google-maps": "8.0.0",
     "@capacitor/ios": "^8.0.0",
     "@clerk/react": "^6.4.7",
     "@clerk/themes": "^2.4.57",

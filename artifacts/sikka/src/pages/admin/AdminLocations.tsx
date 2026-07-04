@@ -26,7 +26,7 @@ const AdminLocations = () => {
 
   const fetchLocations = async () => {
     try {
-      const data = await api.get<Location[]>('/locations');
+      const data = await api.getStatic<Location[]>('/locations');
       setLocations(data ?? []);
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Failed to load'); }
     setIsLoading(false);

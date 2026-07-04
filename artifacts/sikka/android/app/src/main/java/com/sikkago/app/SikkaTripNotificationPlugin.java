@@ -11,6 +11,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.os.Build;
 
@@ -36,7 +37,9 @@ public class SikkaTripNotificationPlugin extends Plugin {
         Context context = getContext();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            getActivity().requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, REQUEST_NOTIFICATIONS);
+            if (getActivity() != null) {
+                getActivity().requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, REQUEST_NOTIFICATIONS);
+            }
             JSObject result = new JSObject();
             result.put("shown", false);
             result.put("permissionRequested", true);
@@ -52,6 +55,9 @@ public class SikkaTripNotificationPlugin extends Plugin {
         String icon = call.getString("icon", "");
         String colorValue = call.getString("color", "#258DFF");
         int color = parseColor(colorValue);
+        String routeLabel = shortenText(from, 22) + " → " + shortenText(to, 22);
+        String title = transportName;
+        String text = routeLabel;
 
         Intent intent = new Intent(context, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -62,9 +68,7 @@ public class SikkaTripNotificationPlugin extends Plugin {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        Bitmap largeIcon = buildTransportIcon(icon, color);
-        String title = from + " -> " + to + " right now";
-        String text = icon.isEmpty() ? transportName : icon + "  " + transportName;
+        Bitmap largeIcon = buildTripNotificationBitmap(icon, color, transportName, routeLabel);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.sikka_app_icon)
@@ -115,31 +119,63 @@ public class SikkaTripNotificationPlugin extends Plugin {
         }
     }
 
-    private Bitmap buildTransportIcon(String icon, int color) {
-        int size = 192;
-        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+    private Bitmap buildTripNotificationBitmap(String icon, int color, String transportName, String routeLabel) {
+        int width = 512;
+        int height = 256;
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
+
+        Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bgPaint.setColor(Color.WHITE);
+        canvas.drawRoundRect(0, 0, width, height, 36f, 36f, bgPaint);
+
+        Paint accentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        accentPaint.setColor(SIKKA_BLUE);
+        canvas.drawRoundRect(0, 0, width, 10f, 5f, 5f, accentPaint);
 
         Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         circlePaint.setColor(color);
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f, circlePaint);
+        canvas.drawCircle(72f, 96f, 34f, circlePaint);
 
         Paint ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         ringPaint.setStyle(Paint.Style.STROKE);
-        ringPaint.setStrokeWidth(8f);
-        ringPaint.setColor(Color.argb(90, 255, 255, 255));
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 7f, ringPaint);
+        ringPaint.setStrokeWidth(6f);
+        ringPaint.setColor(Color.argb(70, 255, 255, 255));
+        canvas.drawCircle(72f, 96f, 28f, ringPaint);
 
         Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         textPaint.setColor(Color.WHITE);
         textPaint.setTextAlign(Paint.Align.CENTER);
-        textPaint.setTextSize(86f);
+        textPaint.setTextSize(28f);
         textPaint.setTypeface(Typeface.DEFAULT_BOLD);
         Paint.FontMetrics metrics = textPaint.getFontMetrics();
-        float y = size / 2f - (metrics.ascent + metrics.descent) / 2f;
-
+        float y = 96f - (metrics.ascent + metrics.descent) / 2f;
         String glyph = icon == null || icon.trim().isEmpty() ? "●" : icon.trim();
-        canvas.drawText(glyph, size / 2f, y, textPaint);
+        canvas.drawText(glyph.length() > 2 ? glyph.substring(0, 2) : glyph, 72f, y, textPaint);
+
+        Paint titlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        titlePaint.setColor(Color.rgb(20, 24, 31));
+        titlePaint.setTextSize(30f);
+        titlePaint.setTypeface(Typeface.DEFAULT_BOLD);
+        titlePaint.setTextAlign(Paint.Align.LEFT);
+        canvas.drawText(shortenText(transportName, 18), 124f, 80f, titlePaint);
+
+        Paint bodyPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bodyPaint.setColor(Color.rgb(91, 100, 114));
+        bodyPaint.setTextSize(24f);
+        bodyPaint.setTextAlign(Paint.Align.LEFT);
+        canvas.drawText(shortenText(routeLabel, 34), 124f, 122f, bodyPaint);
+
+        Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        dotPaint.setColor(color);
+        canvas.drawCircle(width - 46f, 96f, 16f, dotPaint);
+
         return bitmap;
+    }
+
+    private String shortenText(String value, int max) {
+        if (value == null) return "";
+        String text = value.trim();
+        return text.length() <= max ? text : text.substring(0, Math.max(1, max - 1)) + "…";
     }
 }

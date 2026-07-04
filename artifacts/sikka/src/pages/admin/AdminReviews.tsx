@@ -67,7 +67,7 @@ const AdminReviews = () => {
 
   useEffect(() => {
     Promise.all([
-      api.get<Review[]>('/reviews'),
+      api.getStatic<Review[]>('/reviews'),
       getLocalRouteCatalog<TransitLine, TransportType>(),
     ])
       .then(([data, catalog]) => {
