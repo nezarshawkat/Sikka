@@ -1,3 +1,28 @@
+well look here in the uploaded image this is the design of the notification and i need to to be as this exactly... 
+
+Notification is not correct; you made the notification design inside the notification itself as a block inside it... i need it to be THE NOTIFICATION ITESLF TO BE WITH THIS BACKGROUND COLOR AND CONTAINS THE DETAILS INSIDE THE BLUE RECTANGLE AND THE LOGO BE THE APP NOTIFICATION ICON THE NOTIFICATION ITSEFT BACKGROUND COLOR BE THE SAME AS THE ONE INSIDE THE RECTANGLE AND REMOVE THE RECTANGEL ITSELF
+
+
+
+look at the needed code and edit on it and send the full code
+
+package com.sikkago.app;
+
+
+
+import android.Manifest;
+
+import android.app.NotificationChannel;
+
+import android.app.NotificationManager;
+
+import android.app.PendingIntent;
+
+import android.content.Context;
+
+import android.content.Intent;
+
+import android.content.pm.PackageManager;
 package com.sikkago.app;
 
 import android.Manifest;
@@ -24,16 +49,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 /**
  * Persistent "active trip" notification, built from res/layout/notification_trip.xml
  * (or notification_trip_ar.xml for Arabic) via RemoteViews rather than a painted
- * bitmap. That gives it real, non-cropped text in the app's actual Cairo font
- * files (bundled under res/font/), instead of baking everything into an image
- * that Android's notification template may crop or rescale unpredictably.
- *
- * Left circle: the Sikka mark, always the same — it's branding, not per-trip data.
- *
- * Right circle: the one dynamic part — tinted to the current leg's actual line
- * color and labeled with the actual mode being ridden (e.g. "Bus", "Metro",
- * "Microbus"), both provided by the caller rather than guessed here, since the
- * JS side already knows the correct localized label and the real line color.
+ * bitmap.
  */
 @CapacitorPlugin(name = "SikkaTripNotification")
 public class SikkaTripNotificationPlugin extends Plugin {
@@ -59,13 +75,16 @@ public class SikkaTripNotificationPlugin extends Plugin {
 
         ensureChannel(context);
 
-        String to = call.getString("to", "Destination");
+        // Fetching live data sent from TypeScript
+        String to = call.getString("to", "");
         String transportName = call.getString("transportName", "Sikka");
         String modeLabel = call.getString("modeLabel", "");
         String language = call.getString("language", "en");
         int color = parseColor(call.getString("color", "#258DFF"));
         boolean isArabic = isArabicLang(language);
-        String subtitle = (isArabic ? "باتجاه " : "toward ") + shortenText(to, 26);
+        
+        // Dynamically build the text
+        String subtitle = (isArabic ? "باتجاه " : "toward ") + shortenText(to, 30);
 
         Intent intent = new Intent(context, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -85,11 +104,11 @@ public class SikkaTripNotificationPlugin extends Plugin {
             .setCustomContentView(views)
             .setCustomBigContentView(views)
             .setColor(SIKKA_BLUE)
-            .setColorized(false)
+            .setColorized(true) // FIX: Forces the entire native notification background to be blue
             .setOngoing(true)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_MAX) // Required for colorized backgrounds
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .setContentIntent(pendingIntent);
 
@@ -116,7 +135,7 @@ public class SikkaTripNotificationPlugin extends Plugin {
         NotificationChannel channel = new NotificationChannel(
             CHANNEL_ID,
             "Active Sikka trip",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_HIGH
         );
         channel.setDescription("Persistent navigation notification while a Sikka trip is active.");
         channel.setShowBadge(false);
@@ -142,20 +161,14 @@ public class SikkaTripNotificationPlugin extends Plugin {
         int layoutRes = isArabic ? R.layout.notification_trip_ar : R.layout.notification_trip;
         RemoteViews views = new RemoteViews(context.getPackageName(), layoutRes);
 
-        // Right badge: the one part of this view that actually changes — tinted
-        // to the real line color and labeled with the real mode being ridden,
-        // instead of staying a fixed placeholder.
         views.setInt(R.id.trip_badge_circle_bg, "setColorFilter", badgeColor);
         views.setTextViewText(R.id.trip_badge_text, badgeTextFor(modeLabel, title));
 
-        views.setTextViewText(R.id.trip_title, shortenText(title, 20));
+        views.setTextViewText(R.id.trip_title, shortenText(title, 40));
         views.setTextViewText(R.id.trip_subtitle, subtitle);
         return views;
     }
 
-    /** The real, already-localized mode label when we have one; otherwise a
-     *  short fallback derived from the transport name so the badge is never
-     *  left blank. */
     private String badgeTextFor(String modeLabel, String transportName) {
         if (modeLabel != null && !modeLabel.trim().isEmpty()) {
             return modeLabel.trim();
@@ -169,3 +182,4 @@ public class SikkaTripNotificationPlugin extends Plugin {
         return text.length() <= max ? text : text.substring(0, Math.max(1, max - 1)) + "…";
     }
 }
+the code u need ask for it if not one of those + gimme full code

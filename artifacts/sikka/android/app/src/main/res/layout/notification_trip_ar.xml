@@ -1,20 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Arabic-language variant of notification_trip.xml — identical structure, but
-  points the title/subtitle at the Arabic-subset Cairo font files (the Latin
-  subset has no Arabic glyphs) and right-aligns that text. The icon/badge
-  stay on their fixed physical sides (layoutDirection="ltr") since that's a
-  fixed brand layout, not something meant to mirror with locale.
--->
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="64dp"
+    android:layout_height="wrap_content"
+    android:minHeight="64dp"
     android:layoutDirection="ltr"
-    android:background="@drawable/bg_trip_pill"
-    android:paddingStart="9dp"
-    android:paddingEnd="9dp">
+    android:background="@android:color/transparent"
+    android:padding="12dp">
 
-    <!-- Left: mode icon circle -->
     <ImageView
         android:id="@+id/trip_icon_circle_bg"
         android:layout_width="46dp"
@@ -35,7 +28,6 @@
         android:scaleType="fitCenter"
         android:src="@drawable/sikka_notification_mark" />
 
-    <!-- Right: dynamically-colored route badge -->
     <ImageView
         android:id="@+id/trip_badge_circle_bg"
         android:layout_width="46dp"
@@ -57,21 +49,20 @@
         android:includeFontPadding="false"
         android:autoSizeTextType="uniform"
         android:autoSizeMinTextSize="7sp"
-        android:autoSizeMaxTextSize="11sp"
+        android:autoSizeMaxTextSize="12sp"
         android:textColor="#FFFFFF"
-        android:textSize="11sp"
+        android:textSize="12sp"
         android:fontFamily="@font/cairo_ar_bold"
-        android:text="أتوبيس" />
+        tools:text="أتوبيس" />
 
-    <!-- Middle: title + subtitle, between the two circles -->
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_centerVertical="true"
         android:layout_toEndOf="@id/trip_icon_circle_bg"
         android:layout_toStartOf="@id/trip_badge_circle_bg"
-        android:layout_marginStart="10dp"
-        android:layout_marginEnd="10dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
         android:orientation="vertical">
 
         <TextView
@@ -86,7 +77,7 @@
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:fontFamily="@font/cairo_ar_bold"
-            android:text="ميكروباص" />
+            tools:text="ميكروباص" />
 
         <TextView
             android:id="@+id/trip_subtitle"
@@ -99,8 +90,8 @@
             android:gravity="end"
             android:textDirection="rtl"
             android:textColor="#E7F1FF"
-            android:textSize="12.5sp"
+            android:textSize="13sp"
             android:fontFamily="@font/cairo_ar_regular"
-            android:text="باتجاه ميدان رمسيس" />
+            tools:text="باتجاه ميدان رمسيس" />
     </LinearLayout>
 </RelativeLayout>
