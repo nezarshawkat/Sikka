@@ -25,7 +25,7 @@ import { nativeLocationIsEnabled, openNativeAppSettings, openNativeLocationSetti
 import {
   acknowledgeNativeDiscoveryTrip,
   getPendingNativeDiscoveryTrips,
-  startNativeDiscovery,
+  stopNativeDiscovery,
   type NativeDiscoveryTrip,
 } from '@/lib/nativeDiscovery';
 import {
@@ -72,10 +72,13 @@ const Index = () => {
   const navigate = useNavigate();
   const { style: mapStyle, mode: mapMode } = useMapStyle();
   const mapRef = useRef<MapRef | null>(null);
-  const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 14 });
+  // zoom 15 (rather than 14) is where OpenFreeMap's "liberty" style starts
+  // showing POI labels (landmarks, mosques, hospitals) instead of just roads.
+  const [viewState, setViewState] = useState({ ...CAIRO_CENTER, zoom: 15 });
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationName, setLocationName] = useState('');
   const [showLocationPrompt, setShowLocationPrompt] = useState(false);
+  const [enablingLocation, setEnablingLocation] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Destination chosen by tapping the map or searching (reverse-geocoded address shown for confirmation)
@@ -215,7 +218,11 @@ const Index = () => {
         setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng }));
         const name = await reverseGeocode(loc.lat, loc.lng, language);
         setLocationName(name);
-        void startNativeDiscovery();
+        // Turns off (and keeps turned off) the old always-on background
+        // discovery service, so its persistent "Sikka is collecting trip
+        // data" notification stops showing. In-app ride discovery (while
+        // Sikka is actually open) is unaffected.
+        void stopNativeDiscovery();
       },
       () => {
         setUserLocation(null);
@@ -226,37 +233,96 @@ const Index = () => {
     );
   }, [language]);
 
-  const requestLocation = useCallback(() => {
-    if (!navigator.geolocation) return;
+  const pollRef = useRef<number | null>(null);
+  const attemptInFlightRef = useRef(false);
+
+  const stopEnablingPoll = useCallback(() => {
+    if (pollRef.current != null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setEnablingLocation(false);
+  }, []);
+
+  const attemptGetPosition = useCallback(() => {
+    if (attemptInFlightRef.current) return;
+    attemptInFlightRef.current = true;
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        attemptInFlightRef.current = false;
+        stopEnablingPoll();
         const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setUserLocation(loc);
         setShowLocationPrompt(false);
         setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng, zoom: 15 }));
         const name = await reverseGeocode(loc.lat, loc.lng, language);
         setLocationName(name);
-        void startNativeDiscovery();
+        void stopNativeDiscovery();
       },
       async (error) => {
-        const openedSettings = error.code === error.PERMISSION_DENIED
-          ? await openNativeAppSettings()
-          : await openNativeLocationSettings();
-        if (!openedSettings) toast.error(t('locationStillOff', language));
+        attemptInFlightRef.current = false;
+        // Only reach for the settings dialog here if we haven't already
+        // fired it below — this branch mainly now handles permission-denied,
+        // since the "services are off" case is short-circuited up front.
+        if (error.code === error.PERMISSION_DENIED) {
+          stopEnablingPoll();
+          const opened = await openNativeAppSettings();
+          if (!opened) toast.error(t('locationStillOff', language));
+        }
       },
       { enableHighAccuracy: true, timeout: 12_000, maximumAge: 0 },
     );
-  }, [language]);
+  }, [language, stopEnablingPoll]);
+
+  const requestLocation = useCallback(async () => {
+    if (!navigator.geolocation) return;
+    setEnablingLocation(true);
+
+    // Check the fast, local OS flag first instead of only finding out
+    // location services are off after a slow getCurrentPosition() timeout —
+    // that up-front wait was most of what made this feel slow to open.
+    const enabled = await nativeLocationIsEnabled();
+    if (enabled === false) {
+      const opened = await openNativeLocationSettings();
+      if (!opened) {
+        stopEnablingPoll();
+        toast.error(t('locationStillOff', language));
+        return;
+      }
+    } else {
+      attemptGetPosition();
+    }
+
+    // Keep checking in the background until location actually turns on, so
+    // there's no need to back out of the system dialog and reopen Sikka —
+    // this fires on its own the moment it's enabled. Capped at 2 minutes so
+    // an abandoned attempt doesn't poll forever; tapping "Enable" again
+    // restarts it.
+    if (pollRef.current == null) {
+      let ticks = 0;
+      pollRef.current = window.setInterval(async () => {
+        ticks += 1;
+        if (ticks > 80) {
+          stopEnablingPoll();
+          return;
+        }
+        const nowEnabled = await nativeLocationIsEnabled();
+        if (nowEnabled) attemptGetPosition();
+      }, 1500);
+    }
+  }, [attemptGetPosition, language, stopEnablingPoll]);
+
+  useEffect(() => stopEnablingPoll, [stopEnablingPoll]);
 
   useEffect(() => {
     const retryAfterSystemDialog = async () => {
       if (!showLocationPrompt) return;
       const enabled = await nativeLocationIsEnabled();
-      if (enabled) requestLocation();
+      if (enabled) attemptGetPosition();
     };
     window.addEventListener('focus', retryAfterSystemDialog);
     return () => window.removeEventListener('focus', retryAfterSystemDialog);
-  }, [requestLocation, showLocationPrompt]);
+  }, [attemptGetPosition, showLocationPrompt]);
 
   const loadRoutes = useCallback((plan: ActiveTripPlan) => {
     const results: { segIndex: number; coords: [number, number][] }[] = [];
@@ -295,10 +361,54 @@ const Index = () => {
     if (activeTrip) saveOfflineTrip(activeTrip);
   }, [activeTrip, language]);
 
+  /**
+   * Detects whether a segment is a bus or microbus ride and, if so, opens the
+   * matching confirmation dialog (persisting a pending-feedback marker so it
+   * survives a refresh). Returns true if it handled the segment as bus/microbus,
+   * false if the caller should fall back to the generic segment review.
+   */
+  const openBusOrMicrobusUsedIfApplicable = (segIdx: number): boolean => {
+    if (!activeTrip) return false;
+    const seg = activeTrip.segments[segIdx];
+    if (!seg) return false;
+    // Microbus and CTA/NTA buses share the same "bus" icon in the data, so the transport
+    // name (e.g. "Microbus" / "ميكروباص") is the only reliable way to tell them apart.
+    const isMicrobus = /microbus|ميكروباص/i.test(seg.transport_name || '');
+    const isBus = seg.icon === 'bus' && !isMicrobus;
+
+    if (isMicrobus) {
+      sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({ type: 'microbus', segmentIndex: segIdx }));
+      setMicrobusUsedName(seg.transport_name);
+      setMicrobusUsedFrom(seg.start_name);
+      setMicrobusUsedTo(seg.end_name);
+      setMicrobusUsedOpen(true);
+      return true;
+    }
+    if (isBus) {
+      sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({ type: 'bus', segmentIndex: segIdx }));
+      setBusUsedName(seg.transport_name);
+      setBusUsedFrom(seg.start_name);
+      setBusUsedTo(seg.end_name);
+      setBusUsedOpen(true);
+      return true;
+    }
+    return false;
+  };
+
   const onApproachSegmentEnd = useCallback((segIdx: number) => {
     if (!activeTrip) return;
     if (segIdx < activeTrip.segments.length - 1) toast(t('approachingNext', language));
-  }, [activeTrip, language]);
+
+    // Auto-arrival: for bus/microbus specifically, GPS proximity to the segment's
+    // end is treated as "arrived" and the confirmation popup opens on its own —
+    // no need to wait for the rider to tap "I arrived" manually. Other modes
+    // (metro/train/walk/taxi/monorail) are untouched and still use the manual
+    // "I arrived" button, since a premature auto-advance is riskier on multi-stop
+    // rides where GPS proximity to the final stop isn't necessarily "get off now".
+    if (reviewOpen || busUsedOpen || microbusUsedOpen || tripReviewOpen) return;
+    openBusOrMicrobusUsedIfApplicable(segIdx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrip, language, reviewOpen, busUsedOpen, microbusUsedOpen, tripReviewOpen]);
 
   const { userPos, progress, remainingMinutes, isOffRoute } = useTripTracking({
     enabled: !!activeTrip,
@@ -313,6 +423,23 @@ const Index = () => {
 
   // Persistent OS-level notification while trip is active
   const currentSeg = activeTrip?.segments[currentSegIdx];
+  // Short, already-localized mode word for the notification badge — reuses
+  // the same bilingual mode-name strings already in i18n.ts and the same
+  // microbus-vs-bus detection used elsewhere for the used-transport dialogs.
+  const modeLabelFor = (seg?: typeof currentSeg): string => {
+    if (!seg) return t('bus', language);
+    if (/microbus|ميكروباص/i.test(seg.transport_name || '')) return t('microbus', language);
+    switch (seg.icon) {
+      case 'metro': return t('metro', language);
+      case 'monorail': return t('monorail', language);
+      case 'train': return t('train', language);
+      case 'car': return t('taxi', language);
+      case 'bike': return t('tuktuk', language);
+      case 'bus': return t('bus', language);
+      default: return seg.transport_name || t('bus', language);
+    }
+  };
+
   useTripNotification({
     active: !!activeTrip,
     from: activeTrip?.segments[0]?.start_name ?? '',
@@ -320,6 +447,8 @@ const Index = () => {
     transportName: currentSeg?.transport_name ?? '',
     transportColor: currentSeg?.color ?? '#3B82F6',
     transportCode: currentSeg?.line_number || undefined,
+    modeLabel: modeLabelFor(currentSeg),
+    language,
     progress,
   });
 
@@ -420,28 +549,7 @@ const Index = () => {
 
   const handleDone = () => {
     if (!activeTrip) return;
-    const seg = activeTrip.segments[currentSegIdx];
-    // Microbus and CTA/NTA buses share the same "bus" icon in the data, so the transport
-    // name (e.g. "Microbus" / "ميكروباص") is the only reliable way to tell them apart.
-    const isMicrobus = /microbus|ميكروباص/i.test(seg.transport_name || '');
-    const isBus = seg.icon === 'bus' && !isMicrobus;
-
-    if (isMicrobus) {
-      sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({ type: 'microbus', segmentIndex: currentSegIdx }));
-      setMicrobusUsedName(seg.transport_name);
-      setMicrobusUsedFrom(seg.start_name);
-      setMicrobusUsedTo(seg.end_name);
-      setMicrobusUsedOpen(true);
-      return;
-    }
-    if (isBus) {
-      sessionStorage.setItem(PENDING_FEEDBACK_KEY, JSON.stringify({ type: 'bus', segmentIndex: currentSegIdx }));
-      setBusUsedName(seg.transport_name);
-      setBusUsedFrom(seg.start_name);
-      setBusUsedTo(seg.end_name);
-      setBusUsedOpen(true);
-      return;
-    }
+    if (openBusOrMicrobusUsedIfApplicable(currentSegIdx)) return;
     openSegmentReview();
   };
 
@@ -677,24 +785,37 @@ const Index = () => {
           animate={{ y: 0, opacity: 1 }}
           className="absolute top-[5.5rem] left-4 right-4 z-20 safe-area-top"
         >
-          <div className="glass-panel rounded-[1.75rem] border border-primary/20 shadow-xl p-4 space-y-2">
+          <div className="glass-panel rounded-[1.75rem] border border-primary/20 shadow-xl p-4 space-y-2 overflow-hidden">
             <div className="flex items-start gap-3">
               <div className="h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
                 <MapPin className="h-4 w-4 text-primary" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-foreground">{t('locationPromptTitle', language)}</p>
-                <p className="text-xs text-muted-foreground leading-snug mt-0.5">{t('locationPromptBody', language)}</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {enablingLocation ? t('locationEnabling', language) : t('locationPromptTitle', language)}
+                </p>
+                {!enablingLocation && (
+                  <p className="text-xs text-muted-foreground leading-snug mt-0.5">{t('locationPromptBody', language)}</p>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-2 pt-1">
-              <Button variant="ghost" size="sm" className="flex-1 rounded-full" onClick={() => setShowLocationPrompt(false)}>
-                {t('locationPromptDismiss', language)}
-              </Button>
-              <Button size="sm" className="flex-1 rounded-full" onClick={requestLocation}>
-                {t('locationPromptEnable', language)}
-              </Button>
-            </div>
+            {enablingLocation ? (
+              <div className="h-1 rounded-full location-enabling-bar mt-2" />
+            ) : (
+              <div className="flex items-center gap-2 pt-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex-1 rounded-full"
+                  onClick={() => { stopEnablingPoll(); setShowLocationPrompt(false); }}
+                >
+                  {t('locationPromptDismiss', language)}
+                </Button>
+                <Button size="sm" className="flex-1 rounded-full" onClick={requestLocation}>
+                  {t('locationPromptEnable', language)}
+                </Button>
+              </div>
+            )}
           </div>
         </motion.div>
       )}
@@ -711,11 +832,12 @@ const Index = () => {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0, opacity: 0 }}
               transition={{ delay: 0.2 }}
-              className="absolute right-4 bottom-40 z-20"
+              className="absolute right-4 bottom-52 z-20"
             >
               <Button
+                variant="outline"
                 size="icon"
-                className="h-12 w-12 rounded-full shadow-[0_10px_35px_rgba(0,0,0,0.22)] border border-white/35 bg-background/70 dark:bg-slate-900/70 backdrop-blur-2xl"
+                className="h-14 w-14 rounded-full shadow-xl border border-white/20 shrink-0 glass-panel"
                 onClick={() => {
                   if (userPos) setViewState(v => ({ ...v, latitude: userPos.lat, longitude: userPos.lng, zoom: 15 }));
                 }}

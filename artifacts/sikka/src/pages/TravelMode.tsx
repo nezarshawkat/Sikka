@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ExternalLink, Plane, Ship, TrainFront, Car, CheckCircle2, MapPinned } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
+import TaxiAppButton from '@/components/trip/TaxiAppButton';
 
 type Mode = 'flight' | 'train' | 'taxi' | 'nile';
 
@@ -189,12 +189,7 @@ export default function TravelMode() {
   const to = params.get('toLabel') || params.get('to') || '';
   const routeText = from && to ? `${from} -> ${to}` : '';
   const cityPair = `${normalizeCity(from)} ${normalizeCity(to)}`;
-  const taxiAppUrl = useMemo(() => {
-    const pickup = encodeURIComponent(from);
-    const dropoff = encodeURIComponent(to);
-    return `uber://?action=setPickup&pickup[formatted_address]=${pickup}&dropoff[formatted_address]=${dropoff}`;
-  }, [from, to]);
-  const bookingUrl = mode === 'taxi' ? taxiAppUrl : item.bookingUrl;
+  const bookingUrl = mode === 'taxi' ? null : item.bookingUrl;
   const recommended =
     mode === 'taxi' ||
     (mode === 'flight' && /cairo|alexandria|luxor|aswan|hurghada|sharm/.test(cityPair)) ||
@@ -262,9 +257,16 @@ export default function TravelMode() {
           ))}
         </div>
 
-        {bookingUrl ? (
+        {mode === 'taxi' ? (
+          <TaxiAppButton
+            fromName={from}
+            toName={to}
+            label={isAr ? item.bookingAr : item.bookingEn}
+            className="h-12 w-full rounded-[2rem] gap-2"
+          />
+        ) : bookingUrl ? (
           <Button asChild className="h-12 w-full rounded-[2rem] gap-2">
-            <a href={bookingUrl} target={mode === 'taxi' ? undefined : '_blank'} rel={mode === 'taxi' ? undefined : 'noopener noreferrer'}>
+            <a href={bookingUrl} target="_blank" rel="noopener noreferrer">
               {isAr ? item.bookingAr : item.bookingEn}
               <ExternalLink className="h-4 w-4" />
             </a>

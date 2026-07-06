@@ -34,9 +34,15 @@ export const MAP_MODES: Record<MapMode, { labelEn: string; labelAr: string; desc
   },
 };
 
+// "liberty" is OpenFreeMap's full-detail style (roads, buildings, transit,
+// and POI labels for landmarks/hospitals/mosques/etc.) and is the most
+// detailed option available, so it's also what "standard" uses by default.
+// "bright" was previously aliased to "positron" by mistake — positron has its
+// POIs intentionally stripped out for a minimal look, so that pairing made
+// the map look emptier than intended for anyone on the "bright" mode.
 const MAP_STYLE_URLS: Record<MapMode, string> = {
   standard: 'https://tiles.openfreemap.org/styles/liberty',
-  bright: 'https://tiles.openfreemap.org/styles/positron',
+  bright: 'https://tiles.openfreemap.org/styles/bright',
   minimal: 'https://tiles.openfreemap.org/styles/positron',
   dark: 'https://tiles.openfreemap.org/styles/dark',
 };

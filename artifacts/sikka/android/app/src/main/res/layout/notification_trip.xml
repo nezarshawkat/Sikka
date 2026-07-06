@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Custom trip notification content view (see SikkaTripNotificationPlugin.java).
+  Built as a RemoteViews layout (not a canvas-drawn bitmap) so text renders in
+  the app's real fonts at real, non-cropped sizes instead of being baked into
+  an image that Android's notification template may crop or rescale.
+
+  RemoteViews only supports a limited set of layouts/widgets — this sticks to
+  RelativeLayout + TextView/ImageView, which are all safe to inflate remotely.
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="64dp"
+    android:layoutDirection="ltr"
+    android:background="@drawable/bg_trip_pill"
+    android:paddingStart="9dp"
+    android:paddingEnd="9dp">
+
+    <!-- Left: mode icon circle -->
+    <ImageView
+        android:id="@+id/trip_icon_circle_bg"
+        android:layout_width="46dp"
+        android:layout_height="46dp"
+        android:layout_centerVertical="true"
+        android:layout_alignParentStart="true"
+        android:src="@drawable/bg_circle_pale" />
+
+    <ImageView
+        android:id="@+id/trip_icon_glyph"
+        android:layout_width="30dp"
+        android:layout_height="30dp"
+        android:layout_alignTop="@id/trip_icon_circle_bg"
+        android:layout_alignBottom="@id/trip_icon_circle_bg"
+        android:layout_alignStart="@id/trip_icon_circle_bg"
+        android:layout_alignEnd="@id/trip_icon_circle_bg"
+        android:layout_margin="8dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/sikka_notification_mark" />
+
+    <!-- Right: dynamically-colored route badge -->
+    <ImageView
+        android:id="@+id/trip_badge_circle_bg"
+        android:layout_width="46dp"
+        android:layout_height="46dp"
+        android:layout_centerVertical="true"
+        android:layout_alignParentEnd="true"
+        android:src="@drawable/bg_circle_white" />
+
+    <TextView
+        android:id="@+id/trip_badge_text"
+        android:layout_width="42dp"
+        android:layout_height="46dp"
+        android:layout_alignTop="@id/trip_badge_circle_bg"
+        android:layout_alignBottom="@id/trip_badge_circle_bg"
+        android:layout_alignStart="@id/trip_badge_circle_bg"
+        android:layout_alignEnd="@id/trip_badge_circle_bg"
+        android:gravity="center"
+        android:maxLines="1"
+        android:includeFontPadding="false"
+        android:autoSizeTextType="uniform"
+        android:autoSizeMinTextSize="7sp"
+        android:autoSizeMaxTextSize="11sp"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp"
+        android:fontFamily="@font/cairo_lat_extrabold"
+        android:text="Bus" />
+
+    <!-- Middle: title + subtitle, between the two circles -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerVertical="true"
+        android:layout_toEndOf="@id/trip_icon_circle_bg"
+        android:layout_toStartOf="@id/trip_badge_circle_bg"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/trip_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:fontFamily="@font/cairo_lat_bold"
+            android:text="Microbus" />
+
+        <TextView
+            android:id="@+id/trip_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:textColor="#E7F1FF"
+            android:textSize="12.5sp"
+            android:fontFamily="@font/cairo_lat_regular"
+            android:text="toward Ramses Square" />
+    </LinearLayout>
+</RelativeLayout>

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { runIntercitySearch, EGYPT_CITIES, getSuperJetCities } from "../lib/intercitySearch.js";
+import { runIntercitySearch, EGYPT_CITIES, getGovernorates, getSuperJetCities } from "../lib/intercitySearch.js";
 import { db } from "@workspace/db";
 import { interTripsCacheTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -53,6 +53,20 @@ router.get("/cities", (_req, res) => {
     lng: c.lng ?? null,
   }));
   res.json(cities);
+});
+
+// GET /api/intercity/governorates — for the governorate-to-governorate picker.
+// Each entry's hubCityId is what actually gets searched under the hood.
+router.get("/governorates", (_req, res) => {
+  const governorates = getGovernorates().map((g) => ({
+    governorate: g.governorate,
+    nameEn: g.nameEn,
+    nameAr: g.nameAr,
+    hubCityId: g.hubCity.id,
+    hubCityNameEn: g.hubCity.nameEn,
+    hubCityNameAr: g.hubCity.nameAr,
+  }));
+  res.json(governorates);
 });
 
 // GET /api/intercity/search?from=Cairo&to=Hurghada&date=2026-06-01&userLat=&userLng=

@@ -57,6 +57,16 @@ public class SikkaDiscoveryPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void stopAlwaysOn(PluginCall call) {
+        SikkaDiscoveryService.setEnabled(getContext(), false);
+        Intent intent = new Intent(getContext(), SikkaDiscoveryService.class);
+        getContext().stopService(intent);
+        JSObject result = new JSObject();
+        result.put("enabled", false);
+        call.resolve(result);
+    }
+
+    @PluginMethod
     public void getStatus(PluginCall call) {
         JSObject result = new JSObject();
         result.put("enabled", SikkaDiscoveryService.isEnabled(getContext()));

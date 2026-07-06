@@ -20,6 +20,16 @@ export function scorePlan(plan: EnginePlan): number {
   const crowd =
     1 - avg(legs.map((l) => crowdingPenalty(l.crowding))) * 0.5; // crowding lowers score
 
+  // Once a rider-discovered route has been reviewed and promoted to "active"
+  // it's earned real trust — and steering more riders onto it is the whole
+  // point of the discovery feature (more traffic means more confirmations).
+  // This is a modest tie-breaking nudge, not a dominant factor: a plan won't
+  // beat a meaningfully faster/cheaper one just for using a discovered line,
+  // but it will win close calls and ties.
+  const discoveredShare = legs.length
+    ? legs.filter((l) => l.dataSource === "discovery" && l.routeStatus === "active").length / legs.length
+    : 0;
+
   let w: { t: number; c: number; w: number; x: number; r: number; cr: number };
   if (plan.plan === "economic") w = { t: 0.15, c: 0.4, w: 0.12, x: 0.12, r: 0.11, cr: 0.1 };
   else if (plan.plan === "premium") w = { t: 0.4, c: 0.08, w: 0.18, x: 0.16, r: 0.1, cr: 0.08 };
@@ -31,7 +41,8 @@ export function scorePlan(plan: EnginePlan): number {
     w.w * walkScore +
     w.x * transferScore +
     w.r * reliability +
-    w.cr * crowd;
+    w.cr * crowd +
+    discoveredShare * 0.06;
 
   return Math.round(clamp01(score) * 100);
 }

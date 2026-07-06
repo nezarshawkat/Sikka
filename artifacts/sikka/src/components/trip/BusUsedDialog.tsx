@@ -96,7 +96,7 @@ export default function BusUsedDialog({
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-sm" hideClose>
         <DialogHeader>
           <DialogTitle>{t('busUsedTitle', language)}</DialogTitle>
         </DialogHeader>

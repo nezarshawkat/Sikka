@@ -220,6 +220,28 @@
     overflow: hidden;
   }
 
+  /* Slim indeterminate progress bar for "turning on your location…", reusing
+     the app's existing blue/cyan linear gradient for visual consistency with
+     .gradient-button-surface rather than introducing a new color. */
+  .location-enabling-bar {
+    position: relative;
+    overflow: hidden;
+    background: hsl(var(--primary) / 0.15);
+  }
+  .location-enabling-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 40%;
+    background: linear-gradient(90deg, #02cffa 0%, #258dff 100%);
+    border-radius: inherit;
+    animation: location-enabling-sweep 1.1s ease-in-out infinite;
+  }
+  @keyframes location-enabling-sweep {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
+  }
+
   .gradient-button-surface::before,
   .gradient-button-surface::after {
     content: none !important;

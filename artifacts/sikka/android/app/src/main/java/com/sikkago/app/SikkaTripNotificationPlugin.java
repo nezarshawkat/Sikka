@@ -7,13 +7,9 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Rect;
-import android.graphics.Typeface;
 import android.os.Build;
+import android.widget.RemoteViews;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
@@ -25,12 +21,26 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+/**
+ * Persistent "active trip" notification, built from res/layout/notification_trip.xml
+ * (or notification_trip_ar.xml for Arabic) via RemoteViews rather than a painted
+ * bitmap. That gives it real, non-cropped text in the app's actual Cairo font
+ * files (bundled under res/font/), instead of baking everything into an image
+ * that Android's notification template may crop or rescale unpredictably.
+ *
+ * Left circle: the Sikka mark, always the same — it's branding, not per-trip data.
+ *
+ * Right circle: the one dynamic part — tinted to the current leg's actual line
+ * color and labeled with the actual mode being ridden (e.g. "Bus", "Metro",
+ * "Microbus"), both provided by the caller rather than guessed here, since the
+ * JS side already knows the correct localized label and the real line color.
+ */
 @CapacitorPlugin(name = "SikkaTripNotification")
 public class SikkaTripNotificationPlugin extends Plugin {
     private static final String CHANNEL_ID = "sikka_active_trip";
     private static final int NOTIFICATION_ID = 3107;
     private static final int REQUEST_NOTIFICATIONS = 3108;
-    private static final int SIKKA_BLUE = Color.rgb(37, 141, 255);
+    private static final int SIKKA_BLUE = Color.parseColor("#258DFF");
 
     @PluginMethod
     public void show(PluginCall call) {
@@ -49,15 +59,13 @@ public class SikkaTripNotificationPlugin extends Plugin {
 
         ensureChannel(context);
 
-        String from = call.getString("from", "Current location");
         String to = call.getString("to", "Destination");
         String transportName = call.getString("transportName", "Sikka");
-        String icon = call.getString("icon", "");
-        String colorValue = call.getString("color", "#258DFF");
-        int color = parseColor(colorValue);
-        String routeLabel = shortenText(from, 22) + " → " + shortenText(to, 22);
-        String title = transportName;
-        String text = routeLabel;
+        String modeLabel = call.getString("modeLabel", "");
+        String language = call.getString("language", "en");
+        int color = parseColor(call.getString("color", "#258DFF"));
+        boolean isArabic = isArabicLang(language);
+        String subtitle = (isArabic ? "باتجاه " : "toward ") + shortenText(to, 26);
 
         Intent intent = new Intent(context, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -68,14 +76,14 @@ public class SikkaTripNotificationPlugin extends Plugin {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        Bitmap largeIcon = buildTripNotificationBitmap(icon, color, transportName, routeLabel);
+        RemoteViews views = buildTripViews(context, isArabic, color, transportName, subtitle, modeLabel);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.sikka_app_icon)
-            .setLargeIcon(largeIcon)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
+            .setContentTitle(transportName)
+            .setContentText(subtitle)
+            .setCustomContentView(views)
+            .setCustomBigContentView(views)
             .setColor(SIKKA_BLUE)
             .setColorized(false)
             .setOngoing(true)
@@ -95,6 +103,10 @@ public class SikkaTripNotificationPlugin extends Plugin {
     public void clear(PluginCall call) {
         NotificationManagerCompat.from(getContext()).cancel(NOTIFICATION_ID);
         call.resolve();
+    }
+
+    private boolean isArabicLang(String language) {
+        return language != null && language.toLowerCase(java.util.Locale.ROOT).startsWith("ar");
     }
 
     private void ensureChannel(Context context) {
@@ -119,58 +131,36 @@ public class SikkaTripNotificationPlugin extends Plugin {
         }
     }
 
-    private Bitmap buildTripNotificationBitmap(String icon, int color, String transportName, String routeLabel) {
-        int width = 512;
-        int height = 256;
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
+    private RemoteViews buildTripViews(
+        Context context,
+        boolean isArabic,
+        int badgeColor,
+        String title,
+        String subtitle,
+        String modeLabel
+    ) {
+        int layoutRes = isArabic ? R.layout.notification_trip_ar : R.layout.notification_trip;
+        RemoteViews views = new RemoteViews(context.getPackageName(), layoutRes);
 
-        Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        bgPaint.setColor(Color.WHITE);
-        canvas.drawRoundRect(0, 0, width, height, 36f, 36f, bgPaint);
+        // Right badge: the one part of this view that actually changes — tinted
+        // to the real line color and labeled with the real mode being ridden,
+        // instead of staying a fixed placeholder.
+        views.setInt(R.id.trip_badge_circle_bg, "setColorFilter", badgeColor);
+        views.setTextViewText(R.id.trip_badge_text, badgeTextFor(modeLabel, title));
 
-        Paint accentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        accentPaint.setColor(SIKKA_BLUE);
-        canvas.drawRoundRect(0, 0, width, 10f, 5f, 5f, accentPaint);
+        views.setTextViewText(R.id.trip_title, shortenText(title, 20));
+        views.setTextViewText(R.id.trip_subtitle, subtitle);
+        return views;
+    }
 
-        Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        circlePaint.setColor(color);
-        canvas.drawCircle(72f, 96f, 34f, circlePaint);
-
-        Paint ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        ringPaint.setStyle(Paint.Style.STROKE);
-        ringPaint.setStrokeWidth(6f);
-        ringPaint.setColor(Color.argb(70, 255, 255, 255));
-        canvas.drawCircle(72f, 96f, 28f, ringPaint);
-
-        Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        textPaint.setColor(Color.WHITE);
-        textPaint.setTextAlign(Paint.Align.CENTER);
-        textPaint.setTextSize(28f);
-        textPaint.setTypeface(Typeface.DEFAULT_BOLD);
-        Paint.FontMetrics metrics = textPaint.getFontMetrics();
-        float y = 96f - (metrics.ascent + metrics.descent) / 2f;
-        String glyph = icon == null || icon.trim().isEmpty() ? "●" : icon.trim();
-        canvas.drawText(glyph.length() > 2 ? glyph.substring(0, 2) : glyph, 72f, y, textPaint);
-
-        Paint titlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        titlePaint.setColor(Color.rgb(20, 24, 31));
-        titlePaint.setTextSize(30f);
-        titlePaint.setTypeface(Typeface.DEFAULT_BOLD);
-        titlePaint.setTextAlign(Paint.Align.LEFT);
-        canvas.drawText(shortenText(transportName, 18), 124f, 80f, titlePaint);
-
-        Paint bodyPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        bodyPaint.setColor(Color.rgb(91, 100, 114));
-        bodyPaint.setTextSize(24f);
-        bodyPaint.setTextAlign(Paint.Align.LEFT);
-        canvas.drawText(shortenText(routeLabel, 34), 124f, 122f, bodyPaint);
-
-        Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        dotPaint.setColor(color);
-        canvas.drawCircle(width - 46f, 96f, 16f, dotPaint);
-
-        return bitmap;
+    /** The real, already-localized mode label when we have one; otherwise a
+     *  short fallback derived from the transport name so the badge is never
+     *  left blank. */
+    private String badgeTextFor(String modeLabel, String transportName) {
+        if (modeLabel != null && !modeLabel.trim().isEmpty()) {
+            return modeLabel.trim();
+        }
+        return transportName == null ? "" : transportName.trim();
     }
 
     private String shortenText(String value, int max) {

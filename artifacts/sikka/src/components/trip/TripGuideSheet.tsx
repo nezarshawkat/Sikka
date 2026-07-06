@@ -10,6 +10,7 @@ import {
   AlertTriangle, Volume2, VolumeX,
 } from 'lucide-react';
 import { useVoiceInstructions } from '@/hooks/useVoiceInstructions';
+import TaxiAppButton from '@/components/trip/TaxiAppButton';
 
 const ICONS: Record<string, string> = {
   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
@@ -49,12 +50,6 @@ interface TripGuideSheetProps {
 
 const isTaxiLike = (seg: Pick<GuideSegment, 'icon' | 'transport_name'>) =>
   seg.icon === 'car' || /taxi|app|uber|careem|توك|تاكسي|أوبر|كريم/i.test(seg.transport_name);
-
-function taxiAppUrlForSegment(seg: Pick<GuideSegment, 'start_name' | 'end_name'>) {
-  const pickup = encodeURIComponent(seg.start_name);
-  const dropoff = encodeURIComponent(seg.end_name);
-  return `uber://?action=setPickup&pickup[formatted_address]=${pickup}&dropoff[formatted_address]=${dropoff}`;
-}
 
 function getIcon(icon: string) {
   return ICONS[icon] || '🚌';
@@ -199,11 +194,7 @@ export default function TripGuideSheet({
                   {isTaxiLike(seg) ? (
                     <div className="space-y-2">
                       <p className="text-sm font-semibold text-foreground">{seg.start_name} → {seg.end_name}</p>
-                      <Button asChild className="w-full h-11 rounded-[2rem] gap-2">
-                        <a href={taxiAppUrlForSegment(seg)}>
-                          <ExternalLink className="h-4 w-4" /> {t('openTaxiApps', language)}
-                        </a>
-                      </Button>
+                      <TaxiAppButton fromName={seg.start_name} toName={seg.end_name} label={t('openTaxiApps', language)} />
                     </div>
                   ) : seg.instructions && seg.instructions.length > 0 && (
                     <div>

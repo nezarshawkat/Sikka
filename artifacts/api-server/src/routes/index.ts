@@ -25,6 +25,7 @@ import reportsRouter from "./reports";
 import transportReportsRouter from "./transportReports";
 import seedEgyptTransitRouter from "./seedEgyptTransit";
 import trainsRouter from "./trains";
+import fixedStopsRepairRouter from "./fixedStopsRepair";
 import { clerkAuth } from "../middlewares/clerkAuth";
 
 const router: IRouter = Router();
@@ -71,6 +72,7 @@ router.use("/admin/seed-gtfs", seedGtfsRouter);
 router.use("/admin/re-enrich-routes", reEnrichRoutesRouter);
 // Safe route-geometry repair workflow: audit, candidate generation, anchor repair, accept/reject versions.
 router.use("/admin/routes", routeGeometryRepairRouter);
+router.use("/admin/fixed-stops-repair", fixedStopsRepairRouter);
 // POST /api/admin/seed-egypt-transit?dataset=lrt|brt|tram&offset=N
 //   - geocodes + road/rail-snaps Cairo LRT, Cairo BRT, and Alexandria Tram from
 //     real researched station lists, one line per call (call until done:true)

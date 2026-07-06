@@ -93,7 +93,7 @@ export default function MicrobusUsedDialog({
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-sm" hideClose>
         <DialogHeader>
           <DialogTitle>
             {t('microbus', language)} — {t('busUsedTitle', language)}
@@ -140,9 +140,6 @@ export default function MicrobusUsedDialog({
           </div>
 
           <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1" onClick={finish} disabled={submitting}>
-              {t('skip', language) || 'Skip'}
-            </Button>
             <Button className="flex-1" onClick={handleSubmit} disabled={submitting}>
               {t('submit', language)}
             </Button>

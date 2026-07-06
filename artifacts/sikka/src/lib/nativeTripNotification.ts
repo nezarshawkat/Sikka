@@ -1,11 +1,14 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import type { Language } from '@/lib/i18n';
 
 type TripNotificationPayload = {
   from: string;
   to: string;
   transportName: string;
-  icon: string;
+  /** Short, already-localized mode word shown in the colored badge, e.g. "Bus" / "أتوبيس". */
+  modeLabel: string;
   color: string;
+  language: Language;
 };
 
 type SikkaTripNotificationPlugin = {

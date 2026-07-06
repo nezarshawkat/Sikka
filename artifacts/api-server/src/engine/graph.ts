@@ -276,6 +276,8 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       frequencyMinutes: l.frequencyMinutes,
       observedSpeedKmh: l.observedSpeedKmh,
       hasFixedStops: l.hasFixedStops,
+      dataSource: l.dataSource,
+      routeStatus: l.routeStatus,
       path,
       stops,
       pathSuspect: maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM,

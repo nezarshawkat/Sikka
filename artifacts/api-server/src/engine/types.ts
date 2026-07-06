@@ -58,6 +58,12 @@ export interface LineInfo {
    *  when enough data exists. Preferred over the transport type's generic
    *  speed for this line's duration estimate whenever it's set. */
   observedSpeedKmh?: number | null;
+  /** Where this line's data came from ("seed" | "admin" | "gtfs" | "discovery" | ...). */
+  dataSource?: string;
+  /** Lifecycle status — "active" here means the line (including a
+   *  rider-discovered one) has been reviewed/accepted and is trustworthy
+   *  enough to route through, not just provisionally recorded. */
+  routeStatus?: string;
   // route_path coordinates as stored in DB: [lng, lat] pairs
   path: [number, number][] | null;
   stops: LineStop[]; // ordered along the line
@@ -133,6 +139,10 @@ export interface PlanLeg {
   geometry: [number, number][]; // [lng, lat]
   crowding: "low" | "medium" | "high";
   stopsCount?: number; // rail/bus stops ridden (for instructions)
+  /** Carried through from the underlying LineInfo so the scorer can give a
+   *  preference bonus to accepted, rider-discovered routes over generic ones. */
+  dataSource?: string;
+  routeStatus?: string;
 }
 
 export interface EnginePlan {

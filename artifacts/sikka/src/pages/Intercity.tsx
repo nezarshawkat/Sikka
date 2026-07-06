@@ -22,6 +22,15 @@ interface City {
   lng: number | null;
 }
 
+interface GovernorateOption {
+  governorate: string;
+  nameEn: string;
+  nameAr: string;
+  hubCityId: string;
+  hubCityNameEn: string;
+  hubCityNameAr: string;
+}
+
 interface Trip {
   operator: string;
   operatorSlug: string;
@@ -66,8 +75,11 @@ const Intercity = () => {
   const isAr = language === 'ar';
 
   const [cities, setCities] = useState<City[]>([]);
+  const [governorates, setGovernorates] = useState<GovernorateOption[]>([]);
   const [fromCity, setFromCity] = useState<City | null>(null);
   const [toCity, setToCity] = useState<City | null>(null);
+  const [fromGovernorate, setFromGovernorate] = useState<GovernorateOption | null>(null);
+  const [toGovernorate, setToGovernorate] = useState<GovernorateOption | null>(null);
   const [date, setDate] = useState(todayStr());
   const [trips, setTrips] = useState<Trip[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,6 +92,10 @@ const Intercity = () => {
   const [autoSearch, setAutoSearch] = useState(false);
 
   useEffect(() => {
+    fetch('/api/intercity/governorates')
+      .then((r) => r.json())
+      .then((data: GovernorateOption[]) => setGovernorates(data))
+      .catch(() => {});
     fetch('/api/intercity/cities')
       .then((r) => r.json())
       .then((data: City[]) => {
@@ -97,21 +113,36 @@ const Intercity = () => {
             : undefined;
         const fromMatch = byName(fromParam);
         const toMatch = byName(toParam);
-        setFromCity(fromMatch ?? data.find((c) => c.id === 'cairo') ?? null);
+        // Deliberately no "default to Cairo" (or to wherever the rider
+        // currently is) fallback here anymore — intercity travel is
+        // governorate-to-governorate by the rider's own choice, not an
+        // assumption based on their current location. Only preselect from
+        // an explicit ?from=/?to= handoff (e.g. from the home map flow).
+        if (fromMatch) setFromCity(fromMatch);
         if (toMatch) setToCity(toMatch);
         if (fromMatch && toMatch && fromMatch.id !== toMatch.id) setAutoSearch(true);
       })
       .catch(() => toast.error('Could not load cities'));
   }, []);
 
+  // Keeps the *displayed* governorate in sync with the resolved hub city,
+  // regardless of which of the two fetches above finishes first.
+  useEffect(() => {
+    if (!governorates.length) return;
+    if (fromCity) setFromGovernorate(governorates.find((g) => g.governorate === fromCity.governorate) ?? null);
+    if (toCity) setToGovernorate(governorates.find((g) => g.governorate === toCity.governorate) ?? null);
+  }, [governorates, fromCity, toCity]);
+
   const swapCities = () => {
     setFromCity(toCity);
     setToCity(fromCity);
+    setFromGovernorate(toGovernorate);
+    setToGovernorate(fromGovernorate);
   };
 
   const handleSearch = useCallback(async () => {
-    if (!fromCity || !toCity) { toast.error(isAr ? 'اختر المدينتين' : 'Select both cities'); return; }
-    if (fromCity.id === toCity.id) { toast.error(isAr ? 'اختر مدينتين مختلفتين' : 'Cities must differ'); return; }
+    if (!fromCity || !toCity) { toast.error(isAr ? 'اختر المحافظتين' : 'Select both governorates'); return; }
+    if (fromCity.id === toCity.id) { toast.error(isAr ? 'اختر محافظتين مختلفتين' : 'Governorates must differ'); return; }
     setLoading(true);
     setSearched(true);
     try {
@@ -161,9 +192,10 @@ const Intercity = () => {
       }
     : { latitude: 26.8206, longitude: 30.8025 };
 
-  const filteredCities = cities.filter((c) =>
-    c.nameEn.toLowerCase().includes(cityFilter.toLowerCase()) ||
-    c.nameAr.includes(cityFilter)
+  const filteredGovernorates = governorates.filter((g) =>
+    g.nameEn.toLowerCase().includes(cityFilter.toLowerCase()) ||
+    g.nameAr.includes(cityFilter) ||
+    g.governorate.toLowerCase().includes(cityFilter.toLowerCase())
   );
 
   const groupedByOperator = trips
@@ -221,8 +253,8 @@ const Intercity = () => {
                 className="w-full h-12 px-4 rounded-[1.5rem] border bg-background/70 text-start flex items-center gap-3 hover:border-primary transition-colors"
               >
                 <MapPin className="h-4 w-4 text-primary shrink-0" />
-                <span className={fromCity ? 'text-foreground font-medium' : 'text-muted-foreground text-sm'}>
-                  {fromCity ? (isAr ? fromCity.nameAr : fromCity.nameEn) : (isAr ? 'اختر المدينة' : 'Select city')}
+                <span className={fromGovernorate ? 'text-foreground font-medium' : 'text-muted-foreground text-sm'}>
+                  {fromGovernorate ? (isAr ? fromGovernorate.nameAr : fromGovernorate.nameEn) : (isAr ? 'اختر المحافظة' : 'Select governorate')}
                 </span>
               </button>
             </div>
@@ -242,8 +274,8 @@ const Intercity = () => {
                 className="w-full h-12 px-4 rounded-[1.5rem] border bg-background/70 text-start flex items-center gap-3 hover:border-primary transition-colors"
               >
                 <MapPin className="h-4 w-4 text-destructive shrink-0" />
-                <span className={toCity ? 'text-foreground font-medium' : 'text-muted-foreground text-sm'}>
-                  {toCity ? (isAr ? toCity.nameAr : toCity.nameEn) : (isAr ? 'اختر المدينة' : 'Select city')}
+                <span className={toGovernorate ? 'text-foreground font-medium' : 'text-muted-foreground text-sm'}>
+                  {toGovernorate ? (isAr ? toGovernorate.nameAr : toGovernorate.nameEn) : (isAr ? 'اختر المحافظة' : 'Select governorate')}
                 </span>
               </button>
             </div>
@@ -459,34 +491,44 @@ const Intercity = () => {
               <div className="p-4 border-b">
                 <p className="font-semibold text-center mb-3">
                   {showFromPicker
-                    ? (isAr ? 'اختر مدينة الانطلاق' : 'Select departure city')
-                    : (isAr ? 'اختر مدينة الوصول' : 'Select destination city')}
+                    ? (isAr ? 'اختر محافظة الانطلاق' : 'Select departure governorate')
+                    : (isAr ? 'اختر محافظة الوصول' : 'Select destination governorate')}
                 </p>
                 <input
                   autoFocus
                   value={cityFilter}
                   onChange={(e) => setCityFilter(e.target.value)}
-                  placeholder={isAr ? 'ابحث عن مدينة...' : 'Search city...'}
+                  placeholder={isAr ? 'ابحث عن محافظة...' : 'Search governorate...'}
                   className="w-full h-10 px-4 rounded-[1.5rem] border bg-background/70 text-sm focus:outline-none focus:border-primary"
                 />
               </div>
               <div className="overflow-y-auto flex-1 p-2">
-                {filteredCities.map((city) => (
+                {filteredGovernorates.map((gov) => (
                   <button
-                    key={city.id}
+                    key={gov.governorate}
                     className="w-full text-start px-4 py-3 rounded-[1.5rem] hover:bg-muted transition-colors flex items-center justify-between"
                     onClick={() => {
-                      if (showFromPicker) setFromCity(city);
-                      else setToCity(city);
+                      const hub = cities.find((c) => c.id === gov.hubCityId) ?? {
+                        id: gov.hubCityId,
+                        nameEn: gov.hubCityNameEn,
+                        nameAr: gov.hubCityNameAr,
+                        governorate: gov.governorate,
+                        lat: null,
+                        lng: null,
+                      };
+                      if (showFromPicker) { setFromCity(hub); setFromGovernorate(gov); }
+                      else { setToCity(hub); setToGovernorate(gov); }
                       setShowFromPicker(false);
                       setShowToPicker(false);
                     }}
                   >
                     <div>
-                      <p className="font-medium text-foreground text-sm">{isAr ? city.nameAr : city.nameEn}</p>
-                      <p className="text-xs text-muted-foreground">{city.governorate}</p>
+                      <p className="font-medium text-foreground text-sm">{isAr ? gov.nameAr : gov.nameEn}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {isAr ? `مركز البحث: ${gov.hubCityNameAr}` : `Searches via ${gov.hubCityNameEn}`}
+                      </p>
                     </div>
-                    {(showFromPicker ? fromCity?.id : toCity?.id) === city.id && (
+                    {(showFromPicker ? fromGovernorate?.governorate : toGovernorate?.governorate) === gov.governorate && (
                       <div className="h-2 w-2 rounded-full bg-primary" />
                     )}
                   </button>

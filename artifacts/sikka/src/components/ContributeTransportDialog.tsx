@@ -52,8 +52,9 @@ export default function ContributeTransportDialog({
   const [toArea, setToArea] = useState('');
   const [price, setPrice] = useState('');
   const [routeCompleteness, setRouteCompleteness] = useState<'full' | 'partial'>('full');
-  const [directionConfirmed, setDirectionConfirmed] = useState(true);
-  const [gpsQuality, setGpsQuality] = useState<'good' | 'ok' | 'poor'>('good');
+  // Direction is always taken to be the direction actually recorded by GPS —
+  // there's nothing for the rider to confirm, so this is no longer a UI toggle.
+  const directionConfirmed = true;
   const [trace, setTrace] = useState<[number, number][]>([]);
   const [timestamps, setTimestamps] = useState<number[]>([]);
   const [recording, setRecording] = useState(false);
@@ -93,8 +94,6 @@ export default function ContributeTransportDialog({
     setToArea('');
     setPrice('');
     setRouteCompleteness('full');
-    setDirectionConfirmed(true);
-    setGpsQuality('good');
     setTrace([]);
     setTimestamps([]);
     stopRecording();
@@ -123,11 +122,6 @@ export default function ContributeTransportDialog({
       () => {},
       { enableHighAccuracy: true, maximumAge: 0 },
     );
-  };
-
-  const handleClose = () => {
-    reset();
-    onClose();
   };
 
   const handleSubmit = async () => {
@@ -162,7 +156,6 @@ export default function ContributeTransportDialog({
           : null,
         routeCompleteness,
         directionConfirmed,
-        gpsQuality,
       });
       toast.success(t('contributeSubmitted', language));
       reset();
@@ -176,8 +169,8 @@ export default function ContributeTransportDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="max-w-sm">
+    <Dialog open={open} onOpenChange={() => {}}>
+      <DialogContent className="max-w-sm" hideClose>
         <DialogHeader>
           <DialogTitle>{t('contributeTitle', language)}</DialogTitle>
         </DialogHeader>
@@ -281,32 +274,6 @@ export default function ContributeTransportDialog({
             </Button>
           </div>
 
-          <div>
-            <label className="text-xs text-muted-foreground">GPS quality</label>
-            <div className="grid grid-cols-3 gap-2 mt-1">
-              {(['good', 'ok', 'poor'] as const).map((quality) => (
-                <Button
-                  key={quality}
-                  type="button"
-                  variant={gpsQuality === quality ? 'default' : 'outline'}
-                  className="h-9 rounded-[2rem] text-xs capitalize"
-                  onClick={() => setGpsQuality(quality)}
-                >
-                  {quality}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          <Button
-            type="button"
-            variant={directionConfirmed ? 'default' : 'outline'}
-            className="w-full h-10 rounded-[2rem] text-xs"
-            onClick={() => setDirectionConfirmed((value) => !value)}
-          >
-            {directionConfirmed ? 'Direction confirmed' : 'Direction not confirmed'}
-          </Button>
-
           {!isTraceSubmit && (
             <Button
               type="button"
@@ -325,9 +292,6 @@ export default function ContributeTransportDialog({
           )}
 
           <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1 h-11 rounded-[2rem]" onClick={handleClose} disabled={submitting}>
-              {t('cancel', language)}
-            </Button>
             <Button className="flex-1 h-11 rounded-[2rem]" onClick={handleSubmit} disabled={submitting}>
               {t('save', language)}
             </Button>

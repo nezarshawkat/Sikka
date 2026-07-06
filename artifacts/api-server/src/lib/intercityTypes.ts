@@ -58,3 +58,43 @@ export const EGYPT_CITIES: InterCityRecord[] = [
   { id: "nuweiba", nameEn: "Nuweiba", nameAr: "نويبع", normalizedName: "nuweiba", governorate: "South Sinai", lat: 29.0544, lng: 34.6602 },
   { id: "taba", nameEn: "Taba", nameAr: "طابا", normalizedName: "taba", governorate: "South Sinai", lat: 29.5003, lng: 34.9035 },
 ];
+
+export interface GovernorateOption {
+  /** The governorate's English name, used as the stable id/key. */
+  governorate: string;
+  nameEn: string;
+  nameAr: string;
+  /** The city used to represent this governorate in operator searches —
+   *  intercity bus/train data is keyed by city/terminal, not governorate, so
+   *  picking a governorate has to resolve to one concrete place under the
+   *  hood. Defaults to the first city listed for that governorate. */
+  hubCity: InterCityRecord;
+  /** Every city in this governorate, in case a hub needs to be swapped later. */
+  cities: InterCityRecord[];
+}
+
+/**
+ * Groups EGYPT_CITIES by governorate for governorate-to-governorate pickers.
+ * Egypt has 27 governorates; this covers the ones intercity travel data
+ * exists for. There's no separate "governorate name" field on InterCityRecord,
+ * so the hub city's own bilingual name doubles as the governorate's label —
+ * a reasonable stand-in since Egyptians commonly call a governorate by its
+ * capital city's name anyway (e.g. "Aswan" the city and "Aswan" the governorate).
+ */
+export function getGovernorates(): GovernorateOption[] {
+  const byGovernorate = new Map<string, InterCityRecord[]>();
+  for (const city of EGYPT_CITIES) {
+    const list = byGovernorate.get(city.governorate) ?? [];
+    list.push(city);
+    byGovernorate.set(city.governorate, list);
+  }
+  return Array.from(byGovernorate.entries())
+    .map(([governorate, cities]) => ({
+      governorate,
+      nameEn: cities[0].nameEn,
+      nameAr: cities[0].nameAr,
+      hubCity: cities[0],
+      cities,
+    }))
+    .sort((a, b) => a.nameEn.localeCompare(b.nameEn));
+}

@@ -355,6 +355,8 @@ function reconstruct(
         ],
         crowding: estimateCrowding(board.mode, startStop.coord, graph.heatPoints),
         stopsCount: namedRidden,
+        dataSource: line.dataSource,
+        routeStatus: line.routeStatus,
       });
       continue;
     }
@@ -932,6 +934,8 @@ async function buildAlternatives(graph: TransitGraph, leg: PlanLeg, planKey: Pla
         costEgp: directFare(type, dist),
         geometry: geom as [number, number][],
         stopsCount: undefined,
+        dataSource: line.dataSource,
+        routeStatus: line.routeStatus,
       };
       push({
         transport_type_id: type.id,
