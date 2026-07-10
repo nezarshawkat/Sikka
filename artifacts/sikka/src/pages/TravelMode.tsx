@@ -155,7 +155,7 @@ const DATA: Record<Mode, ModeData> = {
     stepsEn: ['Open a taxi app with pickup and destination filled in.', 'Confirm the fare estimate and pickup point.', 'Share the ride details and keep Sikka for public-transport legs.'],
     stepsAr: ['افتح تطبيق تاكسي بالبداية والوجهة.', 'أكد تقدير السعر ونقطة الالتقاء.', 'شارك تفاصيل الرحلة واستخدم سكة لأجزاء المواصلات العامة.'],
     services: TAXI_SERVICES,
-    bookingEn: 'Open taxi apps',
+    bookingEn: 'Share taxi route',
     bookingAr: 'فتح تطبيقات التاكسي',
   },
   nile: {

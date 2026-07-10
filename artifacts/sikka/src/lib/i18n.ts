@@ -661,7 +661,7 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
     nextSegment: 'Next segment',
     movedToNextSegment: 'Moved to next segment',
     markTripComplete: 'Mark trip complete',
-    openTaxiApps: 'Open in taxi apps',
+    openTaxiApps: 'Share taxi route',
     settingUpPlanTitle: 'Planning your trip',
     settingUpPlanBody: 'Finding the best way to get there.',
     setupStepGraph: 'Finding your route...',

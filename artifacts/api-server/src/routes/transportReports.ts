@@ -556,16 +556,16 @@ router.get("/", requireAdmin, async (req, res) => {
         sampleToArea: sql<string | null>`max(${transportReportsTable.toArea})`,
         avgPrice: sql<number | null>`avg(${transportReportsTable.priceEgp})`,
         gpsTraceCount: sql<number>`cast(sum(case when ${transportReportsTable.gpsTrace} is not null then 1 else 0 end) as int)`,
-        avgGpsPoints: sql<number | null>`avg(jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)))`,
+        avgGpsPoints: sql<number | null>`avg(case when jsonb_typeof(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)) = 'array' then jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)) else 0 end)`,
         fullTraceCount: sql<number>`cast(sum(case when ${transportReportsTable.discoveryMeta}->>'routeCompleteness' = 'full' then 1 else 0 end) as int)`,
         goodGpsCount: sql<number>`cast(sum(case when ${transportReportsTable.discoveryMeta}->>'gpsQuality' = 'good' then 1 else 0 end) as int)`,
-        confidenceScore: sql<number>`least(5, greatest(1, round((1 + least(count(*), 12) / 3.0 + least(avg(jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb))), 120) / 60.0)::numeric, 1)))`,
+        confidenceScore: sql<number>`least(5, greatest(1, round((1 + least(count(*), 12) / 3.0 + least(avg(case when jsonb_typeof(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)) = 'array' then jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)) else 0 end), 120) / 60.0)::numeric, 1)))`,
         recommendationScore: sql<number>`cast(count(*) as int)`,
         // Pick the GPS trace with the most points within each cluster as the representative
         // route geometry for the small preview map / full-screen map. Cast to text so the
         // result always arrives as a predictable JSON string, regardless of how the pg
         // driver infers the type of a computed jsonb-array subscript expression.
-        routeGeometry: sql<string | null>`((array_agg(${transportReportsTable.gpsTrace} order by jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)) desc nulls last))[1])::text`,
+        routeGeometry: sql<string | null>`((array_agg(${transportReportsTable.gpsTrace} order by case when jsonb_typeof(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)) = 'array' then jsonb_array_length(coalesce(${transportReportsTable.gpsTrace}, '[]'::jsonb)) else 0 end desc nulls last))[1])::text`,
       })
       .from(transportReportsTable)
       .groupBy(

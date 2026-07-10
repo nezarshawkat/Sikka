@@ -6,7 +6,19 @@ import { t } from '@/lib/i18n';
 import { Users, Route, Star, Train, TrendingUp, MessageSquare, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { getLocalRouteCatalog } from '@/lib/localRouteStore';
 
-interface AnalyticsStats { users: number; trips: number; reviews: number; routes: number }
+interface AnalyticsStats {
+  users: number;
+  trips: number;
+  reviews: number;
+  routes: number;
+  activeRoutes?: number;
+  needsReviewRoutes?: number;
+  discoveryRoutes?: number;
+  openReports?: number;
+  pendingDiscovery?: number;
+  suspectPaths?: number;
+  suspectPathsTotal?: number;
+}
 interface Review { rating: number; transportTypeId: string | null; createdAt: string }
 interface Report { reportType: string; status: string; createdAt: string }
 interface TransportType { id: string; nameEn: string; nameAr: string }
@@ -19,11 +31,11 @@ const AdminAnalytics = () => {
   const [types, setTypes] = useState<TransportType[]>([]);
 
   useEffect(() => {
-    api.getStatic<AnalyticsStats>('/analytics')
+    api.get<AnalyticsStats>('/analytics')
       .then((data) => setStats(data ?? { users: 0, trips: 0, reviews: 0, routes: 0 }))
       .catch(() => {});
-    api.getStatic<Review[]>('/reviews').then((d) => setReviews(d ?? [])).catch(() => {});
-    api.getStatic<Report[]>('/reports').then((d) => setReports(d ?? [])).catch(() => {});
+    api.get<Review[]>('/reviews').then((d) => setReviews(d ?? [])).catch(() => {});
+    api.get<Report[]>('/reports').then((d) => setReports(d ?? [])).catch(() => {});
     getLocalRouteCatalog<unknown, TransportType>().then((catalog) => setTypes(catalog.transportTypes)).catch(() => {});
   }, []);
 
@@ -77,11 +89,6 @@ const AdminAnalytics = () => {
     return (sum / reviews.length).toFixed(1);
   }, [reviews]);
 
-  const tripsPerDay = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    return stats.trips; // This is a simplified metric
-  }, [stats.trips]);
-
   return (
     <div className="space-y-6">
       {/* Main Stats Cards */}
@@ -120,10 +127,17 @@ const AdminAnalytics = () => {
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-1">
               <TrendingUp className="h-4 w-4 text-emerald-500" />
-              <p className="text-xs text-muted-foreground">Unique Routes</p>
+              <p className="text-xs text-muted-foreground">Route Health</p>
             </div>
-            <p className="text-2xl font-bold">{stats.routes}</p>
-            <p className="text-xs text-muted-foreground mt-2">in the system</p>
+            <p className="text-2xl font-bold">{stats.activeRoutes ?? 0}/{stats.routes}</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              {stats.discoveryRoutes ?? 0} discovered - {stats.needsReviewRoutes ?? 0} need review
+            </p>
+            {(stats.suspectPathsTotal ?? 0) > 0 && (
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {stats.suspectPaths ?? 0}/{stats.suspectPathsTotal} suspect paths
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -134,7 +148,9 @@ const AdminAnalytics = () => {
               <p className="text-xs text-muted-foreground">Total Reports</p>
             </div>
             <p className="text-2xl font-bold">{reports.length}</p>
-            <p className="text-xs text-muted-foreground mt-2">from community</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              {stats.openReports ?? reportStats.pending} open - {stats.pendingDiscovery ?? 0} discovery pending
+            </p>
           </CardContent>
         </Card>
       </div>

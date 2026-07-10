@@ -468,6 +468,25 @@ function closestPointOnPath(path: LngLat[], point: Coord): ClosestPoint {
   return best;
 }
 
+function closestStationOnLine(line: OfflineLine, point: Coord): ClosestPoint | null {
+  const stops = (line.stops ?? []).filter((stop) =>
+    stop?.name && Number.isFinite(stop.lat) && Number.isFinite(stop.lng),
+  );
+  if (!stops.length || line.path.length < 2) return null;
+  let best: ClosestPoint | null = null;
+  for (const stop of stops) {
+    const coord = { lat: stop.lat, lng: stop.lng };
+    const projected = closestPointOnPath(line.path, coord);
+    const candidate: ClosestPoint = {
+      coord,
+      index: projected.index,
+      distanceKm: haversineKm(point, coord),
+    };
+    if (!best || candidate.distanceKm < best.distanceKm) best = candidate;
+  }
+  return best;
+}
+
 function pathLengthKm(path: LngLat[]): number {
   let total = 0;
   for (let i = 1; i < path.length; i++) total += haversineKm({ lng: path[i - 1][0], lat: path[i - 1][1] }, { lng: path[i][0], lat: path[i][1] });
@@ -770,6 +789,10 @@ function segmentEndpointLabels(
 
 function rideSegment(candidate: Candidate, from: ClosestPoint, to: ClosestPoint, isArabic: boolean): ApiSegment {
   const route = slicePath(candidate.line.path, from.index, to.index);
+  if (route.length >= 2) {
+    route[0] = [from.coord.lng, from.coord.lat];
+    route[route.length - 1] = [to.coord.lng, to.coord.lat];
+  }
   const labels = segmentEndpointLabels(candidate.line, from.index, to.index, isArabic);
   const km = Math.max(0.2, pathLengthKm(route));
   const speed = effectiveSpeedKmh(candidate.line, candidate.type, candidate.mode);
@@ -981,7 +1004,9 @@ function buildCandidates(snapshot: OfflineSnapshot, point: Coord, planKey: PlanK
     if (!type) continue;
     const mode = modeOfType(type.nameEn);
     if (!allowed.has(mode)) continue;
-    const closest = closestPointOnPath(line.path, point);
+    const closest = (line.hasFixedStops || mode === "metro" || mode === "monorail" || mode === "train" || mode === "lrt" || mode === "brt")
+      ? closestStationOnLine(line, point) ?? closestPointOnPath(line.path, point)
+      : closestPointOnPath(line.path, point);
     if (closest.distanceKm <= maxKm) candidates.push({ line, type, mode, closest });
   }
   candidates.sort((a, b) => {
@@ -1208,8 +1233,8 @@ export async function planTripOnDevice(request: PlannerRequest): Promise<ApiPlan
   const plans = await Promise.all(picked.map(({ variant, candidate, railRecommended }) => (
     makePlan(candidate.segments, request, snapshot, variant, railRecommended)
   )));
-  const primary = plans.find((plan) => plan.rail_recommended)
-    ?? plans.find((plan) => plan.route_variant === "recommended")
+  const primary = plans.find((plan) => plan.route_variant === "recommended")
+    ?? plans.find((plan) => plan.rail_recommended)
     ?? plans[0];
   if (!primary) return null;
   return {

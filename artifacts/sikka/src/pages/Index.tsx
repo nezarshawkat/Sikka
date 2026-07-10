@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { User, MapPin, Navigation, Square, X, Focus } from 'lucide-react';
+import { User, MapPin, Navigation, Square, X, Focus, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
@@ -67,6 +67,9 @@ interface ActiveTripPlan extends GuidePlan {
   destination: string;
 }
 
+const isBusOrMicrobusSegment = (seg?: Pick<GuideSegment, 'icon' | 'transport_name'>) =>
+  !!seg && (seg.icon === 'bus' || /bus|microbus|Ù…ÙŠÙƒØ±ÙˆØ¨Ø§Øµ|Ø£ØªÙˆØ¨ÙŠØ³|Ø§ØªÙˆØ¨ÙŠØ³/i.test(seg.transport_name || ''));
+
 const Index = () => {
   const { user, isLoading, language } = useAuth();
   const navigate = useNavigate();
@@ -88,6 +91,10 @@ const Index = () => {
   const [currentSegIdx, setCurrentSegIdx] = useState(0);
   const [expanded, setExpanded] = useState(true);
   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
+  const [guideSheetHeight, setGuideSheetHeight] = useState(190);
+  const [isFollowingUser, setIsFollowingUser] = useState(true);
+  const [getOffPrompt, setGetOffPrompt] = useState<{ segIdx: number; reason: 'passed' | 'walking' } | null>(null);
+  const dismissedGetOffPromptsRef = useRef<Record<string, boolean>>({});
   const [contributionTrace, setContributionTrace] = useState<[number, number][]>([]);
   const [contributionTimestamps, setContributionTimestamps] = useState<number[]>([]);
   const [isContributingRoute, setIsContributingRoute] = useState(false);
@@ -395,6 +402,27 @@ const Index = () => {
     return false;
   };
 
+  const openSegmentReview = (segmentIndex = currentSegIdx) => {
+    if (!activeTrip) return;
+    const seg = activeTrip.segments[segmentIndex];
+    if (!seg) return;
+    setReviewSeg({
+      transport_type_id: seg.transport_type_id,
+      transport_name: seg.transport_name,
+      line_id: seg.line_id ?? null,
+      line_number: seg.line_number ?? null,
+    });
+    setReviewOpen(true);
+  };
+
+  const completeSegment = (segmentIndex = currentSegIdx) => {
+    if (!activeTrip) return;
+    setCurrentSegIdx(segmentIndex);
+    setGetOffPrompt(null);
+    if (openBusOrMicrobusUsedIfApplicable(segmentIndex)) return;
+    openSegmentReview(segmentIndex);
+  };
+
   const onApproachSegmentEnd = useCallback((segIdx: number) => {
     if (!activeTrip) return;
     if (segIdx < activeTrip.segments.length - 1) toast(t('approachingNext', language));
@@ -406,11 +434,21 @@ const Index = () => {
     // "I arrived" button, since a premature auto-advance is riskier on multi-stop
     // rides where GPS proximity to the final stop isn't necessarily "get off now".
     if (reviewOpen || busUsedOpen || microbusUsedOpen || tripReviewOpen) return;
-    openBusOrMicrobusUsedIfApplicable(segIdx);
+    const seg = activeTrip.segments[segIdx];
+    if (isBusOrMicrobusSegment(seg)) return;
+    completeSegment(segIdx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTrip, language, reviewOpen, busUsedOpen, microbusUsedOpen, tripReviewOpen]);
 
-  const { userPos, progress, remainingMinutes, isOffRoute } = useTripTracking({
+  const {
+    userPos,
+    progress,
+    remainingMinutes,
+    isOffRoute,
+    speedKmh,
+    segmentEndReached,
+    passedSegmentEnd,
+  } = useTripTracking({
     enabled: !!activeTrip,
     segments: activeTrip?.segments ?? [],
     currentSegIdx,
@@ -442,8 +480,8 @@ const Index = () => {
 
   useTripNotification({
     active: !!activeTrip,
-    from: activeTrip?.segments[0]?.start_name ?? '',
-    to: activeTrip?.destination ?? activeTrip?.segments[activeTrip.segments.length - 1]?.end_name ?? '',
+    from: currentSeg?.start_name ?? '',
+    to: currentSeg?.end_name ?? '',
     transportName: currentSeg?.transport_name ?? '',
     transportColor: currentSeg?.color ?? '#3B82F6',
     transportCode: currentSeg?.line_number || undefined,
@@ -451,6 +489,41 @@ const Index = () => {
     language,
     progress,
   });
+
+  useEffect(() => {
+    if (
+      !activeTrip
+      || !currentSeg
+      || !isBusOrMicrobusSegment(currentSeg)
+      || reviewOpen
+      || busUsedOpen
+      || microbusUsedOpen
+      || tripReviewOpen
+    ) {
+      setGetOffPrompt(null);
+      return;
+    }
+
+    const walkingAfterStop = segmentEndReached && speedKmh <= 7;
+    const stayedOnAfterStop = passedSegmentEnd && speedKmh > 7;
+    const reason = stayedOnAfterStop ? 'passed' : walkingAfterStop ? 'walking' : null;
+    if (!reason) return;
+
+    const key = `${currentSegIdx}:${reason}`;
+    if (dismissedGetOffPromptsRef.current[key]) return;
+    setGetOffPrompt({ segIdx: currentSegIdx, reason });
+  }, [
+    activeTrip,
+    currentSeg,
+    currentSegIdx,
+    speedKmh,
+    segmentEndReached,
+    passedSegmentEnd,
+    reviewOpen,
+    busUsedOpen,
+    microbusUsedOpen,
+    tripReviewOpen,
+  ]);
 
 
   const clearTrip = () => {
@@ -462,7 +535,28 @@ const Index = () => {
     setCurrentSegIdx(0);
     setExpanded(false);
     setRouteCoords([]);
+    setGetOffPrompt(null);
+    setIsFollowingUser(false);
   };
+
+  useEffect(() => {
+    if (activeTrip) setIsFollowingUser(true);
+  }, [activeTrip]);
+
+  useEffect(() => {
+    if (!activeTrip || !userPos || !mapRef.current || !isFollowingUser) return;
+    const bottomPadding = Math.min(window.innerHeight * 0.68, guideSheetHeight + 96);
+    try {
+      mapRef.current.easeTo({
+        center: [userPos.lng, userPos.lat],
+        zoom: Math.max(15, viewState.zoom),
+        padding: { top: 96, bottom: bottomPadding, left: 24, right: 24 },
+        duration: 450,
+      });
+    } catch {
+      setViewState((value) => ({ ...value, latitude: userPos.lat, longitude: userPos.lng, zoom: Math.max(15, value.zoom) }));
+    }
+  }, [activeTrip, userPos, isFollowingUser, guideSheetHeight, viewState.zoom]);
 
   const stopContributionRecording = useCallback(() => {
     if (contributionWatchRef.current != null && navigator.geolocation) {
@@ -507,19 +601,6 @@ const Index = () => {
   };
   const handleBack = () => setCurrentSegIdx((i) => Math.max(i - 1, 0));
 
-  const openSegmentReview = (segmentIndex = currentSegIdx) => {
-    if (!activeTrip) return;
-    const seg = activeTrip.segments[segmentIndex];
-    if (!seg) return;
-    setReviewSeg({
-      transport_type_id: seg.transport_type_id,
-      transport_name: seg.transport_name,
-      line_id: seg.line_id ?? null,
-      line_number: seg.line_number ?? null,
-    });
-    setReviewOpen(true);
-  };
-
   useEffect(() => {
     if (!activeTrip || reviewOpen || busUsedOpen || microbusUsedOpen || tripReviewOpen) return;
     const pending = sessionStorage.getItem(PENDING_FEEDBACK_KEY);
@@ -549,8 +630,7 @@ const Index = () => {
 
   const handleDone = () => {
     if (!activeTrip) return;
-    if (openBusOrMicrobusUsedIfApplicable(currentSegIdx)) return;
-    openSegmentReview();
+    completeSegment(currentSegIdx);
   };
 
   const handleDestinationSelect = async (suggestion: { place_name: string; center: [number, number] }) => {
@@ -773,6 +853,53 @@ const Index = () => {
               </Button>
             )}
         </motion.div>
+        {activeTrip && getOffPrompt && currentSeg && (
+          <motion.div
+            initial={{ y: -8, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -8, opacity: 0 }}
+            className="mt-2 rounded-[1.5rem] border border-primary/20 bg-background/85 backdrop-blur-xl shadow-xl p-3"
+          >
+            <div className="flex items-start gap-2">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <AlertTriangle className="h-4 w-4 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">
+                  Did you get off the {modeLabelFor(currentSeg)}?
+                </p>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  {getOffPrompt.reason === 'passed'
+                    ? 'It looks like you passed this leg destination while still moving faster than walking.'
+                    : 'It looks like you reached this leg destination or slowed down to walking speed.'}
+                </p>
+              </div>
+            </div>
+            <div className="mt-2 flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1 rounded-full"
+                onClick={() => {
+                  dismissedGetOffPromptsRef.current[`${getOffPrompt.segIdx}:${getOffPrompt.reason}`] = true;
+                  setGetOffPrompt(null);
+                }}
+              >
+                {t('no', language)}
+              </Button>
+              <Button
+                size="sm"
+                className="flex-1 rounded-full"
+                onClick={() => {
+                  stopContributionRecording();
+                  completeSegment(getOffPrompt.segIdx);
+                }}
+              >
+                {t('yes', language)}
+              </Button>
+            </div>
+          </motion.div>
+        )}
       </div>
 
       {/* "Turn on location" prompt — shown whenever location isn't granted yet,
@@ -826,20 +953,22 @@ const Index = () => {
           {/* Focus button — only shown on the minimized map (above the trip popup), matching
               the "nothing but map + route" rule for the minimized view. Hidden once the
               sheet is expanded since the map is no longer the focus. */}
-          {userPos && !expanded && (
+          {userPos && (
             <motion.div
               initial={{ scale: 0, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0, opacity: 0 }}
               transition={{ delay: 0.2 }}
-              className="absolute right-4 bottom-52 z-20"
+              className="absolute right-4 z-20"
+              style={{ bottom: `calc(${guideSheetHeight + 18}px + env(safe-area-inset-bottom, 0px))` }}
             >
               <Button
                 variant="outline"
                 size="icon"
-                className="h-14 w-14 rounded-full shadow-xl border border-white/20 shrink-0 glass-panel"
+                className="h-14 w-14 rounded-full shadow-xl border border-white/20 shrink-0 glass-panel !bg-background/55 hover:!bg-background/55 active:!bg-background/55 focus:!bg-background/55 !text-foreground hover:!text-foreground active:!text-foreground"
                 onClick={() => {
-                  if (userPos) setViewState(v => ({ ...v, latitude: userPos.lat, longitude: userPos.lng, zoom: 15 }));
+                  setIsFollowingUser(true);
+                  setViewState(v => ({ ...v, latitude: userPos.lat, longitude: userPos.lng, zoom: 15 }));
                 }}
                 title={t('focusOnLocation', language) || 'Focus on my location'}
               >
@@ -860,6 +989,7 @@ const Index = () => {
             onSwap={handleSwap}
             onReport={() => setReportOpen(true)}
             language={language}
+            onHeightChange={setGuideSheetHeight}
             isOffRoute={isOffRoute}
           />
         </>

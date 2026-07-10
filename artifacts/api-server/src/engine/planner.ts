@@ -99,7 +99,7 @@ function sliceLinePath(line: { path: [number, number][] | null }, a: Coord, b: C
   const hi = Math.max(ia, ib);
   const slice = path.slice(lo, hi + 1);
   const oriented = ia <= ib ? slice : slice.reverse();
-  return oriented.length >= 2 ? oriented : [[a.lng, a.lat], [b.lng, b.lat]];
+  return pinGeometryEndpoints(oriented.length >= 2 ? oriented : [[a.lng, a.lat], [b.lng, b.lat]], a, b);
 }
 
 function findClosestPathIndex(path: [number, number][], coord: Coord): number {
@@ -113,6 +113,16 @@ function findClosestPathIndex(path: [number, number][], coord: Coord): number {
     }
   }
   return minIdx;
+}
+
+function pinGeometryEndpoints(geometry: [number, number][], start: Coord, end: Coord): [number, number][] {
+  const pinned = geometry.length >= 2 ? geometry.map((point) => [point[0], point[1]] as [number, number]) : [];
+  const startPoint: [number, number] = [start.lng, start.lat];
+  const endPoint: [number, number] = [end.lng, end.lat];
+  if (pinned.length < 2) return [startPoint, endPoint];
+  pinned[0] = startPoint;
+  pinned[pinned.length - 1] = endPoint;
+  return pinned;
 }
 
 /**
@@ -321,6 +331,7 @@ function reconstruct(
         }
         const isForward = (boardLs?.stopIndex ?? 0) <= (endLs?.stopIndex ?? 0);
         geometry = isForward ? slice : slice.slice().reverse();
+        geometry = pinGeometryEndpoints(geometry, startStop.coord, endStop.coord);
       }
 
       const rideTime = rides.reduce((s, r) => s + r.timeMin, 0);

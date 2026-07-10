@@ -89,8 +89,8 @@ const AdminDiscovery = () => {
     setIsLoading(true);
     setLoadError(null);
     Promise.allSettled([
-      api.getStatic<DiscoveryRow[]>('/transport-reports?discovery=true'),
-      api.getStatic<TransportReport[]>('/transport-reports?status=pending'),
+      api.get<DiscoveryRow[]>('/transport-reports?discovery=true'),
+      api.get<TransportReport[]>('/transport-reports?status=pending'),
     ])
       .then(([discResult, pendingResult]) => {
         if (discResult.status === 'fulfilled') {

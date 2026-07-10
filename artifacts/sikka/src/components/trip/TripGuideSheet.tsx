@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -43,6 +43,7 @@ interface TripGuideSheetProps {
   onSwap: (segIdx: number, alt: GuideAlternative) => void;
   onReport?: () => void;
   language: Language;
+  onHeightChange?: (height: number) => void;
   /** True when the rider's GPS has drifted meaningfully off the expected
    *  path for the current segment — wrong vehicle, missed turn, etc. */
   isOffRoute?: boolean;
@@ -67,10 +68,12 @@ function formatClock(minsFromNow: number, lang: Language): string {
 export default function TripGuideSheet({
   plan, currentSegIdx, progress, remainingMinutes, expanded, onToggleExpand,
   onNext, onBack, onDone, onClose, onSwap, onReport, language,
+  onHeightChange,
   isOffRoute,
 }: TripGuideSheetProps) {
   const voice = useVoiceInstructions(language);
   const seg = plan.segments[currentSegIdx];
+  const sheetRef = useRef<HTMLDivElement | null>(null);
 
   // Reads the new segment's instructions aloud the moment the rider moves
   // onto it — this is the whole point of voice guidance: it works even when
@@ -86,6 +89,17 @@ export default function TripGuideSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSegIdx, isOffRoute, language]);
 
+  useEffect(() => {
+    if (!onHeightChange || !sheetRef.current) return;
+    const node = sheetRef.current;
+    const measure = () => onHeightChange(Math.ceil(node.getBoundingClientRect().height));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [onHeightChange, expanded, currentSegIdx]);
+
   if (!seg) return null;
   const isLast = currentSegIdx >= plan.segments.length - 1;
   const arrival = formatClock(remainingMinutes, language);
@@ -93,6 +107,7 @@ export default function TripGuideSheet({
   return (
     <div className="absolute bottom-0 left-0 right-0 z-30 px-3 pb-3">
       <motion.div
+        ref={sheetRef}
         layout
         initial={{ y: 140, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}

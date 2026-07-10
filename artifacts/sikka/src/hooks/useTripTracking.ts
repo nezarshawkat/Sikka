@@ -20,10 +20,13 @@ interface UseTripTrackingArgs {
 export interface UserPos {
   lat: number;
   lng: number;
+  timestamp: number;
 }
 
 const EARTH_R = 6371000; // metres
 const ARRIVAL_THRESHOLD_M = 120;
+const PASSED_END_THRESHOLD_M = 80;
+const WALKING_SPEED_MAX_KMH = 7;
 // How far the rider can be from the expected path before we consider them
 // drifted off it. Generous enough to absorb normal GPS noise and the width of
 // a real street, but still tight enough to flag "wrong vehicle" or "missed a
@@ -64,8 +67,14 @@ export function useTripTracking({
   const [segProgress, setSegProgress] = useState(0); // 0..1 within current segment
   const [isOffRoute, setIsOffRoute] = useState(false);
   const [offRouteDistanceM, setOffRouteDistanceM] = useState(0);
+  const [speedKmh, setSpeedKmh] = useState(0);
+  const [distanceToSegmentEndM, setDistanceToSegmentEndM] = useState<number | null>(null);
+  const [segmentEndReached, setSegmentEndReached] = useState(false);
+  const [passedSegmentEnd, setPassedSegmentEnd] = useState(false);
   const watchRef = useRef<number | null>(null);
   const approachedRef = useRef<Record<number, boolean>>({});
+  const reachedRef = useRef<Record<number, boolean>>({});
+  const lastSampleRef = useRef<UserPos | null>(null);
   const offRouteStreakRef = useRef(0);
   const onRouteStreakRef = useRef(0);
 
@@ -73,14 +82,37 @@ export function useTripTracking({
     if (!enabled || !navigator.geolocation) return;
     // Reset ephemeral tracking state for the new tracking session / trip.
     approachedRef.current = {};
+    reachedRef.current = {};
+    lastSampleRef.current = null;
     offRouteStreakRef.current = 0;
     onRouteStreakRef.current = 0;
     setProgress(0);
     setSegProgress(0);
     setIsOffRoute(false);
     setOffRouteDistanceM(0);
+    setSpeedKmh(0);
+    setDistanceToSegmentEndM(null);
+    setSegmentEndReached(false);
+    setPassedSegmentEnd(false);
     watchRef.current = navigator.geolocation.watchPosition(
-      (pos) => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      (pos) => {
+        const next: UserPos = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          timestamp: pos.timestamp || Date.now(),
+        };
+        const prev = lastSampleRef.current;
+        if (prev) {
+          const seconds = Math.max(0.1, (next.timestamp - prev.timestamp) / 1000);
+          const meters = haversine(prev.lat, prev.lng, next.lat, next.lng);
+          const instantaneous = (meters / seconds) * 3.6;
+          if (Number.isFinite(instantaneous) && instantaneous >= 0 && instantaneous <= 160) {
+            setSpeedKmh((old) => old <= 0 ? instantaneous : old * 0.65 + instantaneous * 0.35);
+          }
+        }
+        lastSampleRef.current = next;
+        setUserPos(next);
+      },
       () => {},
       { enableHighAccuracy: true, maximumAge: 3000 }
     );
@@ -91,6 +123,12 @@ export function useTripTracking({
       }
     };
   }, [enabled]);
+
+  useEffect(() => {
+    setDistanceToSegmentEndM(null);
+    setSegmentEndReached(!!reachedRef.current[currentSegIdx]);
+    setPassedSegmentEnd(false);
+  }, [currentSegIdx]);
 
   // Compute progress + auto-advance heuristic whenever the position changes.
   useEffect(() => {
@@ -167,8 +205,12 @@ export function useTripTracking({
       const segStartCum = currentSegIdx > 0 ? segDistances[currentSegIdx - 1] ?? 0 : 0;
       const segEndCum = segDistances[currentSegIdx] ?? totalDist;
       const segLen = Math.max(1, segEndCum - segStartCum);
-      const within = Math.max(0, Math.min(1, (nearestCum - segStartCum) / segLen));
+      const rawWithin = (nearestCum - segStartCum) / segLen;
+      const within = Math.max(0, Math.min(1, rawWithin));
       setSegProgress(within);
+      if (nearestCum > segEndCum + PASSED_END_THRESHOLD_M) {
+        setPassedSegmentEnd(true);
+      }
     }
 
     // Auto-advance heuristic: near the current segment's end point.
@@ -176,12 +218,28 @@ export function useTripTracking({
     const endPt = curSeg?.coords?.[curSeg.coords.length - 1];
     if (endPt) {
       const distToEnd = haversine(userPos.lat, userPos.lng, endPt[1], endPt[0]);
+      setDistanceToSegmentEndM(Math.round(distToEnd));
       if (distToEnd <= ARRIVAL_THRESHOLD_M && !approachedRef.current[currentSegIdx]) {
         approachedRef.current[currentSegIdx] = true;
+        reachedRef.current[currentSegIdx] = true;
+        setSegmentEndReached(true);
         onApproachSegmentEnd?.(currentSegIdx);
       }
+      if (distToEnd <= ARRIVAL_THRESHOLD_M) {
+        reachedRef.current[currentSegIdx] = true;
+        setSegmentEndReached(true);
+      }
+      if (
+        reachedRef.current[currentSegIdx]
+        && distToEnd > ARRIVAL_THRESHOLD_M + PASSED_END_THRESHOLD_M
+        && speedKmh > WALKING_SPEED_MAX_KMH
+      ) {
+        setPassedSegmentEnd(true);
+      }
+    } else {
+      setDistanceToSegmentEndM(null);
     }
-  }, [userPos, routeCoords, currentSegIdx, onApproachSegmentEnd, onOffRouteChange]);
+  }, [userPos, routeCoords, currentSegIdx, onApproachSegmentEnd, onOffRouteChange, speedKmh]);
 
   // Remaining minutes = remaining segments' durations, scaled by progress in current.
   const remainingMinutes = (() => {
@@ -195,5 +253,16 @@ export function useTripTracking({
     return Math.round(total);
   })();
 
-  return { userPos, progress, segProgress, remainingMinutes, isOffRoute, offRouteDistanceM };
+  return {
+    userPos,
+    progress,
+    segProgress,
+    remainingMinutes,
+    isOffRoute,
+    offRouteDistanceM,
+    speedKmh,
+    distanceToSegmentEndM,
+    segmentEndReached,
+    passedSegmentEnd,
+  };
 }

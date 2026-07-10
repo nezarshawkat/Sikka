@@ -1,28 +1,3 @@
-well look here in the uploaded image this is the design of the notification and i need to to be as this exactly... 
-
-Notification is not correct; you made the notification design inside the notification itself as a block inside it... i need it to be THE NOTIFICATION ITESLF TO BE WITH THIS BACKGROUND COLOR AND CONTAINS THE DETAILS INSIDE THE BLUE RECTANGLE AND THE LOGO BE THE APP NOTIFICATION ICON THE NOTIFICATION ITSEFT BACKGROUND COLOR BE THE SAME AS THE ONE INSIDE THE RECTANGLE AND REMOVE THE RECTANGEL ITSELF
-
-
-
-look at the needed code and edit on it and send the full code
-
-package com.sikkago.app;
-
-
-
-import android.Manifest;
-
-import android.app.NotificationChannel;
-
-import android.app.NotificationManager;
-
-import android.app.PendingIntent;
-
-import android.content.Context;
-
-import android.content.Intent;
-
-import android.content.pm.PackageManager;
 package com.sikkago.app;
 
 import android.Manifest;
@@ -47,9 +22,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 /**
- * Persistent "active trip" notification, built from res/layout/notification_trip.xml
- * (or notification_trip_ar.xml for Arabic) via RemoteViews rather than a painted
- * bitmap.
+ * Persistent active-trip notification, built from the native RemoteViews layouts.
  */
 @CapacitorPlugin(name = "SikkaTripNotification")
 public class SikkaTripNotificationPlugin extends Plugin {
@@ -75,16 +48,13 @@ public class SikkaTripNotificationPlugin extends Plugin {
 
         ensureChannel(context);
 
-        // Fetching live data sent from TypeScript
         String to = call.getString("to", "");
         String transportName = call.getString("transportName", "Sikka");
         String modeLabel = call.getString("modeLabel", "");
         String language = call.getString("language", "en");
         int color = parseColor(call.getString("color", "#258DFF"));
         boolean isArabic = isArabicLang(language);
-        
-        // Dynamically build the text
-        String subtitle = (isArabic ? "باتجاه " : "toward ") + shortenText(to, 30);
+        String subtitle = (isArabic ? "\u0628\u0627\u062A\u062C\u0627\u0647 " : "toward ") + shortenText(to, 30);
 
         Intent intent = new Intent(context, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -104,11 +74,11 @@ public class SikkaTripNotificationPlugin extends Plugin {
             .setCustomContentView(views)
             .setCustomBigContentView(views)
             .setColor(SIKKA_BLUE)
-            .setColorized(true) // FIX: Forces the entire native notification background to be blue
+            .setColorized(true)
             .setOngoing(true)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_MAX) // Required for colorized backgrounds
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .setContentIntent(pendingIntent);
 
@@ -163,7 +133,6 @@ public class SikkaTripNotificationPlugin extends Plugin {
 
         views.setInt(R.id.trip_badge_circle_bg, "setColorFilter", badgeColor);
         views.setTextViewText(R.id.trip_badge_text, badgeTextFor(modeLabel, title));
-
         views.setTextViewText(R.id.trip_title, shortenText(title, 40));
         views.setTextViewText(R.id.trip_subtitle, subtitle);
         return views;
@@ -179,7 +148,6 @@ public class SikkaTripNotificationPlugin extends Plugin {
     private String shortenText(String value, int max) {
         if (value == null) return "";
         String text = value.trim();
-        return text.length() <= max ? text : text.substring(0, Math.max(1, max - 1)) + "…";
+        return text.length() <= max ? text : text.substring(0, Math.max(1, max - 3)) + "...";
     }
 }
-the code u need ask for it if not one of those + gimme full code
