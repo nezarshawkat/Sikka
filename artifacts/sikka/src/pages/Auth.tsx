@@ -1,36 +1,44 @@
-import { useState, useEffect, useRef, type KeyboardEvent, type ClipboardEvent } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useUser, useSignIn } from '@clerk/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useAuth } from '@/contexts/AuthContext';
-import { t, Language } from '@/lib/i18n';
+import { useAuth, type Profile } from '@/contexts/AuthContext';
+import { t, type Language } from '@/lib/i18n';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, Shield, ArrowLeft, Users, Globe, UserRound, LocateFixed } from 'lucide-react';
+import { ArrowLeft, Globe2, Shield, UserRound, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import CountryCodeSelect, { countries, Country } from '@/components/auth/CountryCodeSelect';
 import { api } from '@/lib/api';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { languageNames } from '@/lib/i18n';
 
-type Step = 'language' | 'phone' | 'otp' | 'name' | 'location' | 'nationality' | 'admin';
+type Step = 'name' | 'nationality' | 'admin';
 
-const countriesByDialLength = [...countries].sort((a, b) => b.dial.length - a.dial.length);
-const stripNationalPrefix = (value: string) => value.replace(/^0/, '');
-const buildFullPhone = (country: Country, localNumber: string) =>
-  `${country.dial}${stripNationalPrefix(localNumber)}`;
-
-const detectCountryFromPhone = (value: string) => {
-  const normalized = value.startsWith('00') ? `+${value.slice(2)}` : value;
-  return countriesByDialLength.find((country) => normalized.startsWith(country.dial));
+type CountryOption = {
+  code: string;
+  name: string;
 };
+
+type DisplayNamesFactory = {
+  DisplayNames: new (locales: string[], options: { type: 'region' }) => { of(code: string): string | undefined };
+};
+
+const COUNTRY_CODES = [
+  'AF', 'AX', 'AL', 'DZ', 'AS', 'AD', 'AO', 'AI', 'AQ', 'AG', 'AR', 'AM', 'AW', 'AU', 'AT', 'AZ',
+  'BS', 'BH', 'BD', 'BB', 'BY', 'BE', 'BZ', 'BJ', 'BM', 'BT', 'BO', 'BQ', 'BA', 'BW', 'BV', 'BR',
+  'IO', 'BN', 'BG', 'BF', 'BI', 'KH', 'CM', 'CA', 'CV', 'KY', 'CF', 'TD', 'CL', 'CN', 'CX', 'CC',
+  'CO', 'KM', 'CG', 'CD', 'CK', 'CR', 'CI', 'HR', 'CU', 'CW', 'CY', 'CZ', 'DK', 'DJ', 'DM', 'DO',
+  'EC', 'SV', 'GQ', 'ER', 'EE', 'SZ', 'ET', 'FK', 'FO', 'FJ', 'FI', 'FR', 'GF', 'PF', 'TF', 'GA',
+  'GM', 'GE', 'DE', 'GH', 'GI', 'GR', 'GL', 'GD', 'GP', 'GU', 'GT', 'GG', 'GN', 'GW', 'GY', 'HT',
+  'HM', 'VA', 'HN', 'HK', 'HU', 'IS', 'IN', 'ID', 'IR', 'IQ', 'IE', 'IM', 'IL', 'IT', 'JM', 'JP',
+  'JE', 'JO', 'KZ', 'KE', 'KI', 'KP', 'KR', 'KW', 'KG', 'LA', 'LV', 'LB', 'LS', 'LR', 'LY', 'LI',
+  'LT', 'LU', 'MO', 'MG', 'MW', 'MY', 'MV', 'ML', 'MT', 'MH', 'MQ', 'MR', 'MU', 'YT', 'MX', 'FM',
+  'MD', 'MC', 'MN', 'ME', 'MS', 'MA', 'MZ', 'MM', 'NA', 'NR', 'NP', 'NL', 'NC', 'NZ', 'NI', 'NE',
+  'NG', 'NU', 'NF', 'MK', 'MP', 'NO', 'OM', 'PK', 'PW', 'PS', 'PA', 'PG', 'PY', 'PE', 'PH', 'PN',
+  'PL', 'PT', 'PR', 'QA', 'RE', 'RO', 'RU', 'RW', 'BL', 'SH', 'KN', 'LC', 'MF', 'PM', 'VC', 'WS',
+  'SM', 'ST', 'SA', 'SN', 'RS', 'SC', 'SL', 'SG', 'SX', 'SK', 'SI', 'SB', 'SO', 'ZA', 'GS', 'SS',
+  'ES', 'LK', 'SD', 'SR', 'SJ', 'SE', 'CH', 'SY', 'TW', 'TJ', 'TZ', 'TH', 'TL', 'TG', 'TK', 'TO',
+  'TT', 'TN', 'TR', 'TM', 'TC', 'TV', 'UG', 'UA', 'AE', 'GB', 'US', 'UM', 'UY', 'UZ', 'VU', 'VE',
+  'VN', 'VG', 'VI', 'WF', 'EH', 'YE', 'ZM', 'ZW',
+];
 
 const slideVariants = {
   enter: { x: 50, opacity: 0 },
@@ -38,270 +46,52 @@ const slideVariants = {
   exit: { x: -50, opacity: 0 },
 };
 
-const languageEntries = Object.entries(languageNames) as [Language, string][];
+function countryOptionsFor(language: Language): CountryOption[] {
+  const intlWithDisplayNames = typeof Intl !== 'undefined' ? Intl as unknown as DisplayNamesFactory : null;
+  const displayNames = intlWithDisplayNames && 'DisplayNames' in Intl
+    ? new intlWithDisplayNames.DisplayNames([language], { type: 'region' })
+    : null;
+
+  return COUNTRY_CODES
+    .map((code) => ({ code, name: displayNames?.of(code) || code }))
+    .filter((country) => country.code !== 'EG')
+    .sort((a, b) => a.name.localeCompare(b.name, language));
+}
 
 const Auth = () => {
-  const { user: clerkUser } = useUser();
-  const { signIn, setActive, isLoaded: signInLoaded } = useSignIn();
-  const { language, setLanguage, refreshProfile } = useAuth();
+  const { language, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const onboard = searchParams.get('onboard') === '1';
-  const adminParam = searchParams.get('step') === 'admin';
-
-  const [step, setStep] = useState<Step>(() => {
-    if (adminParam) return 'admin';
-    if (onboard) return 'nationality';
-    return 'language';
-  });
-
-  const [selectedLang, setSelectedLang] = useState<Language | ''>('');
-  const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]);
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [otpDigits, setOtpDigits] = useState<string[]>(Array(6).fill(''));
-  const [otpError, setOtpError] = useState(false);
-  const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
-  const [phoneProvider, setPhoneProvider] = useState<'twilio' | 'clerk' | 'dev'>('clerk');
+  const [step, setStep] = useState<Step>(() => (searchParams.get('step') === 'admin' ? 'admin' : 'name'));
   const [displayName, setDisplayName] = useState('');
   const [nationality, setNationality] = useState<'egyptian' | 'foreigner'>('egyptian');
+  const [selectedCountryCode, setSelectedCountryCode] = useState('US');
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    if (clerkUser && step === 'language') navigate('/');
-  }, [clerkUser, step, navigate]);
+  const countryOptions = useMemo(() => countryOptionsFor(language), [language]);
+  const selectedCountry = countryOptions.find((country) => country.code === selectedCountryCode) ?? countryOptions[0];
 
-  useEffect(() => {
-    if (onboard) setStep('nationality');
-    else if (adminParam) setStep('admin');
-  }, [onboard, adminParam]);
-
-  const fullPhone = buildFullPhone(selectedCountry, phoneNumber);
-  const otp = otpDigits.join('');
-
-  const resetOtp = () => {
-    setOtpDigits(Array(6).fill(''));
-    setOtpError(false);
-  };
-
-  const focusOtpBox = (index: number) => {
-    const el = otpRefs.current[index];
-    if (el) {
-      el.focus();
-      el.select();
-    }
-  };
-
-  const handleOtpChange = (index: number, raw: string) => {
-    const cleaned = raw.replace(/\D/g, '');
-    setOtpError(false);
-    setOtpDigits((prev) => {
-      const next = [...prev];
-      if (!cleaned) {
-        next[index] = '';
-        return next;
-      }
-      if (cleaned.length > 1) {
-        const chars = cleaned.slice(0, 6 - index).split('');
-        chars.forEach((ch, k) => {
-          next[index + k] = ch;
-        });
-        const focusTo = Math.min(index + chars.length, 5);
-        requestAnimationFrame(() => focusOtpBox(focusTo));
-        return next;
-      }
-      next[index] = cleaned;
-      if (index < 5) requestAnimationFrame(() => focusOtpBox(index + 1));
-      return next;
-    });
-  };
-
-  const handleOtpPaste = (index: number, e: ClipboardEvent<HTMLInputElement>) => {
-    const pasted = e.clipboardData.getData('text').replace(/\D/g, '');
-    if (!pasted) return;
-    e.preventDefault();
-    setOtpError(false);
-    setOtpDigits((prev) => {
-      const next = [...prev];
-      const chars = pasted.slice(0, 6 - index).split('');
-      chars.forEach((ch, k) => {
-        next[index + k] = ch;
+  const handleCreateRider = async () => {
+    const name = displayName.trim();
+    if (!name) return;
+    setIsLoading(true);
+    try {
+      const res = await api.post<{ token: string; profile: Profile }>('/auth/local-rider', {
+        displayName: name,
+        nationality: nationality === 'egyptian' ? 'Egyptian' : selectedCountry?.name || 'Foreigner',
+        countryCode: nationality === 'egyptian' ? 'EG' : selectedCountry?.code,
+        language,
       });
-      const focusTo = Math.min(index + chars.length, 5);
-      requestAnimationFrame(() => focusOtpBox(focusTo));
-      return next;
-    });
-  };
-
-  const handleOtpKeyDown = (index: number, e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Backspace') {
-      setOtpError(false);
-      if (otpDigits[index]) {
-        setOtpDigits((prev) => {
-          const next = [...prev];
-          next[index] = '';
-          return next;
-        });
-      } else if (index > 0) {
-        e.preventDefault();
-        focusOtpBox(index - 1);
-        setOtpDigits((prev) => {
-          const next = [...prev];
-          next[index - 1] = '';
-          return next;
-        });
-      }
-    } else if (e.key === 'ArrowLeft' && index > 0) {
-      focusOtpBox(index - 1);
-    } else if (e.key === 'ArrowRight' && index < 5) {
-      focusOtpBox(index + 1);
-    } else if (e.key === 'Enter' && otp.length === 6) {
-      handleVerifyOtp();
-    }
-  };
-
-  const handlePhoneInput = (value: string) => {
-    const normalized = value.replace(/[^\d+]/g, '');
-    const internationalValue = normalized.startsWith('00') ? `+${normalized.slice(2)}` : normalized;
-    if (internationalValue.startsWith('+')) {
-      const detectedCountry = detectCountryFromPhone(internationalValue);
-      if (detectedCountry) {
-        setSelectedCountry(detectedCountry);
-        setPhoneNumber(
-          internationalValue.slice(detectedCountry.dial.length).replace(/\D/g, '').replace(/^0/, '')
-        );
-        return;
-      }
-    }
-    setPhoneNumber(normalized.replace(/\D/g, ''));
-  };
-
-  const handleLanguageChange = (lang: Language) => {
-    setSelectedLang(lang);
-    setLanguage(lang);
-    setStep('phone');
-  };
-
-  const handleSendOtp = async () => {
-    const local = stripNationalPrefix(phoneNumber).trim();
-    if (!local || local.length < 6) {
-      toast.error(language === 'ar' ? 'أدخل رقم هاتف صحيح' : 'Enter a valid phone number');
-      return;
-    }
-    setIsLoading(true);
-    resetOtp();
-    try {
-      try {
-        await api.post('/auth/phone/start', { phoneNumber: fullPhone });
-        setPhoneProvider('twilio');
-        toast.success(language === 'ar' ? 'تم إرسال رمز التحقق!' : 'Verification code sent!');
-        setStep('otp');
-        return;
-      } catch {
-        setPhoneProvider('clerk');
-      }
-      if (!signInLoaded || !signIn) throw new Error('Auth not ready');
-      await signIn.create({ strategy: 'phone_code', phoneNumber: fullPhone });
-      toast.success(language === 'ar' ? 'تم إرسال رمز التحقق!' : 'Verification code sent!');
-      setStep('otp');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.toLowerCase().includes('not enabled') || msg.toLowerCase().includes('strategy')) {
-        setPhoneProvider('dev');
-        toast.info(
-          language === 'ar'
-            ? 'رمز التحقق: 123456 (وضع تجريبي)'
-            : 'OTP not yet wired — use 123456 to continue'
-        );
-        setStep('otp');
-      } else {
-        toast.error(msg || (language === 'ar' ? 'فشل إرسال الرمز' : 'Failed to send code'));
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (otp.length !== 6) return;
-    setIsLoading(true);
-    setOtpError(false);
-    try {
-      if (phoneProvider === 'twilio') {
-        const result = await api.post<{ token: string }>('/auth/phone/verify', { phoneNumber: fullPhone, code: otp });
-        localStorage.setItem('sikka_admin_token', result.token);
-        await refreshProfile();
-        setStep('name');
-        return;
-      }
-      if (!signIn) throw new Error('stub');
-      const result = await signIn.attemptFirstFactor({ strategy: 'phone_code', code: otp });
-      if (result.status === 'complete' && setActive) {
-        await setActive({ session: result.createdSessionId });
-        setStep('name');
-      }
-    } catch (err) {
-      if (phoneProvider === 'twilio') {
-        setOtpError(true);
-        toast.error(err instanceof Error ? err.message : (language === 'ar' ? 'رمز غير صحيح' : 'Invalid code'));
-        return;
-      }
-      if (otp === '123456') {
-        toast.info(language === 'ar' ? 'وضع تجريبي — جاري المتابعة' : 'Dev mode — continuing');
-        setStep('name');
-      } else {
-        setOtpError(true);
-        toast.error(language === 'ar' ? 'رمز غير صحيح' : 'Invalid code');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSetName = async () => {
-    if (!displayName.trim()) return;
-    setIsLoading(true);
-    try {
-      await api.put('/profile', { displayName: displayName.trim(), language });
-      await refreshProfile();
-    } catch {
-      // If the local dev OTP fallback is being used before a real session exists,
-      // keep the name in local storage so the app can still greet the rider later.
-      localStorage.setItem('sikka-display-name', displayName.trim());
-    } finally {
-      setIsLoading(false);
-      setStep('location');
-    }
-  };
-
-  const handleEnableLocation = async () => {
-    setIsLoading(true);
-    try {
-      if ('geolocation' in navigator) {
-        await new Promise<void>((resolve) => {
-          navigator.geolocation.getCurrentPosition(
-            () => resolve(),
-            () => resolve(),
-            { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 },
-          );
-        });
-      }
-    } finally {
-      setIsLoading(false);
-      setStep('nationality');
-    }
-  };
-
-  const handleSetNationality = async () => {
-    setIsLoading(true);
-    try {
-      await api.put('/profile', { nationality, language, displayName: displayName.trim() || undefined });
+      localStorage.removeItem('sikka_admin_token');
+      localStorage.setItem('sikka_session_token', res.token);
+      localStorage.setItem('sikka_local_profile', JSON.stringify(res.profile));
       await refreshProfile();
       navigate('/');
-    } catch {
-      navigate('/');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not sign in');
     } finally {
       setIsLoading(false);
     }
@@ -315,12 +105,14 @@ const Auth = () => {
         username: adminUsername,
         password: adminPassword,
       });
+      localStorage.removeItem('sikka_session_token');
+      localStorage.removeItem('sikka_local_profile');
       localStorage.setItem('sikka_admin_token', res.adminToken);
       await refreshProfile();
-      toast.success(language === 'ar' ? 'مرحباً بك، مسؤول!' : 'Welcome, Admin!');
+      toast.success(language === 'ar' ? 'Welcome, Admin!' : 'Welcome, Admin!');
       navigate('/admin');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : (language === 'ar' ? 'بيانات غير صحيحة' : 'Invalid credentials'));
+      toast.error(err instanceof Error ? err.message : 'Invalid credentials');
     } finally {
       setIsLoading(false);
     }
@@ -342,178 +134,13 @@ const Auth = () => {
       </motion.div>
 
       <AnimatePresence mode="wait">
-        {step === 'language' && (
-          <motion.div
-            key="language"
-            variants={slideVariants}
-            initial="enter" animate="center" exit="exit"
-            transition={{ duration: 0.2 }}
-            className="w-full max-w-sm"
-          >
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">{t('selectLanguage', language)}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Select
-                  value={selectedLang}
-                  onValueChange={(v) => handleLanguageChange(v as Language)}
-                >
-                  <SelectTrigger className="w-full">
-                    <div className="flex items-center gap-2">
-                      <Globe className="h-4 w-4" />
-                      <SelectValue placeholder="Select language" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {languageEntries.map(([code, name]) => (
-                      <SelectItem key={code} value={code}>
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {step === 'phone' && (
-          <motion.div
-            key="phone"
-            variants={slideVariants}
-            initial="enter" animate="center" exit="exit"
-            transition={{ duration: 0.2 }}
-            className="w-full max-w-sm"
-          >
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon" onClick={() => setStep('language')}>
-                    <ArrowLeft className="h-4 w-4" />
-                  </Button>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Phone className="h-5 w-5 text-primary" />
-                    {t('phone', language)}
-                  </CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">{t('country', language)}</label>
-                  <select
-                    value={selectedCountry.code}
-                    onChange={(e) => {
-                      const c = countries.find((c) => c.code === e.target.value);
-                      if (c) setSelectedCountry(c);
-                    }}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {countries.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.flag} {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex gap-2" dir="ltr">
-                  <CountryCodeSelect selected={selectedCountry} onSelect={setSelectedCountry} />
-                  <Input
-                    type="tel"
-                    inputMode="numeric"
-                    placeholder={t('enterPhone', language)}
-                    value={phoneNumber}
-                    onChange={(e) => handlePhoneInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSendOtp()}
-                    dir="ltr"
-                    className="text-base flex-1"
-                  />
-                </div>
-                <Button
-                  onClick={handleSendOtp}
-                  disabled={isLoading || stripNationalPrefix(phoneNumber).length < 6}
-                  className="w-full"
-                >
-                  {isLoading ? '...' : t('sendOtp', language)}
-                </Button>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {step === 'otp' && (
-          <motion.div
-            key="otp"
-            variants={slideVariants}
-            initial="enter" animate="center" exit="exit"
-            transition={{ duration: 0.2 }}
-            className="w-full max-w-sm"
-          >
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon" onClick={() => setStep('phone')}>
-                    <ArrowLeft className="h-4 w-4" />
-                  </Button>
-                  <CardTitle className="text-lg">{t('enterOtp', language)}</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground text-center">
-                  {language === 'ar'
-                    ? `تم إرسال الرمز إلى ${fullPhone}`
-                    : `Code sent to ${fullPhone}`}
-                </p>
-                <div className="flex justify-center gap-2" dir="ltr">
-                  {otpDigits.map((digit, i) => (
-                    <input
-                      key={i}
-                      ref={(el) => { otpRefs.current[i] = el; }}
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      maxLength={1}
-                      value={digit}
-                      autoFocus={i === 0}
-                      onChange={(e) => handleOtpChange(i, e.target.value)}
-                      onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                      onPaste={(e) => handleOtpPaste(i, e)}
-                      onFocus={(e) => e.target.select()}
-                      aria-label={`Digit ${i + 1}`}
-                      aria-invalid={otpError}
-                      className={`h-14 w-12 rounded-lg border-2 text-center text-2xl font-semibold outline-none transition-colors focus:ring-2 focus:ring-primary/40 ${
-                        otpError
-                          ? 'border-destructive bg-destructive/10 text-destructive'
-                          : digit
-                            ? 'border-primary bg-primary/5 text-primary'
-                            : 'border-input bg-background text-foreground'
-                      }`}
-                    />
-                  ))}
-                </div>
-                <Button
-                  onClick={handleVerifyOtp}
-                  disabled={isLoading || otp.length !== 6}
-                  className="w-full"
-                >
-                  {isLoading ? '...' : t('verifyOtp', language)}
-                </Button>
-                <button
-                  onClick={() => { resetOtp(); setStep('phone'); }}
-                  className="w-full text-sm text-muted-foreground hover:text-primary transition-colors"
-                >
-                  {language === 'ar' ? 'تغيير رقم الهاتف' : 'Change phone number'}
-                </button>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
         {step === 'name' && (
           <motion.div
             key="name"
             variants={slideVariants}
-            initial="enter" animate="center" exit="exit"
+            initial="enter"
+            animate="center"
+            exit="exit"
             transition={{ duration: 0.2 }}
             className="w-full max-w-sm"
           >
@@ -528,58 +155,19 @@ const Auth = () => {
                 <Input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && displayName.trim() && handleSetName()}
+                  onKeyDown={(e) => e.key === 'Enter' && displayName.trim() && setStep('nationality')}
                   placeholder={t('namePlaceholder', language)}
                   className="text-base"
+                  autoComplete="name"
+                  autoFocus
                 />
                 <Button
-                  onClick={handleSetName}
-                  disabled={isLoading || !displayName.trim()}
-                  className="w-full"
-                >
-                  {isLoading ? '...' : t('continue', language)}
-                </Button>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {step === 'location' && (
-          <motion.div
-            key="location"
-            variants={slideVariants}
-            initial="enter" animate="center" exit="exit"
-            transition={{ duration: 0.2 }}
-            className="w-full max-w-sm"
-          >
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
-                    <LocateFixed className="h-5 w-5" />
-                  </span>
-                  {language === 'ar' ? 'فعّل الموقع' : 'Enable location'}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  {language === 'ar'
-                    ? 'نستخدم موقعك لعرض أقرب نقطة ركوب وتخطيط الرحلة بدقة.'
-                    : 'Sikka uses your location to find nearby pickup points and plan accurate trips.'}
-                </p>
-                <Button
-                  onClick={handleEnableLocation}
-                  disabled={isLoading}
-                  className="w-full"
-                >
-                  {isLoading ? '...' : (language === 'ar' ? 'تفعيل الموقع' : 'Enable location')}
-                </Button>
-                <button
                   onClick={() => setStep('nationality')}
-                  className="w-full text-sm text-muted-foreground hover:text-primary transition-colors"
+                  disabled={!displayName.trim()}
+                  className="w-full"
                 >
-                  {language === 'ar' ? 'ليس الآن' : 'Not now'}
-                </button>
+                  {t('next', language)}
+                </Button>
               </CardContent>
             </Card>
           </motion.div>
@@ -589,16 +177,23 @@ const Auth = () => {
           <motion.div
             key="nationality"
             variants={slideVariants}
-            initial="enter" animate="center" exit="exit"
+            initial="enter"
+            animate="center"
+            exit="exit"
             transition={{ duration: 0.2 }}
             className="w-full max-w-sm"
           >
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Users className="h-5 w-5 text-primary" />
-                  {t('selectNationality', language)}
-                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="icon" onClick={() => setStep('name')}>
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Users className="h-5 w-5 text-primary" />
+                    {t('selectNationality', language)}
+                  </CardTitle>
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 <Button
@@ -615,9 +210,30 @@ const Auth = () => {
                 >
                   {t('foreigner', language)}
                 </Button>
+
+                {nationality === 'foreigner' && (
+                  <div className="space-y-2 pt-1">
+                    <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                      <Globe2 className="h-4 w-4 text-primary" />
+                      {t('country', language)}
+                    </label>
+                    <select
+                      value={selectedCountryCode}
+                      onChange={(e) => setSelectedCountryCode(e.target.value)}
+                      className="flex h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {countryOptions.map((country) => (
+                        <option key={country.code} value={country.code}>
+                          {country.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <Button
-                  onClick={handleSetNationality}
-                  disabled={isLoading}
+                  onClick={handleCreateRider}
+                  disabled={isLoading || !displayName.trim()}
                   className="w-full mt-4"
                 >
                   {isLoading ? '...' : t('continue', language)}
@@ -631,14 +247,16 @@ const Auth = () => {
           <motion.div
             key="admin"
             variants={slideVariants}
-            initial="enter" animate="center" exit="exit"
+            initial="enter"
+            animate="center"
+            exit="exit"
             transition={{ duration: 0.2 }}
             className="w-full max-w-sm"
           >
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon" onClick={() => setStep('language')}>
+                  <Button variant="ghost" size="icon" onClick={() => setStep('name')}>
                     <ArrowLeft className="h-4 w-4" />
                   </Button>
                   <CardTitle className="flex items-center gap-2 text-lg">

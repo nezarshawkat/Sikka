@@ -3,7 +3,7 @@ import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
-import { Users, Route, Star, Train, TrendingUp, MessageSquare, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Users, Route, Star, Train, TrendingUp, MessageSquare, AlertCircle, CheckCircle2, Globe2 } from 'lucide-react';
 import { getLocalRouteCatalog } from '@/lib/localRouteStore';
 
 interface AnalyticsStats {
@@ -18,6 +18,7 @@ interface AnalyticsStats {
   pendingDiscovery?: number;
   suspectPaths?: number;
   suspectPathsTotal?: number;
+  nationalities?: { nationality: string; count: number }[];
 }
 interface Review { rating: number; transportTypeId: string | null; createdAt: string }
 interface Report { reportType: string; status: string; createdAt: string }
@@ -89,6 +90,23 @@ const AdminAnalytics = () => {
     return (sum / reviews.length).toFixed(1);
   }, [reviews]);
 
+  const nationalityRows = useMemo(() => {
+    return (stats.nationalities ?? [])
+      .map((row) => ({
+        nationality: row.nationality || 'Unknown',
+        count: Number(row.count) || 0,
+      }))
+      .filter((row) => row.count > 0)
+      .sort((a, b) => b.count - a.count);
+  }, [stats.nationalities]);
+
+  const nationalityTotal = useMemo(
+    () => nationalityRows.reduce((sum, row) => sum + row.count, 0),
+    [nationalityRows],
+  );
+
+  const nationalityPalette = ['#258DFF', '#16A34A', '#F59E0B', '#DB2777', '#7C3AED', '#0891B2', '#EA580C', '#475569'];
+
   return (
     <div className="space-y-6">
       {/* Main Stats Cards */}
@@ -154,6 +172,72 @@ const AdminAnalytics = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Nationalities */}
+      <Card className="glass-panel rounded-[2rem] overflow-hidden">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2">
+              <Globe2 className="h-4 w-4 text-blue-500" />
+              Nationalities
+            </span>
+            <span className="text-xs font-medium text-muted-foreground">
+              {nationalityTotal.toLocaleString()} riders
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {nationalityRows.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-4">No nationality data yet</p>
+          ) : (
+            <>
+              <div className="h-3 rounded-full overflow-hidden bg-muted/30 flex">
+                {nationalityRows.slice(0, 8).map((row, index) => (
+                  <div
+                    key={row.nationality}
+                    className="h-full"
+                    title={`${row.nationality}: ${row.count}`}
+                    style={{
+                      width: `${(row.count / Math.max(1, nationalityTotal)) * 100}%`,
+                      backgroundColor: nationalityPalette[index % nationalityPalette.length],
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="space-y-2">
+                {nationalityRows.slice(0, 8).map((row, index) => {
+                  const percentage = (row.count / Math.max(1, nationalityTotal)) * 100;
+                  return (
+                    <div key={row.nationality} className="space-y-1">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="h-2.5 w-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: nationalityPalette[index % nationalityPalette.length] }}
+                          />
+                          <span className="font-medium truncate">{row.nationality}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {row.count.toLocaleString()} - {percentage.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${percentage}%`,
+                            backgroundColor: nationalityPalette[index % nationalityPalette.length],
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Report Status */}
       <Card className="glass-panel rounded-[2rem]">

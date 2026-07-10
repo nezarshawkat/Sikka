@@ -51,6 +51,11 @@ type GeoJSONLine = {
   features: { type: 'Feature'; geometry: { type: 'LineString'; coordinates: [number, number][] }; properties: Record<string, never> }[];
 };
 
+const toFiniteNumber = (value: unknown, fallback = 0): number => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
 const lineToGeoJSON = (value: unknown): GeoJSONLine | null => {
   let parsed = value;
   if (typeof parsed === 'string') {
@@ -226,7 +231,7 @@ const AdminDiscoveryContent = () => {
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary" className="gap-1">
                       <Star className="h-3 w-3 fill-current" />
-                      {(d.confidenceScore ?? 1).toFixed(1)}/5
+                      {toFiniteNumber(d.confidenceScore, 1).toFixed(1)}/5
                     </Badge>
                     <Badge variant="secondary" className="gap-1">
                       <Users className="h-3 w-3" />
@@ -248,7 +253,7 @@ const AdminDiscoveryContent = () => {
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  GPS traces: {d.gpsTraceCount ?? 0} · full: {d.fullTraceCount ?? 0} · good GPS: {d.goodGpsCount ?? 0} · avg points: {Math.round(d.avgGpsPoints ?? 0)}
+                  GPS traces: {d.gpsTraceCount ?? 0} · full: {d.fullTraceCount ?? 0} · good GPS: {d.goodGpsCount ?? 0} · avg points: {Math.round(toFiniteNumber(d.avgGpsPoints, 0))}
                 </p>
                 <p className="text-[11px] text-muted-foreground">
                   Approve only clusters whose merged trace follows one real route, not merely routes sharing the same streets.

@@ -54,7 +54,7 @@ const TrainSearch = () => {
   const navigate = useNavigate();
   const { language, profile } = useAuth();
   const isAr = language === 'ar';
-  const isForeigner = profile?.nationality === 'foreigner';
+  const isForeigner = !!profile?.nationality && !/^egyptian$/i.test(profile.nationality);
 
   const [governorates, setGovernorates] = useState<GovernorateOption[]>([]);
   const [fromGov, setFromGov] = useState<GovernorateOption | null>(null);

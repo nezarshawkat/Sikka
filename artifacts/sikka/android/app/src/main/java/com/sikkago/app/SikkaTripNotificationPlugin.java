@@ -7,9 +7,12 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.os.Build;
-import android.widget.RemoteViews;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
@@ -22,7 +25,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 /**
- * Persistent active-trip notification, built from the native RemoteViews layouts.
+ * Persistent active-trip notification.
  */
 @CapacitorPlugin(name = "SikkaTripNotification")
 public class SikkaTripNotificationPlugin extends Plugin {
@@ -52,7 +55,7 @@ public class SikkaTripNotificationPlugin extends Plugin {
         String transportName = call.getString("transportName", "Sikka");
         String modeLabel = call.getString("modeLabel", "");
         String language = call.getString("language", "en");
-        int color = parseColor(call.getString("color", "#258DFF"));
+        int badgeColor = parseColor(call.getString("color", "#258DFF"));
         boolean isArabic = isArabicLang(language);
         String subtitle = (isArabic ? "\u0628\u0627\u062A\u062C\u0627\u0647 " : "toward ") + shortenText(to, 30);
 
@@ -65,14 +68,12 @@ public class SikkaTripNotificationPlugin extends Plugin {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        RemoteViews views = buildTripViews(context, isArabic, color, transportName, subtitle, modeLabel);
-
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.sikka_app_icon)
-            .setContentTitle(transportName)
+            .setLargeIcon(buildBadgeIcon(context, badgeColor, badgeTextFor(modeLabel, transportName)))
+            .setContentTitle(shortenText(transportName, 40))
             .setContentText(subtitle)
-            .setCustomContentView(views)
-            .setCustomBigContentView(views)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(subtitle))
             .setColor(SIKKA_BLUE)
             .setColorized(true)
             .setOngoing(true)
@@ -120,29 +121,34 @@ public class SikkaTripNotificationPlugin extends Plugin {
         }
     }
 
-    private RemoteViews buildTripViews(
-        Context context,
-        boolean isArabic,
-        int badgeColor,
-        String title,
-        String subtitle,
-        String modeLabel
-    ) {
-        int layoutRes = isArabic ? R.layout.notification_trip_ar : R.layout.notification_trip;
-        RemoteViews views = new RemoteViews(context.getPackageName(), layoutRes);
-
-        views.setInt(R.id.trip_badge_circle_bg, "setColorFilter", badgeColor);
-        views.setTextViewText(R.id.trip_badge_text, badgeTextFor(modeLabel, title));
-        views.setTextViewText(R.id.trip_title, shortenText(title, 40));
-        views.setTextViewText(R.id.trip_subtitle, subtitle);
-        return views;
+    private String badgeTextFor(String modeLabel, String transportName) {
+        String source = modeLabel != null && !modeLabel.trim().isEmpty() ? modeLabel.trim() : transportName == null ? "" : transportName.trim();
+        if (source.isEmpty()) return "";
+        return source.length() <= 2 ? source : source.substring(0, 1).toUpperCase(java.util.Locale.ROOT);
     }
 
-    private String badgeTextFor(String modeLabel, String transportName) {
-        if (modeLabel != null && !modeLabel.trim().isEmpty()) {
-            return modeLabel.trim();
-        }
-        return transportName == null ? "" : transportName.trim();
+    private Bitmap buildBadgeIcon(Context context, int badgeColor, String text) {
+        int size = dp(context, 48);
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+
+        Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        circlePaint.setColor(badgeColor);
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, circlePaint);
+
+        Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        textPaint.setColor(Color.WHITE);
+        textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        textPaint.setTextAlign(Paint.Align.CENTER);
+        textPaint.setTextSize(dp(context, text.length() > 1 ? 18 : 22));
+        Paint.FontMetrics metrics = textPaint.getFontMetrics();
+        float y = size / 2f - (metrics.ascent + metrics.descent) / 2f;
+        canvas.drawText(text, size / 2f, y, textPaint);
+        return bitmap;
+    }
+
+    private int dp(Context context, int value) {
+        return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
 
     private String shortenText(String value, int max) {

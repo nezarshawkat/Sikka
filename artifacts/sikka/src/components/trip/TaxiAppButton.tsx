@@ -1,6 +1,7 @@
 import { Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { openNativeShareSheet } from '@/lib/nativeShare';
 
 interface TaxiAppButtonProps {
   fromName: string;
@@ -20,11 +21,12 @@ export default function TaxiAppButton({ fromName, toName, label, className }: Ta
     const url = routeShareUrl(fromName, toName);
     const text = `${fromName || 'Pickup'} -> ${toName || 'Destination'}`;
     try {
+      if (await openNativeShareSheet({ title: 'Sikka taxi route', text, url })) return;
       if (navigator.share) {
         await navigator.share({ title: 'Sikka taxi route', text, url });
         return;
       }
-      toast.error('Sharing is not available on this device');
+      window.open(url, '_blank', 'noopener,noreferrer');
     } catch (err) {
       if ((err as DOMException)?.name === 'AbortError') return;
       toast.error('Could not open the share sheet');

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { profilesTable, userRolesTable, phoneSessionsTable } from "@workspace/db";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
 
 const router = Router();
@@ -97,6 +97,35 @@ router.post("/phone/verify", async (req, res) => {
     return res.json({ token, profile });
   } catch (err) {
     return res.status(503).json({ error: err instanceof Error ? err.message : "Verification failed" });
+  }
+});
+
+router.post("/local-rider", async (req, res) => {
+  const displayName = String(req.body.displayName ?? "").trim();
+  const nationality = String(req.body.nationality ?? "Egyptian").trim() || "Egyptian";
+  const language = String(req.body.language ?? "en").trim().slice(0, 8) || "en";
+
+  if (!displayName) {
+    res.status(400).json({ error: "Name is required" });
+    return;
+  }
+
+  try {
+    const userId = `local:${crypto.randomUUID()}`;
+    const [profile] = await db.insert(profilesTable).values({
+      userId,
+      displayName: displayName.slice(0, 120),
+      language,
+      nationality: nationality.slice(0, 120),
+    }).returning();
+
+    const token = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    await db.insert(phoneSessionsTable).values({ userId, token, expiresAt });
+
+    res.json({ token, profile });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Could not create rider session" });
   }
 });
 

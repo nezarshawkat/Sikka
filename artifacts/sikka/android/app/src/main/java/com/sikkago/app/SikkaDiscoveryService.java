@@ -334,7 +334,7 @@ public class SikkaDiscoveryService extends Service implements LocationListener {
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 4219, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.sikka_app_icon)
-            .setContentTitle("Sikka is collecting trip data")
+            .setContentTitle("Route discovery")
             .setContentText(text)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
             .setCategory(NotificationCompat.CATEGORY_SERVICE)

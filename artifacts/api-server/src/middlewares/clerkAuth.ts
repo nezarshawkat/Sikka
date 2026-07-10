@@ -12,14 +12,19 @@ export async function clerkAuth(req: Request, _res: Response, next: NextFunction
   }
 
   const adminToken = req.headers["x-admin-token"] as string | undefined;
-  if (adminToken) {
+  const authorization = req.headers.authorization;
+  const bearerToken = authorization?.toLowerCase().startsWith("bearer ")
+    ? authorization.slice(7).trim()
+    : undefined;
+  const sessionToken = adminToken || bearerToken;
+  if (sessionToken) {
     try {
       const [session] = await db
         .select()
         .from(phoneSessionsTable)
         .where(
           and(
-            eq(phoneSessionsTable.token, adminToken),
+            eq(phoneSessionsTable.token, sessionToken),
             gt(phoneSessionsTable.expiresAt, new Date()),
           ),
         )

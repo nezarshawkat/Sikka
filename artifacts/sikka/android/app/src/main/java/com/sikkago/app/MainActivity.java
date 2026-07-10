@@ -1,6 +1,7 @@
 package com.sikkago.app;
 
 import android.app.PictureInPictureParams;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.os.Bundle;
 import android.os.Build;
@@ -16,8 +17,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SikkaLocationSettingsPlugin.class);
         registerPlugin(SikkaDiscoveryPlugin.class);
         registerPlugin(SikkaMapUiPlugin.class);
+        registerPlugin(SikkaSharePlugin.class);
         super.onCreate(savedInstanceState);
-        SikkaDiscoveryService.ensureStarted(this);
+        SikkaDiscoveryService.setEnabled(this, false);
+        stopService(new Intent(this, SikkaDiscoveryService.class));
     }
 
     @Override

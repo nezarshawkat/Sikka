@@ -81,8 +81,11 @@ export async function apiFetch<T = unknown>(
   };
 
   const adminToken = localStorage.getItem("sikka_admin_token");
+  const sessionToken = localStorage.getItem("sikka_session_token");
   if (adminToken) {
     headers["X-Admin-Token"] = adminToken;
+  } else if (sessionToken) {
+    headers.Authorization = `Bearer ${sessionToken}`;
   } else if (authTokenProvider) {
     try {
       const token = await authTokenProvider();

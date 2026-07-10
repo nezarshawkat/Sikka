@@ -4,10 +4,11 @@ import { api, setAuthTokenProvider } from '@/lib/api';
 import type { Language } from '@/lib/i18n';
 
 export interface Profile {
+  userId?: string;
   displayName: string | null;
   phone: string | null;
   language: string;
-  nationality: 'egyptian' | 'foreigner';
+  nationality: string | null;
   isAdmin?: boolean;
 }
 
@@ -49,6 +50,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const adminToken = typeof window !== 'undefined' ? localStorage.getItem('sikka_admin_token') : null;
+  const sessionToken = typeof window !== 'undefined' ? localStorage.getItem('sikka_session_token') : null;
 
   useEffect(() => {
     setAuthTokenProvider(async () => getToken());
@@ -57,7 +59,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchProfile = useCallback(async () => {
     const hasAdminToken = !!localStorage.getItem('sikka_admin_token');
-    if (!clerkUser && !hasAdminToken) {
+    const hasSessionToken = !!localStorage.getItem('sikka_session_token');
+    if (!clerkUser && !hasAdminToken && !hasSessionToken) {
       setProfile(null);
       setIsAdmin(false);
       setProfileLoaded(true);
@@ -69,8 +72,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAdmin(!!data.isAdmin);
       if (data.language) setLanguageState(data.language as Language);
     } catch {
-      setProfile(null);
-      setIsAdmin(false);
+      const cachedProfile = localStorage.getItem('sikka_local_profile');
+      if (hasSessionToken && cachedProfile) {
+        try {
+          const parsed = JSON.parse(cachedProfile) as Profile;
+          setProfile(parsed);
+          setIsAdmin(false);
+        } catch {
+          setProfile(null);
+          setIsAdmin(false);
+        }
+      } else {
+        setProfile(null);
+        setIsAdmin(false);
+      }
     } finally {
       setProfileLoaded(true);
     }
@@ -88,7 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('sikka-lang', lang);
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = lang;
-    if (clerkUser || localStorage.getItem('sikka_admin_token')) {
+    if (clerkUser || localStorage.getItem('sikka_admin_token') || localStorage.getItem('sikka_session_token')) {
       api.put('/profile', { language: lang }).catch(() => {});
     }
   };
@@ -106,6 +121,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
       localStorage.removeItem('sikka_admin_token');
     }
+    if (localStorage.getItem('sikka_session_token')) {
+      localStorage.removeItem('sikka_session_token');
+      localStorage.removeItem('sikka_local_profile');
+    }
     if (clerkUser) {
       await clerkSignOut();
     }
@@ -114,10 +133,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const hasAdminSession = !!adminToken;
+  const hasLocalSession = !!sessionToken;
   const effectiveUser = clerkUser
     ? { id: clerkUser.id }
     : hasAdminSession
     ? { id: 'sikka-admin' }
+    : hasLocalSession
+    ? { id: profile?.userId || 'sikka-rider' }
     : null;
 
   const isLoading = !userLoaded || (!!effectiveUser && !profileLoaded);

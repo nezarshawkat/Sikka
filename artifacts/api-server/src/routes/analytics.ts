@@ -19,6 +19,7 @@ router.get("/", requireAdmin, async (_req, res) => {
     openReports,
     pendingDiscovery,
     pathHealth,
+    nationalities,
   ] = await Promise.all([
     db.select({ count: count() }).from(profilesTable),
     db.select({ count: count() }).from(tripsTable),
@@ -30,6 +31,10 @@ router.get("/", requireAdmin, async (_req, res) => {
     db.select({ count: count() }).from(reportsTable).where(eq(reportsTable.status, "open")),
     db.select({ count: count() }).from(transportReportsTable).where(eq(transportReportsTable.status, "pending")),
     countSuspectPaths().catch(() => ({ suspect: 0, total: 0 })),
+    db
+      .select({ nationality: profilesTable.nationality, count: count() })
+      .from(profilesTable)
+      .groupBy(profilesTable.nationality),
   ]);
 
   res.json({
@@ -44,6 +49,10 @@ router.get("/", requireAdmin, async (_req, res) => {
     pendingDiscovery: pendingDiscovery[0]?.count ?? 0,
     suspectPaths: pathHealth.suspect,
     suspectPathsTotal: pathHealth.total,
+    nationalities: nationalities.map((row) => ({
+      nationality: row.nationality || "Unknown",
+      count: Number(row.count) || 0,
+    })),
   });
 });
 

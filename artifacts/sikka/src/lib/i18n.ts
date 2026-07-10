@@ -633,6 +633,8 @@ const translations: Record<Language, Record<string, string>> = {
 
 const supplementalTranslations: Record<Language, Record<string, string>> = {
   en: {
+    whatShouldWeCallYou: 'What should we call you?',
+    namePlaceholder: 'Enter your name',
     user: 'User',
     gpsUnavailable: 'GPS unavailable',
     focusOnLocation: 'Focus on my location',
@@ -690,6 +692,8 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
     microbusNumberOptional: 'Microbus route number or windshield sign (optional)',
   },
   ar: {
+    whatShouldWeCallYou: 'What should we call you?',
+    namePlaceholder: 'Enter your name',
     tookMicrobusInstead: 'ركبت ميكروباص بدلًا من ذلك',
     tookBusInstead: 'ركبت أتوبيس بدلًا من ذلك',
     microbusNumberOptional: 'رقم خط الميكروباص أو اللافتة الأمامية (اختياري)',
