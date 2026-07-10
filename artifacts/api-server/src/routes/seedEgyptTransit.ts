@@ -28,6 +28,18 @@ interface LineSpec {
   nameAr: string;
   stationsEn: string[];
   stationsAr: string[];
+  stations?: Array<{
+    nameEn: string;
+    nameAr: string;
+    lat: number;
+    lng: number;
+    access?: string;
+    serves?: string[];
+    interchange?: string[];
+    source?: string;
+  }>;
+  routePath?: { type: "LineString"; coordinates: [number, number][] };
+  routeQualityDetails?: Record<string, unknown>;
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -161,14 +173,32 @@ router.post("/", requireAdmin, async (req, res) => {
   const results: { line: string; status: string; coords?: number; geocodedStations?: number; totalStations?: number }[] = [];
 
   try {
+    const fixedStations = Array.isArray(line.stations) && line.stations.length >= 2
+      ? line.stations.filter((station) =>
+        Number.isFinite(station.lat) && Number.isFinite(station.lng)
+        && station.lat >= 21.5 && station.lat <= 31.8
+        && station.lng >= 24.5 && station.lng <= 36.9,
+      )
+      : [];
+    const hasFixedGeometry = fixedStations.length >= 2
+      && Array.isArray(line.routePath?.coordinates)
+      && line.routePath.coordinates.length >= 2;
+
     const cityHint = dataset.governorate === "Alexandria" ? "Alexandria" : "Cairo";
     const geocoded: [number, number][] = [];
     let geocodedCount = 0;
-    for (const stationName of line.stationsEn) {
-      const pt = await geocodeStopNominatim(stationName, cityHint);
-      if (pt) {
-        geocoded.push(pt);
-        geocodedCount++;
+    if (fixedStations.length >= 2) {
+      for (const station of fixedStations) {
+        geocoded.push([station.lng, station.lat]);
+      }
+      geocodedCount = geocoded.length;
+    } else {
+      for (const stationName of line.stationsEn) {
+        const pt = await geocodeStopNominatim(stationName, cityHint);
+        if (pt) {
+          geocoded.push(pt);
+          geocodedCount++;
+        }
       }
     }
 
@@ -177,17 +207,29 @@ router.post("/", requireAdmin, async (req, res) => {
     } else {
       const filtered = dropBacktrackingPoints(geocoded);
       const profile = dataset.key === "tram" ? "car" : dataset.key === "brt" ? "car" : "car"; // all three run on/along roads or dedicated rail alignment close to roads
-      const snapped = await snapToRoadsFree(filtered, profile);
+      const snapped = hasFixedGeometry ? line.routePath!.coordinates : await snapToRoadsFree(filtered, profile);
       const quality = checkPathQuality(snapped);
 
-      const fromArea = line.stationsEn[0];
-      const toArea = line.stationsEn[line.stationsEn.length - 1];
-      const fromAreaAr = line.stationsAr[0];
-      const toAreaAr = line.stationsAr[line.stationsAr.length - 1];
-      const stopsPayload = line.stationsEn.map((name, i) => {
+      const stationNamesEn = fixedStations.length >= 2 ? fixedStations.map((station) => station.nameEn) : line.stationsEn;
+      const stationNamesAr = fixedStations.length >= 2 ? fixedStations.map((station) => station.nameAr) : line.stationsAr;
+      const fromArea = stationNamesEn[0];
+      const toArea = stationNamesEn[stationNamesEn.length - 1];
+      const fromAreaAr = stationNamesAr[0];
+      const toAreaAr = stationNamesAr[stationNamesAr.length - 1];
+      const stopsPayload = stationNamesEn.map((name, i) => {
         const coordIdx = Math.min(i, geocoded.length - 1);
         const c = geocoded[coordIdx];
-        return { name, lat: c?.[1] ?? 0, lng: c?.[0] ?? 0 };
+        const fixed = fixedStations[i];
+        return {
+          name,
+          nameAr: stationNamesAr[i],
+          lat: c?.[1] ?? 0,
+          lng: c?.[0] ?? 0,
+          ...(fixed?.access ? { access: fixed.access } : {}),
+          ...(fixed?.serves ? { serves: fixed.serves } : {}),
+          ...(fixed?.interchange ? { interchange: fixed.interchange } : {}),
+          ...(fixed?.source ? { source: fixed.source } : {}),
+        };
       });
 
       // Replace any existing row for this exact line (idempotent re-seed).
@@ -205,7 +247,7 @@ router.post("/", requireAdmin, async (req, res) => {
         fromArea,
         toArea,
         governorate: dataset.governorate,
-        viaStops: line.stationsEn.slice(1, -1),
+        viaStops: stationNamesEn.slice(1, -1),
         stops: stopsPayload,
         routePath: { type: "LineString" as const, coordinates: snapped },
         routeDirection: "forward",
@@ -213,12 +255,13 @@ router.post("/", requireAdmin, async (req, res) => {
         frequencyMinutes: dataset.frequencyMinutes,
         hasFixedStops: dataset.hasFixedStops,
         isActive: true,
-        dataSource: "gtfs", // best-effort GTFS-equivalent: real station list + road/rail-snapped shape
+        dataSource: hasFixedGeometry ? "official_station_list_google_directions" : "gtfs", // best-effort GTFS-equivalent: real station list + road/rail-snapped shape
         sourcePriority: 30,
-        confidenceScore: quality.ok ? 0.85 : 0.55,
-        routeStatus: quality.ok ? "active" as const : "needs_review" as const,
-        needsReviewReason: quality.ok ? null : quality.reason,
-        verifiedAt: quality.ok ? new Date() : null,
+        confidenceScore: hasFixedGeometry ? 0.96 : quality.ok ? 0.85 : 0.55,
+        routeStatus: hasFixedGeometry || quality.ok ? "active" as const : "needs_review" as const,
+        needsReviewReason: hasFixedGeometry || quality.ok ? null : quality.reason,
+        routeQuality: line.routeQualityDetails ?? null,
+        verifiedAt: hasFixedGeometry || quality.ok ? new Date() : null,
         updatedAt: new Date(),
       };
 

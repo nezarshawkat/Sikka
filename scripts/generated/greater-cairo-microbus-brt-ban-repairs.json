@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-10T13:55:08.286Z",
+  "provider": "Google Directions API",
+  "strategy": "Cumulative final status after avoid=highways repair attempts for microbus lines overlapping the BRT phase-1 Ring Road ban area.",
+  "totals": {
+    "repaired": 5,
+    "keptForReview": 12,
+    "totalHandled": 17
+  },
+  "repaired": [
+    {
+      "lineId": "a74e0085-c599-470b-95ec-5f864eccde02",
+      "lineNumber": "IC181",
+      "nameEn": "IC181: 10th of Ramadan Station (Asher Men Ramadan) → Al Shorouq Water Station",
+      "status": "repaired",
+      "fromArea": "10th of Ramadan Station (Asher Men Ramadan)",
+      "toArea": "Al Shorouq Water Station",
+      "repairedBrtPhase1PathShare": 0.077,
+      "originalBrtPhase1PathShare": 0.186,
+      "pointCount": 361,
+      "googleDistanceText": "47.6 km",
+      "confidenceScore": 0.88
+    },
+    {
+      "lineId": "4a38b655-2581-4f2c-9993-dbf4c20799cd",
+      "lineNumber": "IC51",
+      "nameEn": "IC51: Al Moassasa → Mehwar Desert Rd",
+      "status": "repaired",
+      "fromArea": "Al Moassasa",
+      "toArea": "Mehwar Desert Rd",
+      "repairedBrtPhase1PathShare": 0.048,
+      "originalBrtPhase1PathShare": 0.241,
+      "pointCount": 327,
+      "googleDistanceText": "81.1 km",
+      "confidenceScore": 0.88
+    },
+    {
+      "lineId": "f2d394c7-d755-40f9-b627-81e4ea584781",
+      "lineNumber": "IC54",
+      "nameEn": "IC54: Al Moassasa → El Hossary",
+      "status": "repaired",
+      "fromArea": "Al Moassasa",
+      "toArea": "El Hossary",
+      "repairedBrtPhase1PathShare": 0.071,
+      "originalBrtPhase1PathShare": 0.189,
+      "pointCount": 333,
+      "googleDistanceText": "75.5 km",
+      "confidenceScore": 0.88
+    },
+    {
+      "lineId": "1305fa3b-e132-4359-8f57-5ba7e3ee9d95",
+      "lineNumber": "IC60",
+      "nameEn": "IC60: Laylat Al Qadr → New Marg",
+      "status": "repaired",
+      "fromArea": "Laylat Al Qadr",
+      "toArea": "New Marg",
+      "repairedBrtPhase1PathShare": 0.133,
+      "originalBrtPhase1PathShare": 0.223,
+      "pointCount": 329,
+      "googleDistanceText": "66.4 km",
+      "confidenceScore": 0.88
+    },
+    {
+      "lineId": "69224159-d2b1-44d2-8529-2427d0d608e8",
+      "lineNumber": "IC61",
+      "nameEn": "IC61: El Hossary → New Marg",
+      "status": "repaired",
+      "fromArea": "El Hossary",
+      "toArea": "New Marg",
+      "repairedBrtPhase1PathShare": 0.163,
+      "originalBrtPhase1PathShare": 0.25,
+      "pointCount": 338,
+      "googleDistanceText": "56.0 km",
+      "confidenceScore": 0.88
+    }
+  ],
+  "keptForReview": [
+    {
+      "lineId": "c003f4c1-5973-4337-bf9f-b632622671c1",
+      "lineNumber": "IC105",
+      "nameEn": "IC105: Hay Asher → Zahraa Madinet Nasr",
+      "status": "kept_for_review",
+      "fromArea": "Hay Asher",
+      "toArea": "Zahraa Madinet Nasr",
+      "brtPhase1PathShare": 0.25,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.222)"
+    },
+    {
+      "lineId": "7af537e3-51a7-4639-9746-fefb6d63c8dd",
+      "lineNumber": "IC13",
+      "nameEn": "IC13: Hyper → New Marg",
+      "status": "kept_for_review",
+      "fromArea": "Hyper",
+      "toArea": "New Marg",
+      "brtPhase1PathShare": 0.279,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.247)"
+    },
+    {
+      "lineId": "02410755-53a3-413a-beee-46ef0fcb2a4e",
+      "lineNumber": "IC137",
+      "nameEn": "IC137: Bonook → Alf Maskan",
+      "status": "kept_for_review",
+      "fromArea": "Bonook",
+      "toArea": "Alf Maskan",
+      "brtPhase1PathShare": 0.25,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.215)"
+    },
+    {
+      "lineId": "8fdd69f9-1d7c-41d1-9d8d-70ac0ceb2409",
+      "lineNumber": "IC175",
+      "nameEn": "IC175: Salam Nahda → Alf Maskan",
+      "status": "kept_for_review",
+      "fromArea": "Salam Nahda",
+      "toArea": "Alf Maskan",
+      "brtPhase1PathShare": 0.316,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.283)"
+    },
+    {
+      "lineId": "1be7fa66-3ab8-4c14-a8cb-892af6b3303a",
+      "lineNumber": "IC178",
+      "nameEn": "IC178: Al Shorouq Academy (Dorra) → Salam Nahda",
+      "status": "kept_for_review",
+      "fromArea": "Al Shorouq Academy (Dorra)",
+      "toArea": "Salam Nahda",
+      "brtPhase1PathShare": 0.194,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.23)"
+    },
+    {
+      "lineId": "d0156560-7e46-4233-9e4f-64ca2e49d124",
+      "lineNumber": "IC179",
+      "nameEn": "IC179: Shabab Stop Obour → Salam Nahda",
+      "status": "kept_for_review",
+      "fromArea": "Shabab Stop Obour",
+      "toArea": "Salam Nahda",
+      "brtPhase1PathShare": 0.204,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.213)"
+    },
+    {
+      "lineId": "0c38aca4-0ad5-4b11-a13b-6444f5c1e610",
+      "lineNumber": "IC180",
+      "nameEn": "IC180: Al Hijaz (Obour Police Station) → Salam Nahda",
+      "status": "kept_for_review",
+      "fromArea": "Al Hijaz (Obour Police Station)",
+      "toArea": "Salam Nahda",
+      "brtPhase1PathShare": 0.232,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.282)"
+    },
+    {
+      "lineId": "29799171-8857-4163-ad24-927fe498af57",
+      "lineNumber": "IC59",
+      "nameEn": "IC59: New Marg → Rehab Gate 13",
+      "status": "kept_for_review",
+      "fromArea": "New Marg",
+      "toArea": "Rehab Gate 13",
+      "brtPhase1PathShare": 0.759,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.447)"
+    },
+    {
+      "lineId": "4761e81b-287e-4403-b205-95f1522e74f8",
+      "lineNumber": "NC02",
+      "nameEn": "NC02: Zahraa Madinet Nasr → First Settlement Hospital",
+      "status": "kept_for_review",
+      "fromArea": "Zahraa Madinet Nasr",
+      "toArea": "First Settlement Hospital",
+      "brtPhase1PathShare": 0.4,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.398)"
+    },
+    {
+      "lineId": "6971167d-8785-40e9-858d-301bb3fa9d75",
+      "lineNumber": "NC03",
+      "nameEn": "NC03: Zahraa Madinet Nasr → Rehab Gate 13",
+      "status": "kept_for_review",
+      "fromArea": "Zahraa Madinet Nasr",
+      "toArea": "Rehab Gate 13",
+      "brtPhase1PathShare": 0.333,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.321)"
+    },
+    {
+      "lineId": "0bcae4e0-df85-42a4-beed-d878040256ac",
+      "lineNumber": "NC04",
+      "nameEn": "NC04: Zahraa Madinet Nasr → Misr 2000",
+      "status": "kept_for_review",
+      "fromArea": "Zahraa Madinet Nasr",
+      "toArea": "Misr 2000",
+      "brtPhase1PathShare": 0.577,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.545)"
+    },
+    {
+      "lineId": "bdd32ac6-f697-45fb-a0b0-958d3547a6c3",
+      "lineNumber": "NC05",
+      "nameEn": "NC05: Zahraa Madinet Nasr → Police Academy (South)",
+      "status": "kept_for_review",
+      "fromArea": "Zahraa Madinet Nasr",
+      "toArea": "Police Academy (South)",
+      "brtPhase1PathShare": 0.756,
+      "reason": "BRT phase-1 hard rule: microbus overlaps banned Ring Road segment; Candidate still overlaps BRT phase-1 path too much (0.788)"
+    }
+  ]
+}

@@ -1,0 +1,1776 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-10T13:55:08.286Z",
+  "provider": "Google Directions API",
+  "storagePermissionReference": "user-stated-google-storage-permission-2026-07-10",
+  "sourceUrls": {
+    "presidency": "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+    "ahramBan": "https://english.ahram.org.eg/News/546452.aspx",
+    "ahramFactbox": "https://english.ahram.org.eg/News/546581.aspx",
+    "cairoGovernorate": "https://cairo.gov.eg/ar/Interactive%20Services/Transportation/Pages/Frequent_bus_detials.aspx?NID=3",
+    "transportForCairoWorldBank": "https://transportforcairo.com/wp-content/uploads/2020/04/WB_GCR_Multi-modal-Transport-Stragey_2019_en_v2.pdf",
+    "pressPostStationDetails": "https://thepresspost.com/names-shuttle-bus-stations-egypt-ring-road-how-to-arrival/",
+    "dailyNewsStationDetails": "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+  },
+  "officialFacts": {
+    "phase": 1,
+    "corridor": "Cairo Ring Road",
+    "officialLengthKm": 35,
+    "stationCount": 14,
+    "start": "Ring Road and Alexandria Agricultural Road",
+    "end": "Police Academy",
+    "microbusRule": "Microbuses are banned on this phase-1 Ring Road stretch once BRT service is running."
+  },
+  "googleRoute": {
+    "summary": "Ring Rd",
+    "distanceMeters": 43233,
+    "distanceText": "43.2 km",
+    "computedPathKm": 43.22,
+    "startAddress": "5678+J6 Qalyub, Egypt",
+    "endAddress": "2CV9+RX2, Second New Cairo, Cairo Governorate 4731501, Egypt"
+  },
+  "stations": [
+    {
+      "nameEn": "Alexandria Agricultural Road",
+      "nameAr": "طريق الإسكندرية الزراعي",
+      "fraction": 0,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "Cairo-Alexandria Agricultural Road",
+        "Banha",
+        "Toukh",
+        "Qalyub",
+        "Shubra El Kheima",
+        "Ring Road access"
+      ],
+      "lat": 30.16411,
+      "lng": 31.21554,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "Colonel Ahmed Abdel Rahim",
+      "nameAr": "العقيد أحمد عبد الرحيم",
+      "fraction": 0.075,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "El-Sharqaweya",
+        "Mit Halfa",
+        "Mit Nama"
+      ],
+      "lat": 30.159287,
+      "lng": 31.228376,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "Shubra Banha",
+      "nameAr": "شبرا بنها",
+      "fraction": 0.145,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "Shubra-Banha Freeway",
+        "Al-Assar Axis"
+      ],
+      "lat": 30.149651,
+      "lng": 31.244039,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "Bahtim",
+      "nameAr": "بهتيم",
+      "fraction": 0.205,
+      "access": "Pedestrian bridge",
+      "serves": [
+        "Bahtim",
+        "West Shubra El Kheima",
+        "Eskoo Club Street"
+      ],
+      "lat": 30.152137,
+      "lng": 31.27043,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "Mostorod",
+      "nameAr": "مسطرد",
+      "fraction": 0.275,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "Mostorod",
+        "Ismailia Canal",
+        "Ismailia Agricultural Road",
+        "Belbeis Road",
+        "Amiriya",
+        "Matareya"
+      ],
+      "lat": 30.165489,
+      "lng": 31.297038,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "El Khosous",
+      "nameAr": "الخصوص",
+      "fraction": 0.35,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "El Khosous"
+      ],
+      "lat": 30.162906,
+      "lng": 31.330068,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "El Marg",
+      "nameAr": "المرج",
+      "fraction": 0.43,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "New El Marg",
+        "Marg-Khanka axis"
+      ],
+      "interchange": [
+        "Cairo Metro Line 1 at El Marg"
+      ],
+      "lat": 30.166463,
+      "lng": 31.365744,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "El Qalag",
+      "nameAr": "القلج",
+      "fraction": 0.505,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "El Qalag",
+        "Mohamed Naguib Road"
+      ],
+      "lat": 30.161138,
+      "lng": 31.398421,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "Zakat Foundation",
+      "nameAr": "مؤسسة الزكاة",
+      "fraction": 0.585,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "Zakat Foundation",
+        "Ain Shams"
+      ],
+      "lat": 30.149408,
+      "lng": 31.42896,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "General Ibrahim El Oraby",
+      "nameAr": "الفريق إبراهيم العرابي",
+      "fraction": 0.665,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "100 Street",
+        "El Herafeyeen"
+      ],
+      "lat": 30.134124,
+      "lng": 31.454862,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "El Salam",
+      "nameAr": "السلام",
+      "fraction": 0.735,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "El Salam",
+        "El Salam Station",
+        "El Nahda City",
+        "El Salam Stadium"
+      ],
+      "lat": 30.114241,
+      "lng": 31.45749,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "Adly Mansour",
+      "nameAr": "عدلي منصور",
+      "fraction": 0.815,
+      "access": "Non-standard interchange station",
+      "serves": [
+        "Gesr El Suez",
+        "Hikestep",
+        "El Obour",
+        "Ismailia Road"
+      ],
+      "interchange": [
+        "Cairo Metro Line 3",
+        "Cairo LRT",
+        "Cairo-Suez railway",
+        "SuperJet"
+      ],
+      "lat": 30.088024,
+      "lng": 31.438173,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "Suez Road",
+      "nameAr": "طريق السويس",
+      "fraction": 0.9,
+      "access": "Pedestrian tunnel",
+      "serves": [
+        "Cairo-Suez Road",
+        "Nasr City",
+        "Almaza",
+        "First Settlement",
+        "New Administrative Capital corridor"
+      ],
+      "lat": 30.061833,
+      "lng": 31.416862,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    },
+    {
+      "nameEn": "Police Academy",
+      "nameAr": "أكاديمية الشرطة",
+      "fraction": 1,
+      "access": "Pedestrian bridge",
+      "serves": [
+        "Police Academy",
+        "Zahraa Nasr City",
+        "First Settlement",
+        "Cairo Festival City"
+      ],
+      "lat": 30.04579,
+      "lng": 31.41944,
+      "source": "official_station_order_google_directions_ring_road_projection",
+      "sourceUrls": [
+        "https://www.presidency.eg/en/%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D8%B1%D9%8A%D8%B9-%D8%A7%D9%84%D9%82%D9%88%D9%85%D9%8A%D8%A9/projects162025/",
+        "https://www.dailynewsegypt.com/2025/06/01/egypt-launches-trial-operation-of-cairo-ring-road-brt-first-phase/"
+      ]
+    }
+  ],
+  "routePath": {
+    "type": "LineString",
+    "coordinates": [
+      [
+        31.21554,
+        30.16411
+      ],
+      [
+        31.21554,
+        30.16422
+      ],
+      [
+        31.2153,
+        30.16492
+      ],
+      [
+        31.21529,
+        30.165
+      ],
+      [
+        31.21533,
+        30.16503
+      ],
+      [
+        31.21712,
+        30.16534
+      ],
+      [
+        31.21776,
+        30.16545
+      ],
+      [
+        31.21791,
+        30.16547
+      ],
+      [
+        31.21785,
+        30.16582
+      ],
+      [
+        31.21738,
+        30.16707
+      ],
+      [
+        31.21728,
+        30.16733
+      ],
+      [
+        31.21714,
+        30.16749
+      ],
+      [
+        31.21692,
+        30.16772
+      ],
+      [
+        31.21669,
+        30.16796
+      ],
+      [
+        31.21653,
+        30.16816
+      ],
+      [
+        31.21658,
+        30.1682
+      ],
+      [
+        31.2169,
+        30.16867
+      ],
+      [
+        31.21698,
+        30.16877
+      ],
+      [
+        31.21705,
+        30.16882
+      ],
+      [
+        31.21793,
+        30.16995
+      ],
+      [
+        31.21861,
+        30.1708
+      ],
+      [
+        31.21896,
+        30.17123
+      ],
+      [
+        31.21959,
+        30.17199
+      ],
+      [
+        31.21988,
+        30.17236
+      ],
+      [
+        31.21994,
+        30.17231
+      ],
+      [
+        31.22056,
+        30.17195
+      ],
+      [
+        31.2212,
+        30.17158
+      ],
+      [
+        31.22144,
+        30.17148
+      ],
+      [
+        31.22288,
+        30.17118
+      ],
+      [
+        31.22408,
+        30.1709
+      ],
+      [
+        31.22467,
+        30.17073
+      ],
+      [
+        31.22492,
+        30.17069
+      ],
+      [
+        31.22554,
+        30.17075
+      ],
+      [
+        31.22603,
+        30.17079
+      ],
+      [
+        31.22657,
+        30.17083
+      ],
+      [
+        31.22676,
+        30.16962
+      ],
+      [
+        31.2274,
+        30.16556
+      ],
+      [
+        31.22779,
+        30.16312
+      ],
+      [
+        31.2285,
+        30.15848
+      ],
+      [
+        31.22939,
+        30.15256
+      ],
+      [
+        31.22975,
+        30.14955
+      ],
+      [
+        31.22982,
+        30.14911
+      ],
+      [
+        31.22985,
+        30.14891
+      ],
+      [
+        31.2298,
+        30.14884
+      ],
+      [
+        31.22972,
+        30.14847
+      ],
+      [
+        31.22966,
+        30.14832
+      ],
+      [
+        31.22956,
+        30.14819
+      ],
+      [
+        31.22926,
+        30.14801
+      ],
+      [
+        31.22899,
+        30.14794
+      ],
+      [
+        31.22875,
+        30.14792
+      ],
+      [
+        31.22832,
+        30.14792
+      ],
+      [
+        31.22811,
+        30.14801
+      ],
+      [
+        31.22802,
+        30.14811
+      ],
+      [
+        31.22796,
+        30.1482
+      ],
+      [
+        31.22794,
+        30.14833
+      ],
+      [
+        31.22795,
+        30.14846
+      ],
+      [
+        31.22801,
+        30.14858
+      ],
+      [
+        31.2282,
+        30.14873
+      ],
+      [
+        31.22856,
+        30.14889
+      ],
+      [
+        31.2288,
+        30.14899
+      ],
+      [
+        31.23017,
+        30.1491
+      ],
+      [
+        31.23144,
+        30.14922
+      ],
+      [
+        31.23373,
+        30.1494
+      ],
+      [
+        31.23448,
+        30.14949
+      ],
+      [
+        31.23501,
+        30.14954
+      ],
+      [
+        31.2354,
+        30.14958
+      ],
+      [
+        31.2374,
+        30.14966
+      ],
+      [
+        31.23938,
+        30.14967
+      ],
+      [
+        31.24167,
+        30.14966
+      ],
+      [
+        31.24309,
+        30.14966
+      ],
+      [
+        31.24727,
+        30.14962
+      ],
+      [
+        31.25285,
+        30.14958
+      ],
+      [
+        31.25475,
+        30.14953
+      ],
+      [
+        31.25641,
+        30.14953
+      ],
+      [
+        31.25761,
+        30.14951
+      ],
+      [
+        31.25844,
+        30.14949
+      ],
+      [
+        31.25932,
+        30.14945
+      ],
+      [
+        31.26153,
+        30.14951
+      ],
+      [
+        31.26294,
+        30.14969
+      ],
+      [
+        31.26458,
+        30.15002
+      ],
+      [
+        31.26553,
+        30.15025
+      ],
+      [
+        31.26715,
+        30.15072
+      ],
+      [
+        31.26825,
+        30.15113
+      ],
+      [
+        31.26965,
+        30.15174
+      ],
+      [
+        31.27207,
+        30.15297
+      ],
+      [
+        31.27425,
+        30.15405
+      ],
+      [
+        31.2779,
+        30.15582
+      ],
+      [
+        31.28122,
+        30.15753
+      ],
+      [
+        31.28217,
+        30.15795
+      ],
+      [
+        31.28383,
+        30.15878
+      ],
+      [
+        31.28515,
+        30.15944
+      ],
+      [
+        31.28574,
+        30.1597
+      ],
+      [
+        31.28623,
+        30.16
+      ],
+      [
+        31.28676,
+        30.1604
+      ],
+      [
+        31.28736,
+        30.16091
+      ],
+      [
+        31.28768,
+        30.16122
+      ],
+      [
+        31.28953,
+        30.16308
+      ],
+      [
+        31.29041,
+        30.16385
+      ],
+      [
+        31.29122,
+        30.16439
+      ],
+      [
+        31.29153,
+        30.16455
+      ],
+      [
+        31.29262,
+        30.16504
+      ],
+      [
+        31.29378,
+        30.16537
+      ],
+      [
+        31.29436,
+        30.16549
+      ],
+      [
+        31.29512,
+        30.16554
+      ],
+      [
+        31.29633,
+        30.16557
+      ],
+      [
+        31.29746,
+        30.16544
+      ],
+      [
+        31.29802,
+        30.16533
+      ],
+      [
+        31.29916,
+        30.16496
+      ],
+      [
+        31.30209,
+        30.16382
+      ],
+      [
+        31.30303,
+        30.16348
+      ],
+      [
+        31.30484,
+        30.16285
+      ],
+      [
+        31.30548,
+        30.16269
+      ],
+      [
+        31.30605,
+        30.16263
+      ],
+      [
+        31.30661,
+        30.16265
+      ],
+      [
+        31.3079,
+        30.16279
+      ],
+      [
+        31.31323,
+        30.16313
+      ],
+      [
+        31.3165,
+        30.1634
+      ],
+      [
+        31.3168,
+        30.1634
+      ],
+      [
+        31.318,
+        30.16345
+      ],
+      [
+        31.32106,
+        30.16332
+      ],
+      [
+        31.32305,
+        30.16322
+      ],
+      [
+        31.32428,
+        30.16314
+      ],
+      [
+        31.32778,
+        30.16298
+      ],
+      [
+        31.33055,
+        30.16289
+      ],
+      [
+        31.33342,
+        30.1629
+      ],
+      [
+        31.33741,
+        30.16301
+      ],
+      [
+        31.3382,
+        30.16306
+      ],
+      [
+        31.33942,
+        30.16315
+      ],
+      [
+        31.3404,
+        30.16326
+      ],
+      [
+        31.34207,
+        30.16345
+      ],
+      [
+        31.34954,
+        30.1644
+      ],
+      [
+        31.35507,
+        30.16517
+      ],
+      [
+        31.35871,
+        30.16563
+      ],
+      [
+        31.35922,
+        30.1657
+      ],
+      [
+        31.36214,
+        30.16609
+      ],
+      [
+        31.36445,
+        30.16635
+      ],
+      [
+        31.36696,
+        30.16657
+      ],
+      [
+        31.36964,
+        30.16669
+      ],
+      [
+        31.37326,
+        30.1667
+      ],
+      [
+        31.376,
+        30.16657
+      ],
+      [
+        31.37679,
+        30.16652
+      ],
+      [
+        31.37768,
+        30.16643
+      ],
+      [
+        31.37943,
+        30.16628
+      ],
+      [
+        31.38041,
+        30.16615
+      ],
+      [
+        31.38077,
+        30.16609
+      ],
+      [
+        31.38285,
+        30.16581
+      ],
+      [
+        31.38315,
+        30.16576
+      ],
+      [
+        31.38595,
+        30.1652
+      ],
+      [
+        31.38847,
+        30.16461
+      ],
+      [
+        31.38884,
+        30.16452
+      ],
+      [
+        31.39128,
+        30.1638
+      ],
+      [
+        31.39326,
+        30.16318
+      ],
+      [
+        31.39463,
+        30.16271
+      ],
+      [
+        31.39575,
+        30.16228
+      ],
+      [
+        31.39804,
+        30.16131
+      ],
+      [
+        31.39906,
+        30.16085
+      ],
+      [
+        31.39992,
+        30.16054
+      ],
+      [
+        31.40145,
+        30.16008
+      ],
+      [
+        31.40224,
+        30.15981
+      ],
+      [
+        31.40329,
+        30.15934
+      ],
+      [
+        31.40427,
+        30.15876
+      ],
+      [
+        31.40457,
+        30.15855
+      ],
+      [
+        31.40676,
+        30.15664
+      ],
+      [
+        31.40749,
+        30.156
+      ],
+      [
+        31.40822,
+        30.15545
+      ],
+      [
+        31.40934,
+        30.15464
+      ],
+      [
+        31.41257,
+        30.15238
+      ],
+      [
+        31.41451,
+        30.15115
+      ],
+      [
+        31.41607,
+        30.15034
+      ],
+      [
+        31.41762,
+        30.14943
+      ],
+      [
+        31.41909,
+        30.14847
+      ],
+      [
+        31.41949,
+        30.14826
+      ],
+      [
+        31.42073,
+        30.14784
+      ],
+      [
+        31.42142,
+        30.14771
+      ],
+      [
+        31.42195,
+        30.14767
+      ],
+      [
+        31.4231,
+        30.14772
+      ],
+      [
+        31.42358,
+        30.1478
+      ],
+      [
+        31.42417,
+        30.14796
+      ],
+      [
+        31.42488,
+        30.14822
+      ],
+      [
+        31.42572,
+        30.14861
+      ],
+      [
+        31.42633,
+        30.14883
+      ],
+      [
+        31.42785,
+        30.14928
+      ],
+      [
+        31.4288,
+        30.1494
+      ],
+      [
+        31.42964,
+        30.14944
+      ],
+      [
+        31.43018,
+        30.14938
+      ],
+      [
+        31.43082,
+        30.14929
+      ],
+      [
+        31.43124,
+        30.14917
+      ],
+      [
+        31.43166,
+        30.14905
+      ],
+      [
+        31.43212,
+        30.14885
+      ],
+      [
+        31.43265,
+        30.14857
+      ],
+      [
+        31.43299,
+        30.14834
+      ],
+      [
+        31.43375,
+        30.14767
+      ],
+      [
+        31.43402,
+        30.14737
+      ],
+      [
+        31.43423,
+        30.1471
+      ],
+      [
+        31.43455,
+        30.14662
+      ],
+      [
+        31.43475,
+        30.14621
+      ],
+      [
+        31.43663,
+        30.1416
+      ],
+      [
+        31.43719,
+        30.14011
+      ],
+      [
+        31.43765,
+        30.13905
+      ],
+      [
+        31.43825,
+        30.13786
+      ],
+      [
+        31.43873,
+        30.13714
+      ],
+      [
+        31.43926,
+        30.13651
+      ],
+      [
+        31.43986,
+        30.13593
+      ],
+      [
+        31.44054,
+        30.1354
+      ],
+      [
+        31.44139,
+        30.13493
+      ],
+      [
+        31.4422,
+        30.13461
+      ],
+      [
+        31.44308,
+        30.13437
+      ],
+      [
+        31.44364,
+        30.13428
+      ],
+      [
+        31.44457,
+        30.13421
+      ],
+      [
+        31.45038,
+        30.13405
+      ],
+      [
+        31.45119,
+        30.13403
+      ],
+      [
+        31.452,
+        30.13406
+      ],
+      [
+        31.4565,
+        30.13416
+      ],
+      [
+        31.45738,
+        30.13411
+      ],
+      [
+        31.45814,
+        30.13399
+      ],
+      [
+        31.45912,
+        30.13375
+      ],
+      [
+        31.4601,
+        30.1334
+      ],
+      [
+        31.46072,
+        30.1331
+      ],
+      [
+        31.46154,
+        30.13262
+      ],
+      [
+        31.46213,
+        30.1322
+      ],
+      [
+        31.46254,
+        30.13187
+      ],
+      [
+        31.46309,
+        30.13129
+      ],
+      [
+        31.46384,
+        30.13032
+      ],
+      [
+        31.46416,
+        30.12981
+      ],
+      [
+        31.46448,
+        30.12914
+      ],
+      [
+        31.46464,
+        30.1287
+      ],
+      [
+        31.46486,
+        30.12784
+      ],
+      [
+        31.46496,
+        30.12669
+      ],
+      [
+        31.46491,
+        30.12561
+      ],
+      [
+        31.4648,
+        30.12505
+      ],
+      [
+        31.46448,
+        30.12403
+      ],
+      [
+        31.46395,
+        30.12304
+      ],
+      [
+        31.46366,
+        30.12259
+      ],
+      [
+        31.463,
+        30.12177
+      ],
+      [
+        31.46159,
+        30.11997
+      ],
+      [
+        31.46055,
+        30.11866
+      ],
+      [
+        31.45962,
+        30.11732
+      ],
+      [
+        31.45901,
+        30.11631
+      ],
+      [
+        31.45671,
+        30.11318
+      ],
+      [
+        31.45101,
+        30.10543
+      ],
+      [
+        31.44955,
+        30.10347
+      ],
+      [
+        31.44707,
+        30.1001
+      ],
+      [
+        31.4443,
+        30.09638
+      ],
+      [
+        31.44201,
+        30.09322
+      ],
+      [
+        31.44092,
+        30.09175
+      ],
+      [
+        31.44026,
+        30.09087
+      ],
+      [
+        31.43964,
+        30.0901
+      ],
+      [
+        31.43934,
+        30.08964
+      ],
+      [
+        31.43897,
+        30.0892
+      ],
+      [
+        31.43876,
+        30.08886
+      ],
+      [
+        31.43817,
+        30.08802
+      ],
+      [
+        31.43784,
+        30.08745
+      ],
+      [
+        31.43755,
+        30.08685
+      ],
+      [
+        31.43726,
+        30.08614
+      ],
+      [
+        31.43694,
+        30.08517
+      ],
+      [
+        31.43629,
+        30.08285
+      ],
+      [
+        31.4358,
+        30.0811
+      ],
+      [
+        31.43541,
+        30.07994
+      ],
+      [
+        31.43497,
+        30.07879
+      ],
+      [
+        31.4341,
+        30.07717
+      ],
+      [
+        31.43326,
+        30.07578
+      ],
+      [
+        31.43264,
+        30.07496
+      ],
+      [
+        31.43194,
+        30.07416
+      ],
+      [
+        31.43136,
+        30.07353
+      ],
+      [
+        31.4293,
+        30.07158
+      ],
+      [
+        31.42739,
+        30.0698
+      ],
+      [
+        31.42652,
+        30.06902
+      ],
+      [
+        31.42577,
+        30.06843
+      ],
+      [
+        31.4249,
+        30.06779
+      ],
+      [
+        31.42232,
+        30.06607
+      ],
+      [
+        31.42133,
+        30.06538
+      ],
+      [
+        31.42048,
+        30.0647
+      ],
+      [
+        31.41949,
+        30.06383
+      ],
+      [
+        31.41893,
+        30.06321
+      ],
+      [
+        31.41872,
+        30.06315
+      ],
+      [
+        31.41806,
+        30.06275
+      ],
+      [
+        31.4175,
+        30.06242
+      ],
+      [
+        31.41709,
+        30.06209
+      ],
+      [
+        31.41646,
+        30.06138
+      ],
+      [
+        31.41621,
+        30.06109
+      ],
+      [
+        31.41608,
+        30.06095
+      ],
+      [
+        31.41558,
+        30.06038
+      ],
+      [
+        31.4146,
+        30.05921
+      ],
+      [
+        31.4136,
+        30.05799
+      ],
+      [
+        31.41318,
+        30.05735
+      ],
+      [
+        31.41271,
+        30.05655
+      ],
+      [
+        31.41235,
+        30.05599
+      ],
+      [
+        31.41159,
+        30.05498
+      ],
+      [
+        31.41131,
+        30.0547
+      ],
+      [
+        31.4111,
+        30.05437
+      ],
+      [
+        31.41055,
+        30.05373
+      ],
+      [
+        31.40981,
+        30.05284
+      ],
+      [
+        31.40921,
+        30.0521
+      ],
+      [
+        31.40844,
+        30.05118
+      ],
+      [
+        31.40784,
+        30.05051
+      ],
+      [
+        31.4074,
+        30.05034
+      ],
+      [
+        31.40705,
+        30.05031
+      ],
+      [
+        31.40674,
+        30.0504
+      ],
+      [
+        31.40664,
+        30.05047
+      ],
+      [
+        31.40643,
+        30.05072
+      ],
+      [
+        31.40638,
+        30.05109
+      ],
+      [
+        31.4064,
+        30.05118
+      ],
+      [
+        31.40643,
+        30.05126
+      ],
+      [
+        31.40659,
+        30.05145
+      ],
+      [
+        31.40698,
+        30.05175
+      ],
+      [
+        31.40781,
+        30.0518
+      ],
+      [
+        31.40926,
+        30.05188
+      ],
+      [
+        31.40987,
+        30.05198
+      ],
+      [
+        31.41031,
+        30.05205
+      ],
+      [
+        31.41072,
+        30.05188
+      ],
+      [
+        31.41087,
+        30.05173
+      ],
+      [
+        31.41093,
+        30.05162
+      ],
+      [
+        31.41094,
+        30.05135
+      ],
+      [
+        31.41084,
+        30.05111
+      ],
+      [
+        31.41052,
+        30.05078
+      ],
+      [
+        31.41033,
+        30.05063
+      ],
+      [
+        31.41017,
+        30.05057
+      ],
+      [
+        31.41002,
+        30.05055
+      ],
+      [
+        31.40994,
+        30.05049
+      ],
+      [
+        31.40985,
+        30.05047
+      ],
+      [
+        31.40957,
+        30.05047
+      ],
+      [
+        31.40921,
+        30.05052
+      ],
+      [
+        31.40904,
+        30.05055
+      ],
+      [
+        31.4089,
+        30.05054
+      ],
+      [
+        31.40884,
+        30.05048
+      ],
+      [
+        31.40882,
+        30.05038
+      ],
+      [
+        31.40887,
+        30.0503
+      ],
+      [
+        31.40894,
+        30.05026
+      ],
+      [
+        31.40911,
+        30.05019
+      ],
+      [
+        31.40961,
+        30.05022
+      ],
+      [
+        31.40968,
+        30.05022
+      ],
+      [
+        31.40972,
+        30.05024
+      ],
+      [
+        31.40971,
+        30.05021
+      ],
+      [
+        31.40967,
+        30.05014
+      ],
+      [
+        31.40928,
+        30.04966
+      ],
+      [
+        31.40861,
+        30.04889
+      ],
+      [
+        31.40808,
+        30.04846
+      ],
+      [
+        31.40776,
+        30.04809
+      ],
+      [
+        31.40748,
+        30.04769
+      ],
+      [
+        31.40743,
+        30.04765
+      ],
+      [
+        31.40741,
+        30.04752
+      ],
+      [
+        31.40753,
+        30.04744
+      ],
+      [
+        31.40766,
+        30.04747
+      ],
+      [
+        31.40769,
+        30.0475
+      ],
+      [
+        31.40825,
+        30.04726
+      ],
+      [
+        31.40826,
+        30.04721
+      ],
+      [
+        31.40851,
+        30.04713
+      ],
+      [
+        31.41036,
+        30.04689
+      ],
+      [
+        31.41278,
+        30.0466
+      ],
+      [
+        31.41477,
+        30.04636
+      ],
+      [
+        31.41492,
+        30.04629
+      ],
+      [
+        31.41507,
+        30.04618
+      ],
+      [
+        31.41523,
+        30.04595
+      ],
+      [
+        31.41536,
+        30.04588
+      ],
+      [
+        31.41549,
+        30.04588
+      ],
+      [
+        31.41558,
+        30.04591
+      ],
+      [
+        31.41563,
+        30.04593
+      ],
+      [
+        31.41585,
+        30.04569
+      ],
+      [
+        31.41629,
+        30.04518
+      ],
+      [
+        31.41638,
+        30.04515
+      ],
+      [
+        31.41691,
+        30.04505
+      ],
+      [
+        31.41837,
+        30.04478
+      ],
+      [
+        31.41876,
+        30.04477
+      ],
+      [
+        31.41885,
+        30.0448
+      ],
+      [
+        31.419,
+        30.0449
+      ],
+      [
+        31.41921,
+        30.04516
+      ],
+      [
+        31.41936,
+        30.04543
+      ],
+      [
+        31.41944,
+        30.04579
+      ]
+    ]
+  }
+}

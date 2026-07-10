@@ -79,21 +79,22 @@ async function main() {
            route_direction, updated_at)
         VALUES
           ($1,$2,$3,$4,$5,$6,$7,$8,$9::text[],$10::jsonb,$11::jsonb,$12,$13,$14,
-           'active',$15,$16::jsonb,$17,$18,NULL,$19,$20,$21,$22,$23,true,'forward',NOW())
+           $15,$16,$17::jsonb,$18,$19,$20,$21,$22,$23,$24,$25,true,'forward',NOW())
         ON CONFLICT (id) DO UPDATE SET
           transport_type_id=EXCLUDED.transport_type_id, line_number=EXCLUDED.line_number,
           name_en=EXCLUDED.name_en, name_ar=EXCLUDED.name_ar,
           from_area=EXCLUDED.from_area, to_area=EXCLUDED.to_area,
           governorate=EXCLUDED.governorate, via_stops=EXCLUDED.via_stops,
           stops=EXCLUDED.stops,
-          route_path=COALESCE(transit_lines.route_path, EXCLUDED.route_path),
+          route_path=EXCLUDED.route_path,
+          active_geometry_version_id=NULL,
           data_source=EXCLUDED.data_source, source_priority=EXCLUDED.source_priority,
-          confidence_score=GREATEST(transit_lines.confidence_score, EXCLUDED.confidence_score),
-          route_status='active', geometry_locked=EXCLUDED.geometry_locked,
+          confidence_score=EXCLUDED.confidence_score,
+          route_status=EXCLUDED.route_status, geometry_locked=EXCLUDED.geometry_locked,
           route_quality=EXCLUDED.route_quality,
-          verified_at=COALESCE(transit_lines.verified_at, EXCLUDED.verified_at),
-          last_confirmed_at=COALESCE(transit_lines.last_confirmed_at, EXCLUDED.last_confirmed_at),
-          needs_review_reason=NULL, review_report_count=EXCLUDED.review_report_count,
+          verified_at=EXCLUDED.verified_at,
+          last_confirmed_at=EXCLUDED.last_confirmed_at,
+          needs_review_reason=EXCLUDED.needs_review_reason, review_report_count=EXCLUDED.review_report_count,
           price_egp=EXCLUDED.price_egp, frequency_minutes=EXCLUDED.frequency_minutes,
           observed_speed_kmh=EXCLUDED.observed_speed_kmh,
           has_fixed_stops=EXCLUDED.has_fixed_stops, is_active=true, updated_at=NOW()
@@ -101,10 +102,11 @@ async function main() {
         line.id, line.transportTypeId, line.lineNumber, line.nameEn, line.nameAr,
         line.fromArea, line.toArea, line.governorate || "Cairo", line.viaStops ?? [],
         JSON.stringify(line.stops ?? null), JSON.stringify(geometry), line.dataSource || "seed",
-        line.sourcePriority ?? 10, line.confidenceScore ?? 0.9, line.geometryLocked ?? false,
-        JSON.stringify(line.routeQualityDetails ?? {}), line.verifiedAt || null,
-        line.lastConfirmedAt || null, line.reviewReportCount ?? 0, line.priceEgp ?? 0,
-        line.frequencyMinutes ?? null, line.observedSpeedKmh ?? null, line.hasFixedStops,
+        line.sourcePriority ?? 10, line.confidenceScore ?? 0.9, line.routeStatus || "active",
+        line.geometryLocked ?? false, JSON.stringify(line.routeQualityDetails ?? {}),
+        line.verifiedAt || null, line.lastConfirmedAt || null, line.needsReviewReason || null,
+        line.reviewReportCount ?? 0, line.priceEgp ?? 0, line.frequencyMinutes ?? null,
+        line.observedSpeedKmh ?? null, line.hasFixedStops,
       ]);
     }
 
@@ -122,11 +124,13 @@ async function main() {
       SELECT COUNT(*)::text AS count FROM transit_lines
       WHERE is_active=true AND route_status='active' AND route_path IS NOT NULL
     `);
-    if (Number(count.rows[0]?.count ?? 0) !== prepared.lines.length) {
-      throw new Error(`Post-apply active-route count is ${count.rows[0]?.count}; expected ${prepared.lines.length}`);
+    const expectedActiveDrawable = prepared.lines.filter((line) => (line.routeStatus || "active") === "active").length;
+    const needsReviewRoutes = prepared.lines.length - expectedActiveDrawable;
+    if (Number(count.rows[0]?.count ?? 0) !== expectedActiveDrawable) {
+      throw new Error(`Post-apply active-route count is ${count.rows[0]?.count}; expected ${expectedActiveDrawable}`);
     }
     await client.query("COMMIT");
-    console.log(JSON.stringify({ applied: prepared.lines.length, deactivated: deactivated.rowCount, activeDrawableRoutes: Number(count.rows[0].count), hash }, null, 2));
+    console.log(JSON.stringify({ applied: prepared.lines.length, deactivated: deactivated.rowCount, activeDrawableRoutes: Number(count.rows[0].count), needsReviewRoutes, hash }, null, 2));
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

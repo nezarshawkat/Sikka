@@ -3,7 +3,7 @@
   "preparedAt": "2026-07-04T02:36:42.189Z",
   "preparedPath": "C:\\Users\\Nezar\\Desktop\\Sikka\\scripts\\generated\\prepared-device-route-seed.json",
   "targetWhenSeeded": "C:\\Users\\Nezar\\Desktop\\Sikka\\artifacts\\sikka\\src\\data\\bundledSnapshot.json",
-  "sha256": "27f4a4bc6d2929189dd988692557d9888b320b7d997f794699831a336cdc02ed",
+  "sha256": "dcae7c538741022ebaa26fd264e2917c3e72c8b120d7f09ed596f16b932417a4",
   "routeCount": 521,
   "transportTypeCount": 13,
   "selectionPolicy": "independent-audit-pass plus explicit current-Metro acceptance",
@@ -24,5 +24,11 @@
     "Cairo / Cairo LRT": 2,
     "Cairo / Metro": 3,
     "Cairo / Monorail": 2
-  }
+  },
+  "generatedAt": "2026-07-10T13:55:08.286Z",
+  "typeCount": 13,
+  "notes": [
+    "BRT-1 replaced with official phase-1 Ring Road station order and Google Directions geometry.",
+    "Existing backend apply script now replaces stored route_path on confirmed seed apply."
+  ]
 }
