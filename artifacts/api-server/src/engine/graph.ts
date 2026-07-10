@@ -227,6 +227,15 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     register(l.nameAr, { lat: l.latitude, lng: l.longitude });
   }
   for (const l of lineRows) {
+    const type = types.get(l.transportTypeId);
+    if (type && (
+      l.hasFixedStops
+      || type.mode === "metro"
+      || type.mode === "monorail"
+      || type.mode === "train"
+      || type.mode === "lrt"
+      || type.mode === "brt"
+    )) continue;
     const path = (l.routePath?.coordinates ?? null) as [number, number][] | null;
     if (!path || path.length < 2) continue;
     register(l.fromArea, pathPointToCoord(path[0]));
@@ -238,31 +247,60 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     const type = types.get(l.transportTypeId);
     if (!type) continue;
     const path = (l.routePath?.coordinates ?? null) as [number, number][] | null;
-    const via = l.viaStops ?? [];
-    const stopNames = [l.fromArea, ...via, l.toArea].filter((s) => s && s.trim());
-    if (stopNames.length < 2 || !path || path.length < 2) continue;
-
-    const viaIndices = distributeStopsAlongPath(path, via.length);
+    if (!path || path.length < 2) continue;
+    const fixedStopMode = l.hasFixedStops
+      || type.mode === "metro"
+      || type.mode === "monorail"
+      || type.mode === "train"
+      || type.mode === "lrt"
+      || type.mode === "brt";
     const namedStops: LineStop[] = [];
-    stopNames.forEach((name, i) => {
-      let pathIdx: number;
-      if (i === 0) pathIdx = 0;
-      else if (i === stopNames.length - 1) pathIdx = path.length - 1;
-      else pathIdx = viaIndices[i - 1] ?? Math.round((path.length - 1) * (i / (stopNames.length - 1)));
 
-      const dictCoord = nameCoord.get(normalizeName(name));
-      let coord: Coord;
-      if (dictCoord) {
-        coord = dictCoord;
-        pathIdx = nearestPathIndex(path, dictCoord);
-      } else {
-        coord = pathPointToCoord(path[Math.min(pathIdx, path.length - 1)]);
-        register(name, coord);
+    const storedStops = Array.isArray(l.stops)
+      ? (l.stops as { name?: unknown; nameAr?: unknown; lat?: unknown; lng?: unknown }[])
+      : [];
+    if (fixedStopMode && storedStops.length >= 2) {
+      for (const stop of storedStops) {
+        const displayName = String(stop.name ?? stop.nameAr ?? "").trim();
+        const lat = Number(stop.lat);
+        const lng = Number(stop.lng);
+        if (!displayName || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const coord = { lat, lng };
+        namedStops.push({
+          name: `${l.id}:${normalizeName(displayName)}`,
+          displayName,
+          coord,
+          pathIndex: nearestPathIndex(path, coord),
+        });
       }
-      namedStops.push({ name, coord, pathIndex: pathIdx });
-    });
+      namedStops.sort((a, b) => a.pathIndex - b.pathIndex);
+    } else {
+      const via = l.viaStops ?? [];
+      const stopNames = [l.fromArea, ...via, l.toArea].filter((s) => s && s.trim());
+      if (stopNames.length < 2) continue;
+      const viaIndices = distributeStopsAlongPath(path, via.length);
+      stopNames.forEach((name, i) => {
+        let pathIdx: number;
+        if (i === 0) pathIdx = 0;
+        else if (i === stopNames.length - 1) pathIdx = path.length - 1;
+        else pathIdx = viaIndices[i - 1] ?? Math.round((path.length - 1) * (i / (stopNames.length - 1)));
 
-    const stops = l.hasFixedStops ? namedStops : densifyAlongPath(l.id, path, namedStops);
+        const dictCoord = nameCoord.get(normalizeName(name));
+        let coord: Coord;
+        if (dictCoord) {
+          coord = dictCoord;
+          pathIdx = nearestPathIndex(path, dictCoord);
+        } else {
+          if (fixedStopMode) return;
+          coord = pathPointToCoord(path[Math.min(pathIdx, path.length - 1)]);
+          register(name, coord);
+        }
+        namedStops.push({ name, coord, pathIndex: pathIdx });
+      });
+    }
+
+    if (namedStops.length < 2) continue;
+    const stops = fixedStopMode ? namedStops : densifyAlongPath(l.id, path, namedStops);
 
     lines.set(l.id, {
       id: l.id,
@@ -275,7 +313,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       priceEgp: l.priceEgp,
       frequencyMinutes: l.frequencyMinutes,
       observedSpeedKmh: l.observedSpeedKmh,
-      hasFixedStops: l.hasFixedStops,
+      hasFixedStops: fixedStopMode,
       dataSource: l.dataSource,
       routeStatus: l.routeStatus,
       path,

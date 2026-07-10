@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { Component, useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
@@ -75,7 +75,32 @@ const lineToGeoJSON = (value: unknown): GeoJSONLine | null => {
   };
 };
 
-const AdminDiscovery = () => {
+class AdminDiscoveryErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state: { error: string | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error: error.message || 'Discovery failed to render' };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('[admin-discovery] render failed', error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <Card className="border-destructive/40">
+          <CardContent className="p-4 text-sm text-destructive">
+            Discovery could not render: {this.state.error}
+          </CardContent>
+        </Card>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const AdminDiscoveryContent = () => {
   const { language } = useAuth();
   const [discovery, setDiscovery] = useState<DiscoveryRow[]>([]);
   const [pending, setPending] = useState<TransportReport[]>([]);
@@ -187,7 +212,7 @@ const AdminDiscovery = () => {
         {discovery.length === 0 && !loadError && <p className="text-muted-foreground text-sm">{t('noDiscovery', language)}</p>}
         {discovery.map((d, i) => {
           const isSelected = selectedDiscovery?.transportNumber === d.transportNumber && selectedDiscovery?.transportName === d.transportName;
-          const previewGeoJSON = isSelected ? routeGeoJSON : lineToGeoJSON(d.routeGeometry);
+          const previewGeoJSON = isSelected ? routeGeoJSON : null;
           return (
             <Card key={`${d.transportName}-${d.transportNumber}-${i}`} className="cursor-pointer hover:bg-accent/20 transition-colors">
               <CardContent
@@ -357,4 +382,10 @@ const AdminDiscovery = () => {
   );
 };
 
-export default AdminDiscovery;
+export default function AdminDiscovery() {
+  return (
+    <AdminDiscoveryErrorBoundary>
+      <AdminDiscoveryContent />
+    </AdminDiscoveryErrorBoundary>
+  );
+}

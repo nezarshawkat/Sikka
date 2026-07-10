@@ -235,4 +235,8 @@ export const api = {
 
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => void syncPendingOfflinePosts());
+  window.addEventListener("focus", () => void syncPendingOfflinePosts());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void syncPendingOfflinePosts();
+  });
 }

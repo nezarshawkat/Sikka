@@ -25,9 +25,10 @@ import { nativeLocationIsEnabled, openNativeAppSettings, openNativeLocationSetti
 import {
   acknowledgeNativeDiscoveryTrip,
   getPendingNativeDiscoveryTrips,
-  stopNativeDiscovery,
+  startNativeDiscovery,
   type NativeDiscoveryTrip,
 } from '@/lib/nativeDiscovery';
+import { onTripPipChange, setTripPipEnabled } from '@/lib/nativeMapUi';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -92,7 +93,8 @@ const Index = () => {
   const [expanded, setExpanded] = useState(true);
   const [routeCoords, setRouteCoords] = useState<{ segIndex: number; coords: [number, number][] }[]>([]);
   const [guideSheetHeight, setGuideSheetHeight] = useState(190);
-  const [isFollowingUser, setIsFollowingUser] = useState(true);
+  const [isFollowingUser, setIsFollowingUser] = useState(false);
+  const [pipMapOnly, setPipMapOnly] = useState(false);
   const [getOffPrompt, setGetOffPrompt] = useState<{ segIdx: number; reason: 'passed' | 'walking' } | null>(null);
   const dismissedGetOffPromptsRef = useRef<Record<string, boolean>>({});
   const [contributionTrace, setContributionTrace] = useState<[number, number][]>([]);
@@ -225,11 +227,7 @@ const Index = () => {
         setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng }));
         const name = await reverseGeocode(loc.lat, loc.lng, language);
         setLocationName(name);
-        // Turns off (and keeps turned off) the old always-on background
-        // discovery service, so its persistent "Sikka is collecting trip
-        // data" notification stops showing. In-app ride discovery (while
-        // Sikka is actually open) is unaffected.
-        void stopNativeDiscovery();
+        void startNativeDiscovery();
       },
       () => {
         setUserLocation(null);
@@ -264,7 +262,7 @@ const Index = () => {
         setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng, zoom: 15 }));
         const name = await reverseGeocode(loc.lat, loc.lng, language);
         setLocationName(name);
-        void stopNativeDiscovery();
+        void startNativeDiscovery();
       },
       async (error) => {
         attemptInFlightRef.current = false;
@@ -491,6 +489,22 @@ const Index = () => {
   });
 
   useEffect(() => {
+    return onTripPipChange((active) => {
+      setPipMapOnly(active);
+      if (active) {
+        setExpanded(false);
+        setIsFollowingUser(true);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    void setTripPipEnabled(!!activeTrip);
+    if (!activeTrip) setPipMapOnly(false);
+    return () => { void setTripPipEnabled(false); };
+  }, [activeTrip]);
+
+  useEffect(() => {
     if (
       !activeTrip
       || !currentSeg
@@ -540,23 +554,24 @@ const Index = () => {
   };
 
   useEffect(() => {
-    if (activeTrip) setIsFollowingUser(true);
+    if (!activeTrip) setIsFollowingUser(false);
   }, [activeTrip]);
 
   useEffect(() => {
     if (!activeTrip || !userPos || !mapRef.current || !isFollowingUser) return;
-    const bottomPadding = Math.min(window.innerHeight * 0.68, guideSheetHeight + 96);
+    const bottomPadding = pipMapOnly ? 24 : Math.min(window.innerHeight * 0.68, guideSheetHeight + 96);
+    const topPadding = pipMapOnly ? 24 : 96;
     try {
       mapRef.current.easeTo({
         center: [userPos.lng, userPos.lat],
         zoom: Math.max(15, viewState.zoom),
-        padding: { top: 96, bottom: bottomPadding, left: 24, right: 24 },
+        padding: { top: topPadding, bottom: bottomPadding, left: 24, right: 24 },
         duration: 450,
       });
     } catch {
       setViewState((value) => ({ ...value, latitude: userPos.lat, longitude: userPos.lng, zoom: Math.max(15, value.zoom) }));
     }
-  }, [activeTrip, userPos, isFollowingUser, guideSheetHeight, viewState.zoom]);
+  }, [activeTrip, userPos, isFollowingUser, guideSheetHeight, pipMapOnly, viewState.zoom]);
 
   const stopContributionRecording = useCallback(() => {
     if (contributionWatchRef.current != null && navigator.geolocation) {
@@ -743,6 +758,10 @@ const Index = () => {
     toast.success(t('planUpdated', language));
   };
 
+  const stopFollowingForManualMapMove = useCallback(() => {
+    if (!pipMapOnly) setIsFollowingUser(false);
+  }, [pipMapOnly]);
+
   const routeGeoJSON = {
     type: 'FeatureCollection' as const,
     features: routeCoords.map(({ segIndex, coords }) => ({
@@ -769,6 +788,8 @@ const Index = () => {
         ref={mapRef}
         {...viewState}
         onMove={(evt) => setViewState(evt.viewState)}
+        onDragStart={stopFollowingForManualMapMove}
+        onZoomStart={stopFollowingForManualMapMove}
         onClick={(evt) => { void handleMapClick(evt); }}
         onError={(e) => { const err = (e as { error?: Error })?.error; console.error('[home-map] error:', err?.message || e, err?.stack); }}
         cursor={activeTrip ? undefined : 'crosshair'}
@@ -818,6 +839,7 @@ const Index = () => {
       </Map>
 
       {/* Search bar stays visible across the trip experience so the rider can keep exploring or re-plan quickly. */}
+      {!pipMapOnly && (
       <div className="absolute top-0 left-0 right-0 p-4 safe-area-top z-20">
         <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="flex items-center gap-2">
             <LocationAutocomplete
@@ -901,6 +923,7 @@ const Index = () => {
           </motion.div>
         )}
       </div>
+      )}
 
       {/* "Turn on location" prompt — shown whenever location isn't granted yet,
           so trip planning can start from the rider's actual position instead
@@ -948,7 +971,7 @@ const Index = () => {
       )}
 
       {/* Active trip guide sheet */}
-      {activeTrip ? (
+      {activeTrip && !pipMapOnly ? (
         <>
           {/* Focus button — only shown on the minimized map (above the trip popup), matching
               the "nothing but map + route" rule for the minimized view. Hidden once the
@@ -960,12 +983,12 @@ const Index = () => {
               exit={{ scale: 0, opacity: 0 }}
               transition={{ delay: 0.2 }}
               className="absolute right-4 z-20"
-              style={{ bottom: `calc(${guideSheetHeight + 18}px + env(safe-area-inset-bottom, 0px))` }}
+              style={{ bottom: `calc(${guideSheetHeight + 8}px + env(safe-area-inset-bottom, 0px))` }}
             >
               <Button
                 variant="outline"
                 size="icon"
-                className="h-14 w-14 rounded-full shadow-xl border border-white/20 shrink-0 glass-panel !bg-background/55 hover:!bg-background/55 active:!bg-background/55 focus:!bg-background/55 !text-foreground hover:!text-foreground active:!text-foreground"
+                className="h-14 w-14 rounded-full shadow-xl border border-white/20 shrink-0 glass-panel !bg-background/55 hover:!bg-background/55 active:!bg-background/55 focus:!bg-background/55 focus-visible:!bg-background/55 !text-foreground hover:!text-foreground active:!text-foreground focus-visible:!text-foreground"
                 onClick={() => {
                   setIsFollowingUser(true);
                   setViewState(v => ({ ...v, latitude: userPos.lat, longitude: userPos.lng, zoom: 15 }));
@@ -993,7 +1016,7 @@ const Index = () => {
             isOffRoute={isOffRoute}
           />
         </>
-      ) : (
+      ) : !pipMapOnly ? (
         <div className="absolute bottom-6 left-4 right-4">
           <AnimatePresence mode="wait">
             {pickedDest ? (
@@ -1080,11 +1103,11 @@ const Index = () => {
             )}
           </AnimatePresence>
         </div>
-      )}
+      ) : null}
 
       {/* Per-segment review */}
       <SegmentReviewDialog
-        open={reviewOpen}
+        open={!pipMapOnly && reviewOpen}
         onClose={() => setReviewOpen(false)}
         onSubmitted={handleSegmentReviewDone}
         segment={reviewSeg}
@@ -1093,7 +1116,7 @@ const Index = () => {
 
       {/* End-of-trip review */}
       <SegmentReviewDialog
-        open={tripReviewOpen}
+        open={!pipMapOnly && tripReviewOpen}
         onClose={() => setTripReviewOpen(false)}
         onSubmitted={() => { setTripReviewOpen(false); clearTrip(); toast.success(t('tripComplete', language)); }}
         segment={null}
@@ -1103,7 +1126,7 @@ const Index = () => {
 
       {/* Report a problem */}
       <ReportDialog
-        open={reportOpen}
+        open={!pipMapOnly && reportOpen}
         onClose={() => setReportOpen(false)}
         transportTypeId={activeTrip?.segments[currentSegIdx]?.transport_type_id}
         transitLineId={activeTrip?.segments[currentSegIdx]?.line_id ?? undefined}
@@ -1117,7 +1140,7 @@ const Index = () => {
       />
 
       <ContributeTransportDialog
-        open={contributionDialogOpen}
+        open={!pipMapOnly && contributionDialogOpen}
         onClose={() => setContributionDialogOpen(false)}
         onSubmitted={() => {
           const pendingId = pendingNativeDiscovery?.id;
@@ -1140,7 +1163,7 @@ const Index = () => {
 
       {/* Bus info dialog — collecting operator/route info only; rating is never required here */}
       <BusUsedDialog
-        open={busUsedOpen}
+        open={!pipMapOnly && busUsedOpen}
         onClose={() => setBusUsedOpen(false)}
         onDone={() => {
           sessionStorage.removeItem(PENDING_FEEDBACK_KEY);
@@ -1161,7 +1184,7 @@ const Index = () => {
 
       {/* Microbus info dialog — collecting operator/route info only; rating is never required here */}
       <MicrobusUsedDialog
-        open={microbusUsedOpen}
+        open={!pipMapOnly && microbusUsedOpen}
         onClose={() => setMicrobusUsedOpen(false)}
         onDone={() => {
           sessionStorage.removeItem(PENDING_FEEDBACK_KEY);
@@ -1182,7 +1205,7 @@ const Index = () => {
 
       {/* Intercity vs Serfis choice */}
       <IntercityChoiceDialog
-        open={choiceOpen}
+        open={!pipMapOnly && choiceOpen}
         onClose={() => setChoiceOpen(false)}
         onChoose={(choice) => {
           setChoiceOpen(false);
@@ -1202,7 +1225,7 @@ const Index = () => {
         language={language}
       />
 
-      <AlertDialog open={cancelTripOpen} onOpenChange={setCancelTripOpen}>
+      <AlertDialog open={!pipMapOnly && cancelTripOpen} onOpenChange={setCancelTripOpen}>
         <AlertDialogContent className="glass-panel rounded-[2rem]">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('cancelTripTitle', language)}</AlertDialogTitle>

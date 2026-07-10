@@ -1004,9 +1004,9 @@ function buildCandidates(snapshot: OfflineSnapshot, point: Coord, planKey: PlanK
     if (!type) continue;
     const mode = modeOfType(type.nameEn);
     if (!allowed.has(mode)) continue;
-    const closest = (line.hasFixedStops || mode === "metro" || mode === "monorail" || mode === "train" || mode === "lrt" || mode === "brt")
-      ? closestStationOnLine(line, point) ?? closestPointOnPath(line.path, point)
-      : closestPointOnPath(line.path, point);
+    const usesFixedStops = line.hasFixedStops || mode === "metro" || mode === "monorail" || mode === "train" || mode === "lrt" || mode === "brt";
+    const closest = usesFixedStops ? closestStationOnLine(line, point) : closestPointOnPath(line.path, point);
+    if (!closest) continue;
     if (closest.distanceKm <= maxKm) candidates.push({ line, type, mode, closest });
   }
   candidates.sort((a, b) => {

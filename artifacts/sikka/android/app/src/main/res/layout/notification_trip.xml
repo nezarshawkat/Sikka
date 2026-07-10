@@ -12,44 +12,23 @@
     android:layout_width="match_parent"
     android:layout_height="64dp"
     android:layoutDirection="ltr"
-    android:background="@drawable/bg_trip_pill"
-    android:paddingStart="9dp"
-    android:paddingEnd="9dp">
-
-    <!-- Left: mode icon circle -->
-    <ImageView
-        android:id="@+id/trip_icon_circle_bg"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
-        android:layout_centerVertical="true"
-        android:layout_alignParentStart="true"
-        android:src="@drawable/bg_circle_pale" />
-
-    <ImageView
-        android:id="@+id/trip_icon_glyph"
-        android:layout_width="30dp"
-        android:layout_height="30dp"
-        android:layout_alignTop="@id/trip_icon_circle_bg"
-        android:layout_alignBottom="@id/trip_icon_circle_bg"
-        android:layout_alignStart="@id/trip_icon_circle_bg"
-        android:layout_alignEnd="@id/trip_icon_circle_bg"
-        android:layout_margin="8dp"
-        android:scaleType="fitCenter"
-        android:src="@drawable/sikka_notification_mark" />
+    android:background="#258DFF"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp">
 
     <!-- Right: dynamically-colored route badge -->
     <ImageView
         android:id="@+id/trip_badge_circle_bg"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
         android:layout_centerVertical="true"
         android:layout_alignParentEnd="true"
         android:src="@drawable/bg_circle_white" />
 
     <TextView
         android:id="@+id/trip_badge_text"
-        android:layout_width="42dp"
-        android:layout_height="46dp"
+        android:layout_width="38dp"
+        android:layout_height="40dp"
         android:layout_alignTop="@id/trip_badge_circle_bg"
         android:layout_alignBottom="@id/trip_badge_circle_bg"
         android:layout_alignStart="@id/trip_badge_circle_bg"
@@ -59,9 +38,9 @@
         android:includeFontPadding="false"
         android:autoSizeTextType="uniform"
         android:autoSizeMinTextSize="7sp"
-        android:autoSizeMaxTextSize="11sp"
+        android:autoSizeMaxTextSize="10sp"
         android:textColor="#FFFFFF"
-        android:textSize="11sp"
+        android:textSize="10sp"
         android:fontFamily="@font/cairo_lat_extrabold"
         android:text="Bus" />
 
@@ -70,10 +49,10 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerVertical="true"
-        android:layout_toEndOf="@id/trip_icon_circle_bg"
+        android:layout_alignParentStart="true"
         android:layout_toStartOf="@id/trip_badge_circle_bg"
-        android:layout_marginStart="10dp"
-        android:layout_marginEnd="10dp"
+        android:layout_marginStart="2dp"
+        android:layout_marginEnd="12dp"
         android:orientation="vertical">
 
         <TextView

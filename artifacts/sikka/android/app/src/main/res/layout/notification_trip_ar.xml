@@ -1,45 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
+    android:layout_height="64dp"
     android:minHeight="64dp"
     android:layoutDirection="ltr"
-    android:background="@android:color/transparent"
-    android:padding="12dp">
-
-    <ImageView
-        android:id="@+id/trip_icon_circle_bg"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
-        android:layout_centerVertical="true"
-        android:layout_alignParentStart="true"
-        android:src="@drawable/bg_circle_pale" />
-
-    <ImageView
-        android:id="@+id/trip_icon_glyph"
-        android:layout_width="30dp"
-        android:layout_height="30dp"
-        android:layout_alignTop="@id/trip_icon_circle_bg"
-        android:layout_alignBottom="@id/trip_icon_circle_bg"
-        android:layout_alignStart="@id/trip_icon_circle_bg"
-        android:layout_alignEnd="@id/trip_icon_circle_bg"
-        android:layout_margin="8dp"
-        android:scaleType="fitCenter"
-        android:src="@drawable/sikka_notification_mark" />
+    android:background="#258DFF"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp">
 
     <ImageView
         android:id="@+id/trip_badge_circle_bg"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
         android:layout_centerVertical="true"
         android:layout_alignParentEnd="true"
         android:src="@drawable/bg_circle_white" />
 
     <TextView
         android:id="@+id/trip_badge_text"
-        android:layout_width="42dp"
-        android:layout_height="46dp"
+        android:layout_width="38dp"
+        android:layout_height="40dp"
         android:layout_alignTop="@id/trip_badge_circle_bg"
         android:layout_alignBottom="@id/trip_badge_circle_bg"
         android:layout_alignStart="@id/trip_badge_circle_bg"
@@ -49,19 +29,19 @@
         android:includeFontPadding="false"
         android:autoSizeTextType="uniform"
         android:autoSizeMinTextSize="7sp"
-        android:autoSizeMaxTextSize="12sp"
+        android:autoSizeMaxTextSize="10sp"
         android:textColor="#FFFFFF"
-        android:textSize="12sp"
+        android:textSize="10sp"
         android:fontFamily="@font/cairo_ar_bold"
-        tools:text="أتوبيس" />
+        android:text="Bus" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_centerVertical="true"
-        android:layout_toEndOf="@id/trip_icon_circle_bg"
+        android:layout_alignParentStart="true"
         android:layout_toStartOf="@id/trip_badge_circle_bg"
-        android:layout_marginStart="12dp"
+        android:layout_marginStart="2dp"
         android:layout_marginEnd="12dp"
         android:orientation="vertical">
 
@@ -77,7 +57,7 @@
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:fontFamily="@font/cairo_ar_bold"
-            tools:text="ميكروباص" />
+            android:text="Sikka" />
 
         <TextView
             android:id="@+id/trip_subtitle"
@@ -92,6 +72,6 @@
             android:textColor="#E7F1FF"
             android:textSize="13sp"
             android:fontFamily="@font/cairo_ar_regular"
-            tools:text="باتجاه ميدان رمسيس" />
+            android:text="toward destination" />
     </LinearLayout>
 </RelativeLayout>

@@ -24,15 +24,10 @@ export default function TaxiAppButton({ fromName, toName, label, className }: Ta
         await navigator.share({ title: 'Sikka taxi route', text, url });
         return;
       }
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(`${text}\n${url}`);
-        toast.success('Route copied');
-        return;
-      }
-      window.open(url, '_blank', 'noopener,noreferrer');
+      toast.error('Sharing is not available on this device');
     } catch (err) {
       if ((err as DOMException)?.name === 'AbortError') return;
-      window.open(url, '_blank', 'noopener,noreferrer');
+      toast.error('Could not open the share sheet');
     }
   };
 
