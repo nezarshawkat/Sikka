@@ -11,15 +11,6 @@ import {
   X,
   Focus,
   AlertTriangle,
-  Banknote,
-  Building2,
-  Coffee,
-  Fuel,
-  Hospital,
-  Landmark,
-  ShoppingBag,
-  Utensils,
-  type LucideIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
@@ -63,65 +54,6 @@ const FLIGHT_CITY_IDS = new Set(['cairo', 'alexandria', 'luxor', 'aswan', 'hurgh
 const NILE_CITY_IDS = new Set(['cairo', 'giza', 'luxor', 'aswan']);
 const PENDING_FEEDBACK_KEY = 'sikkaPendingTripFeedback';
 
-type PoiCategory = 'food' | 'health' | 'money' | 'fuel' | 'shop' | 'landmark' | 'station' | 'poi';
-
-type MapPoi = {
-  id: string;
-  lat: number;
-  lng: number;
-  name: string;
-  category: PoiCategory;
-};
-
-type OverpassElement = {
-  id: number | string;
-  type: string;
-  lat?: number;
-  lon?: number;
-  center?: { lat?: number; lon?: number };
-  tags?: Record<string, string>;
-};
-
-const poiCategoryFor = (tags: Record<string, string> = {}): PoiCategory => {
-  const amenity = tags.amenity;
-  const tourism = tags.tourism;
-  const railway = tags.railway;
-  if (amenity === 'hospital' || amenity === 'pharmacy' || amenity === 'clinic') return 'health';
-  if (amenity === 'bank' || amenity === 'atm') return 'money';
-  if (amenity === 'fuel') return 'fuel';
-  if (amenity === 'restaurant' || amenity === 'cafe' || amenity === 'fast_food') return 'food';
-  if (tags.shop) return 'shop';
-  if (tourism === 'attraction' || tourism === 'museum' || tourism === 'hotel') return 'landmark';
-  if (tags.public_transport || railway === 'station' || railway === 'tram_stop' || railway === 'halt') return 'station';
-  return 'poi';
-};
-
-const poiFallbackName = (category: PoiCategory) => {
-  switch (category) {
-    case 'food': return 'Food place';
-    case 'health': return 'Health service';
-    case 'money': return 'Money service';
-    case 'fuel': return 'Fuel station';
-    case 'shop': return 'Shop';
-    case 'landmark': return 'Place';
-    case 'station': return 'Station';
-    default: return 'Point of interest';
-  }
-};
-
-const poiIconFor = (category: PoiCategory): LucideIcon => {
-  switch (category) {
-    case 'food': return Utensils;
-    case 'health': return Hospital;
-    case 'money': return Banknote;
-    case 'fuel': return Fuel;
-    case 'shop': return ShoppingBag;
-    case 'landmark': return Landmark;
-    case 'station': return Building2;
-    default: return Coffee;
-  }
-};
-
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
 
@@ -159,8 +91,6 @@ const Index = () => {
   const [showLocationPrompt, setShowLocationPrompt] = useState(false);
   const [enablingLocation, setEnablingLocation] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showPois, setShowPois] = useState(true);
-  const [pois, setPois] = useState<MapPoi[]>([]);
 
   // Destination chosen by tapping the map or searching (reverse-geocoded address shown for confirmation)
   const [pickedDest, setPickedDest] = useState<{ lat: number; lng: number; name: string; loading: boolean } | null>(null);
@@ -403,73 +333,6 @@ const Index = () => {
     window.addEventListener('focus', retryAfterSystemDialog);
     return () => window.removeEventListener('focus', retryAfterSystemDialog);
   }, [attemptGetPosition, showLocationPrompt]);
-
-  useEffect(() => {
-    if (activeTrip || pipMapOnly || !showPois || viewState.zoom < 13) {
-      setPois((current) => (current.length ? [] : current));
-      return;
-    }
-
-    const centerLat = userLocation?.lat ?? viewState.latitude;
-    const centerLng = userLocation?.lng ?? viewState.longitude;
-    const radius = viewState.zoom >= 15 ? 1200 : 2200;
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      const query = `[out:json][timeout:8];(
-node["amenity"~"hospital|pharmacy|clinic|cafe|restaurant|fast_food|bank|atm|fuel|toilets|police"](around:${radius},${centerLat},${centerLng});
-node["tourism"~"attraction|museum|hotel"](around:${radius},${centerLat},${centerLng});
-node["shop"](around:${radius},${centerLat},${centerLng});
-node["public_transport"~"station|platform|stop_position"](around:${radius},${centerLat},${centerLng});
-node["railway"~"station|tram_stop|halt"](around:${radius},${centerLat},${centerLng});
-);out center 80;`;
-
-      try {
-        const response = await fetch('https://overpass-api.de/api/interpreter', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-          body: new URLSearchParams({ data: query }),
-          signal: controller.signal,
-        });
-        if (!response.ok) return;
-        const data = await response.json() as { elements?: OverpassElement[] };
-        const nextPois = (Array.isArray(data.elements) ? data.elements : [])
-          .map((element): MapPoi | null => {
-            const lat = Number(element.lat ?? element.center?.lat);
-            const lng = Number(element.lon ?? element.center?.lon);
-            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-            const tags = element.tags ?? {};
-            const category = poiCategoryFor(tags);
-            const name = tags.name || tags['name:en'] || tags['name:ar'] || poiFallbackName(category);
-            return {
-              id: `${element.type}-${element.id}`,
-              lat,
-              lng,
-              name,
-              category,
-            };
-          })
-          .filter((poi): poi is MapPoi => !!poi)
-          .slice(0, 80);
-        setPois(nextPois);
-      } catch (err) {
-        if ((err as DOMException)?.name !== 'AbortError') setPois([]);
-      }
-    }, 500);
-
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [
-    activeTrip,
-    pipMapOnly,
-    showPois,
-    userLocation?.lat,
-    userLocation?.lng,
-    viewState.latitude,
-    viewState.longitude,
-    viewState.zoom,
-  ]);
 
   const loadRoutes = useCallback((plan: ActiveTripPlan) => {
     const results: { segIndex: number; coords: [number, number][] }[] = [];
@@ -970,26 +833,6 @@ node["railway"~"station|tram_stop|halt"](around:${radius},${centerLat},${centerL
             <MapPin className="h-8 w-8 text-destructive drop-shadow-lg" fill="currentColor" strokeWidth={1.5} />
           </Marker>
         )}
-        {showPois && !activeTrip && !pipMapOnly && pois.map((poi) => {
-          const PoiIcon = poiIconFor(poi.category);
-          return (
-            <Marker key={poi.id} latitude={poi.lat} longitude={poi.lng} anchor="center">
-              <button
-                type="button"
-                className="h-8 w-8 rounded-full bg-background/90 border border-white/40 shadow-lg flex items-center justify-center text-primary backdrop-blur hover:scale-105 transition-transform"
-                title={poi.name}
-                aria-label={poi.name}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setPickedDest({ lat: poi.lat, lng: poi.lng, name: poi.name, loading: false });
-                  setSearchQuery(poi.name);
-                }}
-              >
-                <PoiIcon className="h-4 w-4" />
-              </button>
-            </Marker>
-          );
-        })}
         {(userPos || userLocation) && (
           <Marker latitude={(userPos ?? userLocation)!.lat} longitude={(userPos ?? userLocation)!.lng}>
             <div className="relative">
@@ -1025,19 +868,6 @@ node["railway"~"station|tram_stop|halt"](around:${radius},${centerLat},${centerL
                 else { setSearchQuery(''); setPickedDest(null); }
               }}
             />
-            {!activeTrip && (
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-14 w-14 rounded-full shadow-xl border border-white/20 shrink-0 glass-panel"
-                onClick={() => setShowPois((value) => !value)}
-                title={showPois ? 'Hide points of interest' : 'Show points of interest'}
-                aria-label={showPois ? 'Hide points of interest' : 'Show points of interest'}
-                aria-pressed={showPois}
-              >
-                <Landmark className="h-5 w-5" />
-              </Button>
-            )}
             {/* Profile button — only visible when not in minimized trip mode */}
             {!activeTrip && (
               <Button
