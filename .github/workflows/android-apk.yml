@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android Release AAB
 
 on:
   workflow_dispatch:
@@ -52,12 +52,12 @@ jobs:
       - name: Apply Android app icon
         run: node scripts/apply-android-icon.mjs
 
-      - name: Build debug APK
+      - name: Build release AAB
         working-directory: artifacts/sikka/android
-        run: ./gradlew assembleDebug
+        run: ./gradlew bundleRelease
 
-      - name: Upload APK
+      - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: sikka-debug-apk
-          path: artifacts/sikka/android/app/build/outputs/apk/debug/*.apk
+          name: sikka-release-aab
+          path: artifacts/sikka/android/app/build/outputs/bundle/release/*.aab
