@@ -1,5 +1,13 @@
 apply plugin: 'com.android.application'
 
+def releaseStoreFile = System.getenv("ANDROID_RELEASE_STORE_FILE")
+def releaseStorePassword = System.getenv("ANDROID_RELEASE_STORE_PASSWORD")
+def releaseKeyAlias = System.getenv("ANDROID_RELEASE_KEY_ALIAS")
+def releaseKeyPassword = System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
+def releaseSigningReady = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every {
+    it != null && it.toString().trim()
+}
+
 android {
     namespace = "com.sikkago.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -22,11 +30,33 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (releaseSigningReady) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseSigningReady) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def releaseTaskRequested = graph.allTasks.any { task ->
+        task.path.toLowerCase().contains("bundlerelease") || task.path.toLowerCase().contains("assemblerelease")
+    }
+    if (releaseTaskRequested && !releaseSigningReady) {
+        throw new GradleException("Release signing is missing. Set ANDROID_KEYSTORE_BASE64, ANDROID_RELEASE_STORE_PASSWORD, ANDROID_RELEASE_KEY_ALIAS, and ANDROID_RELEASE_KEY_PASSWORD in GitHub Secrets.")
     }
 }
 
