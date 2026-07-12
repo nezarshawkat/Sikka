@@ -3,13 +3,14 @@
 Apply from the repository root:
 
 ```bash
-unzip -o sikka-signed-release-aab-workflow-linux.zip
+unzip -o sikka-signed-sikka-app-aab-workflow-linux.zip
 ```
 
 This zip wires GitHub Actions to build a signed release Android App Bundle:
 
 - workflow: `.github/workflows/android-apk.yml`
 - Gradle signing config: `artifacts/sikka/android/app/build.gradle`
+- package name / application id: `sikka.app`
 - build command: `./gradlew bundleRelease`
 - uploaded artifact: `sikka-release-aab`
 - output path: `artifacts/sikka/android/app/build/outputs/bundle/release/*.aab`

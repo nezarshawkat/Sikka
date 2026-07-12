@@ -12,7 +12,7 @@ android {
     namespace = "com.sikkago.app"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.sikkago.app"
+        applicationId "sikka.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 19
