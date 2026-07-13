@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
@@ -53,6 +53,7 @@ const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
 const FLIGHT_CITY_IDS = new Set(['cairo', 'alexandria', 'luxor', 'aswan', 'hurghada', 'sharm']);
 const NILE_CITY_IDS = new Set(['cairo', 'giza', 'luxor', 'aswan']);
 const PENDING_FEEDBACK_KEY = 'sikkaPendingTripFeedback';
+const EARTH_RADIUS_M = 6371000;
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
@@ -67,6 +68,59 @@ const reverseGeocode = async (lat: number, lng: number, language: string): Promi
   } catch {
     return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
   }
+};
+
+const haversineMeters = (a: [number, number], b: [number, number]) => {
+  const dLat = ((b[1] - a[1]) * Math.PI) / 180;
+  const dLng = ((b[0] - a[0]) * Math.PI) / 180;
+  const lat1 = (a[1] * Math.PI) / 180;
+  const lat2 = (b[1] * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return EARTH_RADIUS_M * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+};
+
+const projectPointToSegment = (
+  point: [number, number],
+  start: [number, number],
+  end: [number, number],
+) => {
+  const latRad = ((point[1] + start[1] + end[1]) / 3 * Math.PI) / 180;
+  const scaleX = Math.cos(latRad);
+  const px = point[0] * scaleX;
+  const py = point[1];
+  const ax = start[0] * scaleX;
+  const ay = start[1];
+  const bx = end[0] * scaleX;
+  const by = end[1];
+  const dx = bx - ax;
+  const dy = by - ay;
+  const denom = dx * dx + dy * dy;
+  const t = denom > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / denom)) : 0;
+  const projected: [number, number] = [
+    (ax + dx * t) / scaleX,
+    ay + dy * t,
+  ];
+  return { projected, distance: haversineMeters(point, projected), t };
+};
+
+const remainingCoordsFromPosition = (
+  coords: [number, number][],
+  userPos: { lat: number; lng: number } | null,
+) => {
+  if (!userPos || coords.length < 2) return coords;
+  const userPoint: [number, number] = [userPos.lng, userPos.lat];
+  let best: { index: number; projected: [number, number]; distance: number; t: number } | null = null;
+  for (let index = 0; index < coords.length - 1; index++) {
+    const candidate = projectPointToSegment(userPoint, coords[index], coords[index + 1]);
+    if (!best || candidate.distance < best.distance) {
+      best = { index, ...candidate };
+    }
+  }
+  if (!best) return coords;
+  const remaining = [best.projected, ...coords.slice(best.index + 1)];
+  return remaining.length >= 2 ? remaining : [];
 };
 
 interface ActiveTripPlan extends GuidePlan {
@@ -767,17 +821,23 @@ const Index = () => {
     if (!pipMapOnly) setIsFollowingUser(false);
   }, [pipMapOnly]);
 
-  const routeGeoJSON = {
+  const routeGeoJSON = useMemo(() => ({
     type: 'FeatureCollection' as const,
-    features: routeCoords.map(({ segIndex, coords }) => ({
-      type: 'Feature' as const,
-      properties: {
-        color: activeTrip?.segments[segIndex]?.color || '#3B82F6',
-        name: activeTrip?.segments[segIndex]?.line_number || activeTrip?.segments[segIndex]?.transport_name || '',
-      },
-      geometry: { type: 'LineString' as const, coordinates: coords },
-    })),
-  };
+    features: routeCoords
+      .flatMap(({ segIndex, coords }) => {
+        if (segIndex < currentSegIdx) return [];
+        const visibleCoords = segIndex === currentSegIdx ? remainingCoordsFromPosition(coords, userPos) : coords;
+        if (visibleCoords.length < 2) return [];
+        return [{
+          type: 'Feature' as const,
+          properties: {
+            color: activeTrip?.segments[segIndex]?.color || '#3B82F6',
+            name: activeTrip?.segments[segIndex]?.line_number || activeTrip?.segments[segIndex]?.transport_name || '',
+          },
+          geometry: { type: 'LineString' as const, coordinates: visibleCoords },
+        }];
+      }),
+  }), [activeTrip?.segments, currentSegIdx, routeCoords, userPos]);
 
   if (isLoading) {
     return (
@@ -988,7 +1048,7 @@ const Index = () => {
               exit={{ scale: 0, opacity: 0 }}
               transition={{ delay: 0.2 }}
               className="absolute right-4 z-20"
-              style={{ bottom: `calc(${guideSheetHeight + 8}px + env(safe-area-inset-bottom, 0px))` }}
+              style={{ bottom: 'calc(198px + env(safe-area-inset-bottom, 0px))' }}
             >
               <Button
                 variant="outline"
