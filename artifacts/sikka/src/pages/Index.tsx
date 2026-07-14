@@ -81,46 +81,41 @@ const haversineMeters = (a: [number, number], b: [number, number]) => {
   return EARTH_RADIUS_M * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 };
 
-const projectPointToSegment = (
-  point: [number, number],
-  start: [number, number],
-  end: [number, number],
-) => {
-  const latRad = ((point[1] + start[1] + end[1]) / 3 * Math.PI) / 180;
-  const scaleX = Math.cos(latRad);
-  const px = point[0] * scaleX;
-  const py = point[1];
-  const ax = start[0] * scaleX;
-  const ay = start[1];
-  const bx = end[0] * scaleX;
-  const by = end[1];
-  const dx = bx - ax;
-  const dy = by - ay;
-  const denom = dx * dx + dy * dy;
-  const t = denom > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / denom)) : 0;
-  const projected: [number, number] = [
-    (ax + dx * t) / scaleX,
-    ay + dy * t,
-  ];
-  return { projected, distance: haversineMeters(point, projected), t };
+const routeLengthMeters = (coords: [number, number][]) => {
+  let total = 0;
+  for (let i = 1; i < coords.length; i++) {
+    total += haversineMeters(coords[i - 1], coords[i]);
+  }
+  return total;
 };
 
-const remainingCoordsFromPosition = (
+const trimCoordsBeforeDistance = (
   coords: [number, number][],
-  userPos: { lat: number; lng: number } | null,
+  metersToTrim: number,
 ) => {
-  if (!userPos || coords.length < 2) return coords;
-  const userPoint: [number, number] = [userPos.lng, userPos.lat];
-  let best: { index: number; projected: [number, number]; distance: number; t: number } | null = null;
-  for (let index = 0; index < coords.length - 1; index++) {
-    const candidate = projectPointToSegment(userPoint, coords[index], coords[index + 1]);
-    if (!best || candidate.distance < best.distance) {
-      best = { index, ...candidate };
+  if (coords.length < 2) return [];
+  if (metersToTrim <= 0) return coords;
+
+  let consumed = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const start = coords[i];
+    const end = coords[i + 1];
+    const segmentLength = haversineMeters(start, end);
+    if (segmentLength <= 0) continue;
+
+    if (consumed + segmentLength > metersToTrim) {
+      const ratio = Math.max(0, Math.min(1, (metersToTrim - consumed) / segmentLength));
+      const trimmedStart: [number, number] = [
+        start[0] + (end[0] - start[0]) * ratio,
+        start[1] + (end[1] - start[1]) * ratio,
+      ];
+      return [trimmedStart, ...coords.slice(i + 1)];
     }
+
+    consumed += segmentLength;
   }
-  if (!best) return coords;
-  const remaining = [best.projected, ...coords.slice(best.index + 1)];
-  return remaining.length >= 2 ? remaining : [];
+
+  return [];
 };
 
 interface ActiveTripPlan extends GuidePlan {
@@ -500,6 +495,7 @@ const Index = () => {
   const {
     userPos,
     progress,
+    routeProgressMeters,
     remainingMinutes,
     isOffRoute,
     speedKmh,
@@ -821,12 +817,33 @@ const Index = () => {
     if (!pipMapOnly) setIsFollowingUser(false);
   }, [pipMapOnly]);
 
-  const routeGeoJSON = useMemo(() => ({
-    type: 'FeatureCollection' as const,
-    features: routeCoords
-      .flatMap(({ segIndex, coords }) => {
-        if (segIndex < currentSegIdx) return [];
-        const visibleCoords = segIndex === currentSegIdx ? remainingCoordsFromPosition(coords, userPos) : coords;
+  const routeGeoJSON = useMemo(() => {
+    const ordered = [...routeCoords].sort((a, b) => a.segIndex - b.segIndex);
+    let currentSegmentStartMeters = 0;
+    for (const { segIndex, coords } of ordered) {
+      if (segIndex >= currentSegIdx) break;
+      currentSegmentStartMeters += routeLengthMeters(coords);
+    }
+
+    const consumedMeters = Math.max(0, routeProgressMeters, currentSegmentStartMeters);
+    let routeCursorMeters = 0;
+
+    return {
+      type: 'FeatureCollection' as const,
+      features: ordered.flatMap(({ segIndex, coords }) => {
+        const segmentLength = routeLengthMeters(coords);
+        const segmentStartMeters = routeCursorMeters;
+        routeCursorMeters += segmentLength;
+
+        if (coords.length < 2 || segmentLength <= 0) return [];
+
+        const metersIntoSegment = consumedMeters - segmentStartMeters;
+        if (metersIntoSegment >= segmentLength - 0.5) return [];
+
+        const visibleCoords = metersIntoSegment > 0
+          ? trimCoordsBeforeDistance(coords, metersIntoSegment)
+          : coords;
+
         if (visibleCoords.length < 2) return [];
         return [{
           type: 'Feature' as const,
@@ -837,7 +854,8 @@ const Index = () => {
           geometry: { type: 'LineString' as const, coordinates: visibleCoords },
         }];
       }),
-  }), [activeTrip?.segments, currentSegIdx, routeCoords, userPos]);
+    };
+  }, [activeTrip?.segments, currentSegIdx, routeCoords, routeProgressMeters]);
 
   if (isLoading) {
     return (

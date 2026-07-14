@@ -49,6 +49,59 @@ function haversine(aLat: number, aLng: number, bLat: number, bLng: number): numb
   return EARTH_R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
+function routeLengthMeters(coords: [number, number][]): number {
+  let total = 0;
+  for (let i = 1; i < coords.length; i++) {
+    total += haversine(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0]);
+  }
+  return total;
+}
+
+function projectUserToRoute(
+  userPos: UserPos,
+  coords: [number, number][],
+): { cumulativeM: number; distanceM: number } | null {
+  if (coords.length < 2) return null;
+
+  const point: [number, number] = [userPos.lng, userPos.lat];
+  let best: { cumulativeM: number; distanceM: number } | null = null;
+  let cumulativeBefore = 0;
+
+  for (let i = 0; i < coords.length - 1; i++) {
+    const start = coords[i];
+    const end = coords[i + 1];
+    const segmentLength = haversine(start[1], start[0], end[1], end[0]);
+    if (segmentLength <= 0) continue;
+
+    const latRad = ((point[1] + start[1] + end[1]) / 3 * Math.PI) / 180;
+    const scaleX = Math.max(0.000001, Math.cos(latRad));
+    const px = point[0] * scaleX;
+    const py = point[1];
+    const ax = start[0] * scaleX;
+    const ay = start[1];
+    const bx = end[0] * scaleX;
+    const by = end[1];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const denom = dx * dx + dy * dy;
+    const t = denom > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / denom)) : 0;
+    const projected: [number, number] = [
+      (ax + dx * t) / scaleX,
+      ay + dy * t,
+    ];
+    const distanceM = haversine(point[1], point[0], projected[1], projected[0]);
+    const candidate = { cumulativeM: cumulativeBefore + segmentLength * t, distanceM };
+
+    if (!best || candidate.distanceM < best.distanceM) {
+      best = candidate;
+    }
+
+    cumulativeBefore += segmentLength;
+  }
+
+  return best;
+}
+
 /**
  * GPS tracking for an active trip. Watches the user position, computes overall
  * progress along the full route polyline, auto-suggests segment advance when the
@@ -64,6 +117,8 @@ export function useTripTracking({
 }: UseTripTrackingArgs) {
   const [userPos, setUserPos] = useState<UserPos | null>(null);
   const [progress, setProgress] = useState(0); // 0..100 over whole route
+  const [routeProgressMeters, setRouteProgressMeters] = useState(0);
+  const [routeTotalMeters, setRouteTotalMeters] = useState(0);
   const [segProgress, setSegProgress] = useState(0); // 0..1 within current segment
   const [isOffRoute, setIsOffRoute] = useState(false);
   const [offRouteDistanceM, setOffRouteDistanceM] = useState(0);
@@ -75,6 +130,8 @@ export function useTripTracking({
   const approachedRef = useRef<Record<number, boolean>>({});
   const reachedRef = useRef<Record<number, boolean>>({});
   const lastSampleRef = useRef<UserPos | null>(null);
+  const routeProgressRef = useRef(0);
+  const routeSignatureRef = useRef('');
   const offRouteStreakRef = useRef(0);
   const onRouteStreakRef = useRef(0);
 
@@ -86,7 +143,11 @@ export function useTripTracking({
     lastSampleRef.current = null;
     offRouteStreakRef.current = 0;
     onRouteStreakRef.current = 0;
+    routeProgressRef.current = 0;
+    routeSignatureRef.current = '';
     setProgress(0);
+    setRouteProgressMeters(0);
+    setRouteTotalMeters(0);
     setSegProgress(0);
     setIsOffRoute(false);
     setOffRouteDistanceM(0);
@@ -135,44 +196,68 @@ export function useTripTracking({
     if (!userPos) return;
 
     const ordered = [...routeCoords].sort((a, b) => a.segIndex - b.segIndex);
-    const flat: [number, number][] = [];
+    const segStartDistances: number[] = [];
     const segDistances: number[] = []; // cumulative length at the END of each segment
-    let running = 0;
+    const segmentLengths: number[] = [];
+    let totalDist = 0;
+
     for (const r of ordered) {
-      for (let i = 0; i < r.coords.length; i++) {
-        flat.push(r.coords[i]);
-        if (flat.length > 1) {
-          const prev = flat[flat.length - 2];
-          const cur = flat[flat.length - 1];
-          running += haversine(prev[1], prev[0], cur[1], cur[0]);
-        }
-      }
-      segDistances[r.segIndex] = running;
+      const length = routeLengthMeters(r.coords);
+      segStartDistances[r.segIndex] = totalDist;
+      segmentLengths[r.segIndex] = length;
+      totalDist += length;
+      segDistances[r.segIndex] = totalDist;
     }
 
-    const totalDist = running;
+    const routeSignature = ordered
+      .map(({ segIndex, coords }) => {
+        const first = coords[0];
+        const last = coords[coords.length - 1];
+        return [
+          segIndex,
+          coords.length,
+          (segmentLengths[segIndex] ?? 0).toFixed(1),
+          first ? `${first[0]},${first[1]}` : '',
+          last ? `${last[0]},${last[1]}` : '',
+        ].join(':');
+      })
+      .join('|');
 
-    if (flat.length >= 2 && totalDist > 0) {
-      // Find nearest vertex on the flattened polyline and its cumulative distance.
-      let nearestIdx = 0;
+    if (routeSignatureRef.current !== routeSignature) {
+      routeSignatureRef.current = routeSignature;
+      routeProgressRef.current = 0;
+      setRouteProgressMeters(0);
+      setRouteTotalMeters(totalDist);
+      setProgress(0);
+      setSegProgress(0);
+    }
+
+    if (totalDist > 0) {
       let nearestD = Infinity;
-      let cum = 0;
       let nearestCum = 0;
-      for (let i = 0; i < flat.length; i++) {
-        if (i > 0) {
-          const prev = flat[i - 1];
-          const cur = flat[i];
-          cum += haversine(prev[1], prev[0], cur[1], cur[0]);
-        }
-        const d = haversine(userPos.lat, userPos.lng, flat[i][1], flat[i][0]);
-        if (d < nearestD) {
-          nearestD = d;
-          nearestIdx = i;
-          nearestCum = cum;
+      for (const r of ordered) {
+        const projected = projectUserToRoute(userPos, r.coords);
+        if (projected && projected.distanceM < nearestD) {
+          nearestD = projected.distanceM;
+          nearestCum = (segStartDistances[r.segIndex] ?? 0) + projected.cumulativeM;
         }
       }
-      void nearestIdx;
-      setProgress(Math.max(0, Math.min(100, (nearestCum / totalDist) * 100)));
+
+      const currentRoute = ordered.find((r) => r.segIndex === currentSegIdx);
+      const currentProjection = currentRoute ? projectUserToRoute(userPos, currentRoute.coords) : null;
+      const segStartCum = segStartDistances[currentSegIdx] ?? 0;
+      const segEndCum = segDistances[currentSegIdx] ?? totalDist;
+      const segLen = Math.max(1, segEndCum - segStartCum);
+      const rawProgressCum = currentProjection && currentProjection.distanceM <= OFF_ROUTE_THRESHOLD_M
+        ? segStartCum + currentProjection.cumulativeM
+        : routeProgressRef.current;
+      const boundedProgressCum = Math.max(segStartCum, Math.min(segEndCum, rawProgressCum));
+      const nextRouteProgress = Math.min(totalDist, Math.max(routeProgressRef.current, boundedProgressCum));
+
+      routeProgressRef.current = nextRouteProgress;
+      setRouteProgressMeters(nextRouteProgress);
+      setRouteTotalMeters(totalDist);
+      setProgress(Math.max(0, Math.min(100, (nextRouteProgress / totalDist) * 100)));
 
       // Off-route detection: nearestD is the distance from the rider's actual
       // GPS fix to the closest point on the expected route polyline. A
@@ -180,7 +265,9 @@ export function useTripTracking({
       // missed a turn on foot, or got off somewhere unexpected — not just GPS
       // jitter, which is why we require a streak in either direction before
       // flipping state.
-      setOffRouteDistanceM(Math.round(nearestD));
+      if (Number.isFinite(nearestD)) {
+        setOffRouteDistanceM(Math.round(nearestD));
+      }
       if (nearestD > OFF_ROUTE_THRESHOLD_M) {
         offRouteStreakRef.current += 1;
         onRouteStreakRef.current = 0;
@@ -201,16 +288,18 @@ export function useTripTracking({
         }
       }
 
-      // progress within the current segment
-      const segStartCum = currentSegIdx > 0 ? segDistances[currentSegIdx - 1] ?? 0 : 0;
-      const segEndCum = segDistances[currentSegIdx] ?? totalDist;
-      const segLen = Math.max(1, segEndCum - segStartCum);
-      const rawWithin = (nearestCum - segStartCum) / segLen;
+      const rawWithin = (nextRouteProgress - segStartCum) / segLen;
       const within = Math.max(0, Math.min(1, rawWithin));
       setSegProgress(within);
       if (nearestCum > segEndCum + PASSED_END_THRESHOLD_M) {
         setPassedSegmentEnd(true);
       }
+    } else {
+      routeProgressRef.current = 0;
+      setRouteProgressMeters(0);
+      setRouteTotalMeters(0);
+      setProgress(0);
+      setSegProgress(0);
     }
 
     // Auto-advance heuristic: near the current segment's end point.
@@ -256,6 +345,8 @@ export function useTripTracking({
   return {
     userPos,
     progress,
+    routeProgressMeters,
+    routeTotalMeters,
     segProgress,
     remainingMinutes,
     isOffRoute,
