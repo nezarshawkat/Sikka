@@ -252,6 +252,18 @@ export const transportReportsTable = pgTable("transport_reports", {
     directionConfirmed?: boolean;
     gpsQuality?: "good" | "ok" | "poor";
     direction?: string | null;
+    snapProvider?: "valhalla" | "osrm";
+    snapStatus?: "snapped" | "snap_failed" | "not_required";
+    validationStatus?: "accepted" | "deleted_invalid" | "pending_review";
+    validationReason?: string | null;
+    rawPointCount?: number;
+    cleanedPointCount?: number;
+    snappedPointCount?: number;
+    rawDistanceKm?: number;
+    snappedDistanceKm?: number;
+    snapAverageDeviationM?: number;
+    snapEndpointDeviationM?: number;
+    observedSpeedKmh?: number | null;
   }>(),
   priceEgp: real("price_egp"),
   status: text("status").notNull().default("pending"),

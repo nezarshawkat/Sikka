@@ -257,7 +257,7 @@ export function useTripTracking({
       routeProgressRef.current = nextRouteProgress;
       setRouteProgressMeters(nextRouteProgress);
       setRouteTotalMeters(totalDist);
-      setProgress(Math.max(0, Math.min(100, (nextRouteProgress / totalDist) * 100)));
+      setProgress(Math.max(0, Math.min(100, (nearestCum / totalDist) * 100)));
 
       // Off-route detection: nearestD is the distance from the rider's actual
       // GPS fix to the closest point on the expected route polyline. A

@@ -41,6 +41,14 @@ interface TransportReport {
     directionConfirmed?: boolean;
     gpsQuality?: 'good' | 'ok' | 'poor';
     direction?: string | null;
+    snapProvider?: 'valhalla' | 'osrm';
+    snapStatus?: 'snapped' | 'snap_failed' | 'not_required';
+    validationStatus?: 'accepted' | 'deleted_invalid' | 'pending_review';
+    rawPointCount?: number;
+    cleanedPointCount?: number;
+    snappedPointCount?: number;
+    snapAverageDeviationM?: number;
+    snapEndpointDeviationM?: number;
   } | null;
   status: string;
   createdAt: string;
@@ -324,6 +332,21 @@ const AdminDiscoveryContent = () => {
                     <Badge variant="outline" className="gap-1">
                       <ArrowRight className="h-3 w-3" />
                       {r.discoveryMeta.direction}
+                    </Badge>
+                  )}
+                  {r.discoveryMeta.snapStatus === 'snapped' && (
+                    <Badge variant="secondary">
+                      snapped{r.discoveryMeta.snapProvider ? `: ${r.discoveryMeta.snapProvider}` : ''}
+                    </Badge>
+                  )}
+                  {r.discoveryMeta.snappedPointCount != null && (
+                    <Badge variant="outline">
+                      {r.discoveryMeta.cleanedPointCount ?? '?'} {'->'} {r.discoveryMeta.snappedPointCount} pts
+                    </Badge>
+                  )}
+                  {r.discoveryMeta.snapAverageDeviationM != null && (
+                    <Badge variant="outline">
+                      avg drift {r.discoveryMeta.snapAverageDeviationM}m
                     </Badge>
                   )}
                 </div>
