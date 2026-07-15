@@ -819,13 +819,7 @@ const Index = () => {
 
   const routeGeoJSON = useMemo(() => {
     const ordered = [...routeCoords].sort((a, b) => a.segIndex - b.segIndex);
-    let currentSegmentStartMeters = 0;
-    for (const { segIndex, coords } of ordered) {
-      if (segIndex >= currentSegIdx) break;
-      currentSegmentStartMeters += routeLengthMeters(coords);
-    }
-
-    const consumedMeters = Math.max(0, routeProgressMeters, currentSegmentStartMeters);
+    const consumedMeters = Math.max(0, routeProgressMeters);
     let routeCursorMeters = 0;
 
     return {
@@ -855,7 +849,7 @@ const Index = () => {
         }];
       }),
     };
-  }, [activeTrip?.segments, currentSegIdx, routeCoords, routeProgressMeters]);
+  }, [activeTrip?.segments, routeCoords, routeProgressMeters]);
 
   if (isLoading) {
     return (

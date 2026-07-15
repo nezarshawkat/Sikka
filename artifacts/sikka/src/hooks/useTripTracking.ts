@@ -243,16 +243,13 @@ export function useTripTracking({
         }
       }
 
-      const currentRoute = ordered.find((r) => r.segIndex === currentSegIdx);
-      const currentProjection = currentRoute ? projectUserToRoute(userPos, currentRoute.coords) : null;
       const segStartCum = segStartDistances[currentSegIdx] ?? 0;
       const segEndCum = segDistances[currentSegIdx] ?? totalDist;
       const segLen = Math.max(1, segEndCum - segStartCum);
-      const rawProgressCum = currentProjection && currentProjection.distanceM <= OFF_ROUTE_THRESHOLD_M
-        ? segStartCum + currentProjection.cumulativeM
+      const gpsRouteProgress = nearestD <= OFF_ROUTE_THRESHOLD_M
+        ? nearestCum
         : routeProgressRef.current;
-      const boundedProgressCum = Math.max(segStartCum, Math.min(segEndCum, rawProgressCum));
-      const nextRouteProgress = Math.min(totalDist, Math.max(routeProgressRef.current, boundedProgressCum));
+      const nextRouteProgress = Math.min(totalDist, Math.max(routeProgressRef.current, gpsRouteProgress));
 
       routeProgressRef.current = nextRouteProgress;
       setRouteProgressMeters(nextRouteProgress);
