@@ -18,6 +18,7 @@ interface ContributeTransportDialogProps {
   initialFromArea?: string;
   initialToArea?: string;
   initialRouteCompleteness?: 'full' | 'partial';
+  discoverySource?: 'profile' | 'trip' | 'manual' | 'native';
   onSubmitted?: () => void;
 }
 
@@ -42,6 +43,7 @@ export default function ContributeTransportDialog({
   initialFromArea = '',
   initialToArea = '',
   initialRouteCompleteness = 'full',
+  discoverySource = 'manual',
   onSubmitted,
 }: ContributeTransportDialogProps) {
   const isTraceSubmit = !!initialTrace?.length;
@@ -156,6 +158,7 @@ export default function ContributeTransportDialog({
           : null,
         routeCompleteness,
         directionConfirmed,
+        discoverySource,
       });
       toast.success(t('contributeSubmitted', language));
       reset();

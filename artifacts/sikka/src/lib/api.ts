@@ -15,7 +15,7 @@ const staticGetCache = new Map<string, Promise<unknown>>();
 const ADMIN_CACHE_DB = 'sikka-admin-static-cache';
 const ADMIN_CACHE_STORE = 'responses';
 const OFFLINE_QUEUE_KEY = "sikka-offline-post-queue";
-const QUEUEABLE_POSTS = new Set(["/reports", "/reviews", "/transport-reports"]);
+const QUEUEABLE_POSTS = new Set(["/reports", "/reviews", "/transport-reports", "/trips"]);
 
 export function setAuthTokenProvider(provider: AuthTokenProvider | null) {
   authTokenProvider = provider;

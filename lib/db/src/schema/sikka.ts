@@ -252,6 +252,7 @@ export const transportReportsTable = pgTable("transport_reports", {
     directionConfirmed?: boolean;
     gpsQuality?: "good" | "ok" | "poor";
     direction?: string | null;
+    source?: "profile" | "trip" | "manual" | "native";
     snapProvider?: "valhalla" | "osrm";
     snapStatus?: "snapped" | "snap_failed" | "not_required";
     validationStatus?: "accepted" | "deleted_invalid" | "pending_review";

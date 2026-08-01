@@ -33,11 +33,13 @@ const VALHALLA_URL = (process.env.VALHALLA_URL || "").replace(/\/+$/, "");
 
 type TracePoint = [number, number];
 type SnapProvider = "valhalla" | "osrm";
+type DiscoverySource = "profile" | "trip" | "manual" | "native";
 type DiscoveryMeta = {
   routeCompleteness?: "full" | "partial";
   directionConfirmed?: boolean;
   gpsQuality?: "good" | "ok" | "poor";
   direction?: string | null;
+  source?: DiscoverySource;
   snapProvider?: SnapProvider;
   snapStatus?: "snapped" | "snap_failed" | "not_required";
   validationStatus?: "accepted" | "deleted_invalid" | "pending_review";
@@ -150,15 +152,20 @@ function sanitizeDiscoveryMeta(input: {
   directionConfirmed?: unknown;
   gpsQuality?: unknown;
   direction?: unknown;
+  source?: unknown;
 }): DiscoveryMeta {
   const routeCompleteness = input.routeCompleteness === "partial" ? "partial" : "full";
   const gpsQuality = input.gpsQuality === "poor" || input.gpsQuality === "ok" ? input.gpsQuality : "good";
   const direction = typeof input.direction === "string" && input.direction.trim() ? input.direction.trim() : null;
+  const source = input.source === "profile" || input.source === "trip" || input.source === "native"
+    ? input.source
+    : "manual";
   return {
     routeCompleteness,
     directionConfirmed: input.directionConfirmed === true,
     gpsQuality,
     direction,
+    source,
   };
 }
 
@@ -529,6 +536,7 @@ async function promoteDiscoveredRoute(params: {
   transportTypeId: string | null;
   fromArea: string | null;
   toArea: string | null;
+  discoverySource?: DiscoverySource;
 }) {
   const baseFilters: SQL[] = [sql`${transportReportsTable.gpsTrace} is not null`];
   if (params.transportTypeId) {
@@ -629,6 +637,8 @@ async function promoteDiscoveredRoute(params: {
       dataSource: transitLinesTable.dataSource,
       sourcePriority: transitLinesTable.sourcePriority,
       observedSpeedKmh: transitLinesTable.observedSpeedKmh,
+      routeStatus: transitLinesTable.routeStatus,
+      routeQuality: transitLinesTable.routeQuality,
     })
     .from(transitLinesTable)
     .where(eq(transitLinesTable.transportTypeId, params.transportTypeId));
@@ -666,14 +676,25 @@ async function promoteDiscoveredRoute(params: {
     return true;
   });
 
-  const match = geometricMatch ?? corridorMatch;
+  const baseMatch = geometricMatch ?? corridorMatch;
+  const copyMatchedRoute = params.discoverySource === "trip" || params.discoverySource === "native";
+  const existingTripCopy = copyMatchedRoute
+    ? existingLines.find((line) => {
+        const quality = (line.routeQuality ?? {}) as { source?: string };
+        if (quality.source !== "trip_discovery_copy") return false;
+        const coords = (line.routePath?.coordinates ?? null) as TracePoint[] | null;
+        return !!coords && samePath(path, coords);
+      })
+    : null;
+  const updateTarget = copyMatchedRoute ? existingTripCopy : baseMatch;
+  const lineageMatch = updateTarget ?? baseMatch;
 
   const lineNumber = (() => {
     if (!isBus) return null;
-    const existing = splitLineNumbers(match?.lineNumber);
+    const existing = splitLineNumbers(lineageMatch?.lineNumber);
     const next = [...existing];
     for (const num of currentNumbers) {
-      if (match && !recentNumberIsDominant(num, samePathReports)) continue;
+      if (lineageMatch && !recentNumberIsDominant(num, samePathReports)) continue;
       next.push(num);
     }
     return joinLineNumbers(next.length ? next : currentNumbers);
@@ -684,10 +705,25 @@ async function promoteDiscoveredRoute(params: {
     : `${params.transportName}${lineNumber ? ` ${lineNumber}` : ""}: ${fromArea} → ${toArea}`;
   const routePath = { type: "LineString", coordinates: path };
   const priceEgp = Number.isFinite(avgPrice) && avgPrice > 0 ? avgPrice : isMicrobus ? 5 : 10;
+  const confidenceScore = Math.min(0.95, 0.65 + samePathReports.length * 0.05 + completeTraces.length * 0.03);
 
-  if (match) {
-    const existingCoords = (match.routePath?.coordinates ?? []) as TracePoint[];
-    const isCorridorFallback = !geometricMatch;
+  if (updateTarget) {
+    const existingCoords = (updateTarget.routePath?.coordinates ?? []) as TracePoint[];
+    const isCorridorFallback = updateTarget.id === corridorMatch?.id && !geometricMatch;
+    const routeQuality = copyMatchedRoute
+      ? {
+          ...((updateTarget.routeQuality ?? {}) as Record<string, unknown>),
+          source: "trip_discovery_copy",
+          generatedAt: new Date().toISOString(),
+          confidenceScore,
+          metrics: {
+            ...(((updateTarget.routeQuality as { metrics?: Record<string, unknown> } | null)?.metrics) ?? {}),
+            copiedFromLineId: baseMatch?.id ?? null,
+            matchedReportCount: samePathReports.length,
+            discoverySource: params.discoverySource ?? "trip",
+          },
+        }
+      : updateTarget.routeQuality;
     await db
       .update(transitLinesTable)
       .set({
@@ -700,7 +736,7 @@ async function promoteDiscoveredRoute(params: {
         // check entirely (i.e. it's the broken/looping placeholder we're replacing),
         // so the fresh GPS path always wins there. For a genuine geometric match,
         // keep whichever polyline has more detail.
-        routePath: isCorridorFallback || path.length > existingCoords.length ? routePath : match.routePath,
+        routePath: isCorridorFallback || path.length > existingCoords.length ? routePath : updateTarget.routePath,
         // The line always runs fromArea -> toArea by construction (fromArea is derived
         // from the path's start, toArea from its end), so the direction is "forward".
         routeDirection: "forward",
@@ -708,19 +744,23 @@ async function promoteDiscoveredRoute(params: {
         // Only overwrite with a fresh measurement when we have one this run —
         // never null-out a previously-established speed just because this
         // particular batch of reports didn't include enough timed traces.
-        observedSpeedKmh: observedSpeedKmh ?? match.observedSpeedKmh,
+        observedSpeedKmh: observedSpeedKmh ?? updateTarget.observedSpeedKmh,
         hasFixedStops: false,
         isActive: true,
         dataSource: "discovery",
         sourcePriority: 40,
-        confidenceScore: Math.min(0.95, 0.65 + samePathReports.length * 0.05 + completeTraces.length * 0.03),
-        routeStatus: "active",
+        confidenceScore,
+        routeStatus: copyMatchedRoute ? "needs_review" : "active",
+        routeQuality,
         lastConfirmedAt: new Date(),
-        needsReviewReason: null,
+        needsReviewReason: copyMatchedRoute
+          ? "Trip discovery matched an existing route; saved as a separate copy for admin review."
+          : null,
         updatedAt: new Date(),
       })
-      .where(eq(transitLinesTable.id, match.id));
+      .where(eq(transitLinesTable.id, updateTarget.id));
   } else {
+    const isMatchedTripCopy = copyMatchedRoute && !!baseMatch;
     await db.insert(transitLinesTable).values({
       transportTypeId: params.transportTypeId,
       lineNumber,
@@ -740,7 +780,30 @@ async function promoteDiscoveredRoute(params: {
       dataSource: "discovery",
       sourcePriority: 40,
       confidenceScore: Math.min(0.9, 0.6 + samePathReports.length * 0.05 + completeTraces.length * 0.03),
-      routeStatus: "active",
+      routeStatus: isMatchedTripCopy ? "needs_review" : "active",
+      routeQuality: isMatchedTripCopy
+        ? {
+            source: "trip_discovery_copy",
+            generatedAt: new Date().toISOString(),
+            confidenceScore,
+            metrics: {
+              copiedFromLineId: baseMatch?.id ?? null,
+              matchedReportCount: samePathReports.length,
+              discoverySource: params.discoverySource ?? "trip",
+            },
+          }
+        : {
+            source: "discovery",
+            generatedAt: new Date().toISOString(),
+            confidenceScore,
+            metrics: {
+              matchedReportCount: samePathReports.length,
+              discoverySource: params.discoverySource ?? "manual",
+            },
+          },
+      needsReviewReason: isMatchedTripCopy
+        ? "Trip discovery matched an existing route; saved as a separate copy for admin review."
+        : null,
       lastConfirmedAt: new Date(),
     });
   }
@@ -826,7 +889,7 @@ router.get("/", requireAdmin, async (req, res) => {
 router.post("/", requireAuth, async (req, res) => {
   const {
     transportName, transportNumber, transportTypeId, fromArea, toArea,
-    gpsTrace, gpsTimestamps, stopsVisited, priceEgp, routeCompleteness, directionConfirmed, gpsQuality,
+    gpsTrace, gpsTimestamps, stopsVisited, priceEgp, routeCompleteness, directionConfirmed, gpsQuality, discoverySource,
   } = req.body;
 
   if (typeof transportName !== "string" || !transportName.trim()) {
@@ -848,7 +911,7 @@ router.post("/", requireAuth, async (req, res) => {
   // The direction of travel is simply the order the contributor rode the route in —
   // saved as a readable label so admins and the route engine can tell directions apart.
   const direction = cleanFromArea && cleanToArea ? `${cleanFromArea} -> ${cleanToArea}` : null;
-  const discoveryMeta = sanitizeDiscoveryMeta({ routeCompleteness, directionConfirmed, gpsQuality, direction });
+  const discoveryMeta = sanitizeDiscoveryMeta({ routeCompleteness, directionConfirmed, gpsQuality, direction, source: discoverySource });
   let finalGpsTrace = cleanGpsTrace;
   let finalGpsTimestamps = cleanGpsTimestamps;
   let finalDiscoveryMeta: DiscoveryMeta = {
@@ -947,6 +1010,7 @@ router.post("/", requireAuth, async (req, res) => {
       transportTypeId: resolvedTransportTypeId,
       fromArea: cleanFromArea,
       toArea: cleanToArea,
+      discoverySource: finalDiscoveryMeta.source,
     });
   }
   return res.json(row);
@@ -970,6 +1034,7 @@ router.put("/:id", requireAdmin, async (req, res) => {
       transportTypeId: row.transportTypeId,
       fromArea: row.fromArea,
       toArea: row.toArea,
+      discoverySource: (row.discoveryMeta as DiscoveryMeta | null | undefined)?.source,
     });
   }
   return res.json(row);

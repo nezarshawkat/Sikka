@@ -7,6 +7,22 @@ import { countSuspectPaths } from "../engine/graph";
 
 const router = Router();
 
+function normalizeNationalityLabel(value: string | null | undefined): string {
+  const clean = (value ?? "").trim();
+  if (!clean) return "Unknown";
+  const key = clean.toLowerCase();
+  if (["eg", "egypt", "egyptian", "egyptians", "مصر", "مصري", "مصرى", "مصرية"].includes(key)) {
+    return "Egyptian";
+  }
+  if (["foreigner", "foreign", "foreigns", "foriegn", "foriegns"].includes(key)) {
+    return "Foreign";
+  }
+  return clean
+    .split(/\s+/)
+    .map((part) => part ? part[0].toUpperCase() + part.slice(1).toLowerCase() : part)
+    .join(" ");
+}
+
 router.get("/", requireAdmin, async (_req, res) => {
   const [
     users,
@@ -37,6 +53,12 @@ router.get("/", requireAdmin, async (_req, res) => {
       .groupBy(profilesTable.nationality),
   ]);
 
+  const nationalityMap = new Map<string, number>();
+  for (const row of nationalities) {
+    const label = normalizeNationalityLabel(row.nationality);
+    nationalityMap.set(label, (nationalityMap.get(label) ?? 0) + (Number(row.count) || 0));
+  }
+
   res.json({
     users: users[0]?.count ?? 0,
     trips: trips[0]?.count ?? 0,
@@ -49,10 +71,9 @@ router.get("/", requireAdmin, async (_req, res) => {
     pendingDiscovery: pendingDiscovery[0]?.count ?? 0,
     suspectPaths: pathHealth.suspect,
     suspectPathsTotal: pathHealth.total,
-    nationalities: nationalities.map((row) => ({
-      nationality: row.nationality || "Unknown",
-      count: Number(row.count) || 0,
-    })),
+    nationalities: [...nationalityMap.entries()]
+      .map(([nationality, count]) => ({ nationality, count }))
+      .sort((a, b) => b.count - a.count || a.nationality.localeCompare(b.nationality)),
   });
 });
 

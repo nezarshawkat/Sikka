@@ -46,14 +46,17 @@ const slideVariants = {
   exit: { x: -50, opacity: 0 },
 };
 
-function countryOptionsFor(language: Language): CountryOption[] {
+function countryNameFor(code: string, language: Language): string {
   const intlWithDisplayNames = typeof Intl !== 'undefined' ? Intl as unknown as DisplayNamesFactory : null;
   const displayNames = intlWithDisplayNames && 'DisplayNames' in Intl
     ? new intlWithDisplayNames.DisplayNames([language], { type: 'region' })
     : null;
+  return displayNames?.of(code) || code;
+}
 
+function countryOptionsFor(language: Language): CountryOption[] {
   return COUNTRY_CODES
-    .map((code) => ({ code, name: displayNames?.of(code) || code }))
+    .map((code) => ({ code, name: countryNameFor(code, language) }))
     .filter((country) => country.code !== 'EG')
     .sort((a, b) => a.name.localeCompare(b.name, language));
 }
@@ -81,7 +84,7 @@ const Auth = () => {
     try {
       const res = await api.post<{ token: string; profile: Profile }>('/auth/local-rider', {
         displayName: name,
-        nationality: nationality === 'egyptian' ? 'Egyptian' : selectedCountry?.name || 'Foreigner',
+        nationality: nationality === 'egyptian' ? 'Egyptian' : countryNameFor(selectedCountryCode, 'en'),
         countryCode: nationality === 'egyptian' ? 'EG' : selectedCountry?.code,
         language,
       });

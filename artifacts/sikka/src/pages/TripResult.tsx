@@ -501,7 +501,17 @@ const TripResult = () => {
         <div className="sticky bottom-0 p-4 glass-panel border-t">
           <Button className="w-full h-14 text-base rounded-[2rem] gap-2" onClick={() => {
             const stored = sessionStorage.getItem('tripPlan');
-            if (stored) sessionStorage.setItem('activeTrip', stored);
+            if (stored) {
+              try {
+                const parsed = JSON.parse(stored);
+                sessionStorage.setItem('activeTrip', JSON.stringify({
+                  ...parsed,
+                  startedAt: parsed.startedAt ?? Date.now(),
+                }));
+              } catch {
+                sessionStorage.setItem('activeTrip', stored);
+              }
+            }
             navigate('/');
           }}>
             <Navigation className="h-5 w-5" />

@@ -81,6 +81,7 @@ export default function MicrobusUsedDialog({
         toArea: routeEnd.trim(),
         priceEgp: null,
         gpsTrace: null,
+        discoverySource: 'trip',
       });
       toast.success(t('busUsedThanks', language));
     } catch (err) {

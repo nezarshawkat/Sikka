@@ -15,6 +15,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import Map, { Marker, type MapRef } from 'react-map-gl/maplibre';
 import RouteLayers from '@/components/RouteLayers';
+import MapPoiMarkers from '@/components/MapPoiMarkers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import LocationAutocomplete from '@/components/LocationAutocomplete';
 import { useMapStyle } from '@/hooks/useMapStyle';
@@ -122,10 +123,23 @@ interface ActiveTripPlan extends GuidePlan {
   segments: (GuideSegment & { route_geometry?: [number, number][] | null; line_id?: string | null; line_number?: string | null })[];
   startLat: number; startLng: number; destLat: number; destLng: number;
   destination: string;
+  tripType?: string;
+  budget?: number | null;
+  startedAt?: number;
+  recordedTripId?: string;
+  tripReportQueued?: boolean;
 }
 
 const isBusOrMicrobusSegment = (seg?: Pick<GuideSegment, 'icon' | 'transport_name'>) =>
   !!seg && (seg.icon === 'bus' || /bus|microbus|Ù…ÙŠÙƒØ±ÙˆØ¨Ø§Øµ|Ø£ØªÙˆØ¨ÙŠØ³|Ø§ØªÙˆØ¨ÙŠØ³/i.test(seg.transport_name || ''));
+
+const tripReportKeyFor = (plan: ActiveTripPlan) => [
+  Math.round(plan.startLat * 10000),
+  Math.round(plan.startLng * 10000),
+  Math.round(plan.destLat * 10000),
+  Math.round(plan.destLng * 10000),
+  plan.startedAt ?? 'legacy',
+].join(':');
 
 const Index = () => {
   const { user, isLoading, language } = useAuth();
@@ -160,6 +174,7 @@ const Index = () => {
   const [contributionDialogOpen, setContributionDialogOpen] = useState(false);
   const [contributionOperator, setContributionOperator] = useState<'microbus' | 'bus'>('microbus');
   const contributionWatchRef = useRef<number | null>(null);
+  const tripReportInFlightRef = useRef<string | null>(null);
   const [pendingNativeDiscovery, setPendingNativeDiscovery] = useState<NativeDiscoveryTrip | null>(null);
   const [pendingNativeFromArea, setPendingNativeFromArea] = useState('');
   const [pendingNativeToArea, setPendingNativeToArea] = useState('');
@@ -419,6 +434,44 @@ const Index = () => {
     );
     if (activeTrip) saveOfflineTrip(activeTrip);
   }, [activeTrip, language]);
+
+  useEffect(() => {
+    if (!activeTrip || activeTrip.recordedTripId || activeTrip.tripReportQueued) return;
+    const key = `sikka-trip-reported:${tripReportKeyFor(activeTrip)}`;
+    if (localStorage.getItem(key) || tripReportInFlightRef.current === key) return;
+
+    tripReportInFlightRef.current = key;
+    api.post<{ id?: string; queued?: boolean }>('/trips', {
+      startLat: activeTrip.startLat,
+      startLng: activeTrip.startLng,
+      endLat: activeTrip.destLat,
+      endLng: activeTrip.destLng,
+      destinationName: activeTrip.destination || null,
+      budgetEgp: activeTrip.budget ?? null,
+      tripType: activeTrip.tripType || 'economic',
+      totalCostEgp: activeTrip.total_cost_egp,
+      totalTimeMinutes: activeTrip.total_duration_minutes,
+    }).then((row) => {
+      const status = row?.queued ? 'queued' : row?.id || 'reported';
+      localStorage.setItem(key, status);
+      setActiveTrip((current) => {
+        if (!current || `sikka-trip-reported:${tripReportKeyFor(current)}` !== key) return current;
+        const updated = {
+          ...current,
+          recordedTripId: row?.id ?? current.recordedTripId,
+          tripReportQueued: row?.queued ? true : current.tripReportQueued,
+        };
+        sessionStorage.setItem('activeTrip', JSON.stringify(updated));
+        saveOfflineTrip(updated);
+        return updated;
+      });
+    }).catch(() => {
+      // Analytics should never interrupt navigation. If this fails without being
+      // queued, the next app session can try again for the same active trip.
+    }).finally(() => {
+      tripReportInFlightRef.current = null;
+    });
+  }, [activeTrip]);
 
   /**
    * Detects whether a segment is a bus or microbus ride and, if so, opens the
@@ -877,6 +930,7 @@ const Index = () => {
         {activeTrip && routeCoords.length > 0 && (
           <RouteLayers id="home-route" data={routeGeoJSON} />
         )}
+        <MapPoiMarkers mapRef={mapRef} viewState={viewState} hidden={pipMapOnly} />
         {!activeTrip && contributionTrace.length > 1 && (
           <RouteLayers
             id="contribution-route"
@@ -1235,6 +1289,7 @@ const Index = () => {
         initialFromArea={pendingNativeFromArea}
         initialToArea={pendingNativeToArea}
         initialRouteCompleteness={pendingNativeDiscovery ? 'partial' : 'full'}
+        discoverySource={pendingNativeDiscovery ? 'trip' : 'profile'}
         language={language}
       />
 

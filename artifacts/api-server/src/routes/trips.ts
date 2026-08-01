@@ -12,11 +12,29 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 router.post("/", requireAuth, async (req, res) => {
-  const { startLat, startLng, endLat, endLng, destinationName, budgetEgp, tripType } = req.body;
+  const {
+    startLat, startLng, endLat, endLng, destinationName,
+    budgetEgp, tripType, totalCostEgp, totalTimeMinutes,
+  } = req.body;
+  const sLat = Number(startLat);
+  const sLng = Number(startLng);
+  const eLat = Number(endLat);
+  const eLng = Number(endLng);
+  if (![sLat, sLng, eLat, eLng].every(Number.isFinite)) {
+    return res.status(400).json({ error: "valid trip coordinates are required" });
+  }
+  const cleanTripType = typeof tripType === "string" && tripType.trim() ? tripType.trim().slice(0, 60) : "economic";
   const [row] = await db.insert(tripsTable).values({
     userId: req.userId!,
-    startLat, startLng, endLat, endLng,
-    destinationName, budgetEgp, tripType,
+    startLat: sLat,
+    startLng: sLng,
+    endLat: eLat,
+    endLng: eLng,
+    destinationName: typeof destinationName === "string" && destinationName.trim() ? destinationName.trim().slice(0, 240) : null,
+    budgetEgp: Number.isFinite(Number(budgetEgp)) ? Number(budgetEgp) : null,
+    tripType: cleanTripType,
+    totalCostEgp: Number.isFinite(Number(totalCostEgp)) ? Number(totalCostEgp) : null,
+    totalTimeMinutes: Number.isFinite(Number(totalTimeMinutes)) ? Math.round(Number(totalTimeMinutes)) : null,
   }).returning();
   res.json(row);
 });

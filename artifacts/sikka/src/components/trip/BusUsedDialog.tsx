@@ -84,6 +84,7 @@ export default function BusUsedDialog({
         toArea: toArea || null,
         priceEgp: null,
         gpsTrace: null,
+        discoverySource: 'trip',
       });
       toast.success(t('busUsedThanks', language));
     } catch (err) {
