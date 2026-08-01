@@ -104,7 +104,7 @@ function buildOverpassQuery(south: number, west: number, north: number, east: nu
   node["tourism"~"hotel|attraction|museum|gallery"]["name"](${bbox});
   node["leisure"~"park|sports_centre"]["name"](${bbox});
 );
-out body ${MAX_POIS};
+out body qt;
 `;
 }
 
@@ -151,7 +151,13 @@ export default function MapPoiMarkers({ mapRef, viewState, hidden = false }: Map
 
       controller = new AbortController();
       const query = buildOverpassQuery(south, west, north, east);
-      fetch(`${OVERPASS_ENDPOINT}?data=${encodeURIComponent(query)}`, {
+      fetch(OVERPASS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json,text/plain,*/*',
+          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        },
+        body: `data=${encodeURIComponent(query)}`,
         signal: controller.signal,
       })
         .then((res) => res.ok ? res.json() : null)
