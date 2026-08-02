@@ -9,7 +9,6 @@ import { db } from "@workspace/db";
 import { transportTypesTable, transitLinesTable } from "@workspace/db";
 import { eq, and, like } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAdmin";
-import { buildBusRoutePathAI } from "../utils/busPathEnricher";
 
 const router = Router();
 
@@ -52,7 +51,6 @@ const ALEX_ROUTES: LineSpec[] = [
 ];
 
 router.post("/", requireAdmin, async (req, res) => {
-  const generatePaths = req.query.generatePaths === "true";
   try {
     const results: string[] = [];
 
@@ -108,13 +106,6 @@ router.post("/", requireAdmin, async (req, res) => {
         .where(eq(transitLinesTable.lineNumber, lineNum)).limit(1);
       if (ex.length > 0) { results.push(`Skip: ${lineNum}`); continue; }
 
-      let routePath = null;
-      if (generatePaths) {
-        try {
-          routePath = (await buildBusRoutePathAI(fromArea, toArea, viaStops, "Alexandria")).routePath;
-        } catch { /* ignore */ }
-      }
-
       await db.insert(transitLinesTable).values({
         transportTypeId: typeId,
         lineNumber: lineNum,
@@ -127,9 +118,9 @@ router.post("/", requireAdmin, async (req, res) => {
         governorate: "Alexandria",
         priceEgp: 13, isActive: true,
         frequencyMinutes: 15, hasFixedStops: false,
-        routePath: routePath,
+        routePath: null,
       });
-      results.push(`Seeded: Alex Line ${line.n}${generatePaths && routePath ? " (with path)" : ""}`);
+      results.push(`Seeded: Alex Line ${line.n}`);
     }
 
     res.json({ success: true, count: results.filter(r => r.startsWith("Seeded")).length, results });

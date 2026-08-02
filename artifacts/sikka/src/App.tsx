@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { ClerkProvider, useClerk } from "@clerk/react";
@@ -107,28 +106,6 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
-function MapLibreRtlPluginLoader() {
-  useEffect(() => {
-    try {
-      const maybeMapLibre = maplibregl as typeof maplibregl & {
-        getRTLTextPluginStatus?: () => string;
-        setRTLTextPlugin?: (url: string, callback: ((error?: Error) => void) | null, lazy?: boolean) => void;
-      };
-      const status = maybeMapLibre.getRTLTextPluginStatus?.();
-      if (status === 'unavailable' || status === undefined) {
-        maybeMapLibre.setRTLTextPlugin?.(
-          'https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.3.0/dist/mapbox-gl-rtl-text.js',
-          null,
-          true,
-        );
-      }
-    } catch (err) {
-      console.warn('Unable to load RTL map text plugin', err);
-    }
-  }, []);
-  return null;
-}
-
 function AppRoutes() {
   const navigate = useNavigate();
 
@@ -143,7 +120,6 @@ function AppRoutes() {
     >
       <ClerkQueryClientCacheInvalidator />
       <AuthProvider>
-        <MapLibreRtlPluginLoader />
         <StartupSplash />
         <Toaster />
         <Sonner />

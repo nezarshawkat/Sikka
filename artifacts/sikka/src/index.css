@@ -112,18 +112,18 @@
   }
 }
 
-/* Mapbox overrides */
-.mapboxgl-ctrl-logo {
+/* Map control overrides */
+.maplibregl-ctrl-logo {
   display: none !important;
 }
 
-.mapboxgl-ctrl-attrib,
-.mapboxgl-ctrl-attrib-button {
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-attrib-button {
   display: none !important;
 }
 
-.mapboxgl-ctrl-bottom-left,
-.mapboxgl-ctrl-bottom-right {
+.maplibregl-ctrl-bottom-left,
+.maplibregl-ctrl-bottom-right {
   display: none !important;
 }
 
@@ -206,8 +206,7 @@
     -webkit-backdrop-filter: blur(18px) saturate(1.25);
   }
 
-  [dir="rtl"] .maplibregl-canvas,
-  [dir="rtl"] .mapboxgl-canvas {
+  [dir="rtl"] .maplibregl-canvas {
     font-family: 'Cairo', 'Noto Naskh Arabic', 'Noto Sans Arabic', sans-serif;
   }
 }

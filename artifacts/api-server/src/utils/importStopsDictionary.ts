@@ -2,7 +2,7 @@
  * Transit stop dictionary import (Task: data import foundation).
  *
  * Builds a verified, geo-located stop dictionary from the ONLY trustworthy
- * coordinate source we have: each transit_line's Mapbox-snapped `route_path`
+ * coordinate source we have: each transit_line's road-snapped `route_path`
  * geometry. For every line we walk its ordered stops (from_area, via_stops,
  * to_area) and resolve each name to a coordinate exactly the way the routing
  * engine's graph builder does (endpoints = exact terminal vertices, via stops =

@@ -54,9 +54,7 @@ router.use("/analytics", analyticsRouter);
 // Seed endpoints - admin-only, governorate-specific
 // POST /api/admin/seed-cairo              - Metro, Monorail, Train, NTA Bus, Serfis
 // POST /api/admin/seed-cairo?section=nta  - NTA Bus only
-// POST /api/admin/seed-cairo?generatePaths=true - also geocode + snap to roads
 // POST /api/admin/seed-alexandria         - Alexandria APTA routes
-// POST /api/admin/seed-alexandria?generatePaths=true
 router.use("/admin/seed-cairo", seedCairoRouter);
 router.use("/admin/seed-alexandria", seedAlexandriaRouter);
 router.use("/admin/seed-from-csv", seedFromCSVRouter);

@@ -8,17 +8,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { planTripOnDevice } from '@/lib/offlineTripPlanner';
 
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
-
 const langForGeocoding = (language: string) => language === 'zh' ? 'zh-CN' : language;
 
 async function reverseGeocode(lat: number, lng: number, language: string): Promise<string> {
   try {
     const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=${encodeURIComponent(langForGeocoding(language))}&limit=1&types=address,neighborhood,locality,place,poi`,
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1&accept-language=${encodeURIComponent(langForGeocoding(language))}`,
+      { headers: { 'Accept-Language': langForGeocoding(language) } },
     );
     const data = await res.json();
-    return data.features?.[0]?.place_name || '';
+    return data.display_name || '';
   } catch {
     return '';
   }

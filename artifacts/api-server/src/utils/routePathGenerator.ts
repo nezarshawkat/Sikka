@@ -3,9 +3,7 @@
  *
  * Geocoding and road-snapping here are built on free, key-less services
  * (Nominatim + OSRM) so this pipeline never requires a billed API account.
- * Mapbox functions are kept at the bottom as OPTIONAL fallbacks — they only
- * activate if a MAPBOX_TOKEN happens to be configured, and nothing in the
- * primary path depends on them.
+ * The primary path depends only on these free services.
  */
 
 function validLngLat(lng: number, lat: number): boolean {
@@ -320,8 +318,8 @@ export async function getWalkingDirections(
 }
 
 /**
- * Full free-stack snap: try Map Matching first (best fit for noisy hint
- * points), fall back to plain Directions, and fall back to the raw points
+ * Full free-stack snap: try map matching first (best fit for noisy hint
+ * points), fall back to plain directions, and fall back to the raw points
  * if both routing services are unreachable so a route is never dropped
  * entirely just because a routing call timed out.
  */
@@ -337,43 +335,15 @@ export async function snapToRoadsFree(
   return cleaned;
 }
 
-// ─── Optional Mapbox fallbacks (only used if MAPBOX_TOKEN is configured) ───
-// Nothing in the primary pipeline requires these; they exist purely as an
-// optional power-user fallback for accounts that already have a Mapbox token.
-
-function getMapboxToken(): string | null {
-  return process.env.MAPBOX_TOKEN || process.env.VITE_MAPBOX_TOKEN || null;
-}
-
 export async function geocodeStop(
   stop: string,
   city = "Cairo",
   country = "Egypt",
 ): Promise<[number, number] | null> {
-  // Free path first; only reach for Mapbox if Nominatim genuinely failed and a
-  // token happens to be configured.
   const free = await geocodeStopNominatim(stop, city);
   if (free) return free;
 
-  const token = getMapboxToken();
-  if (!token) return null;
-
-  const proximity = city.toLowerCase().includes("alex") ? "29.9553,31.1342" : "31.2357,30.0444";
-  const query = encodeURIComponent(`${stop}, ${city}, ${country}`);
-  const url =
-    `https://api.mapbox.com/geocoding/v5/mapbox.places/${query}.json`
-    + `?access_token=${token}&country=eg&language=en,ar&limit=1&proximity=${proximity}`;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) return null;
-    const data = await res.json() as { features?: Array<{ center: [number, number] }> };
-    if (!data.features?.length) return null;
-    const center = data.features[0].center;
-    if (center[0] < 24 || center[0] > 38 || center[1] < 21 || center[1] > 32) return null;
-    return center;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export async function snapFootOsrm(
@@ -389,24 +359,7 @@ export async function snapConnector(
   b: [number, number],
 ): Promise<[number, number][] | null> {
   const osrmProfile = profile === "walking" ? "foot" : "car";
-  const viaOsrm = await routeViaOsrm([a, b], osrmProfile);
-  if (viaOsrm) return viaOsrm;
-
-  const token = getMapboxToken();
-  if (!token || !validLngLat(a[0], a[1]) || !validLngLat(b[0], b[1])) return null;
-  const coordStr = `${a[0]},${a[1]};${b[0]},${b[1]}`;
-  const url =
-    `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}`
-    + `?geometries=geojson&overview=full&access_token=${token}`;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(6_000) });
-    if (!res.ok) return null;
-    const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
-    const coords = data.routes?.[0]?.geometry?.coordinates;
-    return coords && coords.length >= 2 ? coords : null;
-  } catch {
-    return null;
-  }
+  return routeViaOsrm([a, b], osrmProfile);
 }
 
 export async function snapToRoads(points: [number, number][]): Promise<[number, number][]> {

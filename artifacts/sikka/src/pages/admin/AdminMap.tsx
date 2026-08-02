@@ -18,7 +18,6 @@ interface GeoJSONLineString {
   coordinates: [number, number][];
 }
 
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
 const CAIRO = { latitude: 30.0444, longitude: 31.2357, zoom: 11 };
 const ROUTE_COLORS = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316', '#14B8A6', '#6366F1'];
 
@@ -45,6 +44,7 @@ const ICONS: Record<string, string> = {
 
 async function snapToRoads(points: [number, number][]): Promise<[number, number][]> {
   if (points.length < 2) return points;
+
   const chunks: [number, number][][] = [];
   for (let i = 0; i < points.length; i += 24) {
     const chunk = points.slice(i, i + 25);
@@ -54,9 +54,10 @@ async function snapToRoads(points: [number, number][]): Promise<[number, number]
 
   let allCoords: [number, number][] = [];
   for (const chunk of chunks) {
-    const coordStr = chunk.map(p => `${p[0]},${p[1]}`).join(';');
+    const [from, to] = chunk;
+    const coordStr = `${from[0]},${from[1]};${to[0]},${to[1]}`;
     try {
-      const res = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordStr}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`);
+      const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson&steps=false`);
       const data = await res.json();
       const coords = data.routes?.[0]?.geometry?.coordinates as [number, number][] | undefined;
       if (coords?.length) allCoords = allCoords.length ? [...allCoords, ...coords.slice(1)] : coords;
@@ -146,24 +147,12 @@ const AdminMap = () => {
     const key = stop.trim().toLowerCase();
     if (key in geocodeCacheRef.current) return geocodeCacheRef.current[key];
     try {
-      // Cairo center for proximity bias: 30.0444, 31.2357
       const query = `${stop.trim()}, Cairo, Egypt`;
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json`
-        + `?access_token=${MAPBOX_TOKEN}`
-        + `&country=eg`
-        + `&language=ar,en`
-        + `&limit=3`
-        + `&proximity=31.2357,30.0444`
-        + `&types=poi,address,neighborhood,locality,place,district`;
-      const res = await fetch(url);
-      const data = await res.json();
-      // Prefer results within ~50km of Cairo center
-      const features = data.features as Array<{ center: [number, number]; relevance: number }> | undefined;
-      const inCairo = features?.find(f => {
-        const [lng, lat] = f.center;
-        return Math.abs(lat - 30.0444) < 0.5 && Math.abs(lng - 31.2357) < 0.5;
-      });
-      const center = (inCairo || features?.[0])?.center;
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=eg&limit=3&accept-language=ar,en&q=${encodeURIComponent(query)}`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'ar,en' } });
+      const data = await res.json() as Array<{ lat: string; lon: string }>;
+      const feature = Array.isArray(data) && data.length ? data[0] : null;
+      const center = feature ? [Number(feature.lon), Number(feature.lat)] as [number, number] : null;
       geocodeCacheRef.current[key] = center || null;
       return center || null;
     } catch (err) {

@@ -716,8 +716,8 @@ async function onStreetGeometry(leg: PlanLeg): Promise<number[][]> {
     const b: [number, number] = [leg.endCoord.lng, leg.endCoord.lat];
     try {
       // Walk legs follow the pedestrian network (OSRM foot); taxi/tuktuk legs use
-      // the driving network (Mapbox). For walking, prefer OSRM foot and fall back
-      // to Mapbox walking so a transient OSRM failure still yields snapped geometry.
+      // the driving network (OSRM). For walking, prefer OSRM foot and fall back
+      // to the walking routing service so a transient OSRM failure still yields snapped geometry.
       let snapped: [number, number][] | null = null;
       if (leg.mode === "walk") {
         snapped = await snapFootOsrm(a, b);

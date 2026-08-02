@@ -1,7 +1,6 @@
 /**
  * Cairo transit seed — organized by transport type & governorate.
  * Covers: Metro, Monorail, Train, CTA Bus (الهيئة), NTA Bus (شركات النقل الجماعي), Serfis (السرفيس).
- * Optional query param: ?generatePaths=true  → geocode + snap each route to roads via Mapbox.
  * Stops are AREAS not fixed stops; users can board/alight anywhere along the route.
  */
 import { Router } from "express";
@@ -9,7 +8,6 @@ import { db } from "@workspace/db";
 import { transportTypesTable, transitLinesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAdmin";
-import { buildBusRoutePathAI } from "../utils/busPathEnricher";
 
 const router = Router();
 
@@ -315,7 +313,6 @@ const SERFIS_LINES: LineSpec[] = [
 // MAIN SEED HANDLER
 // ═══════════════════════════════════════════════════════════════════════════
 router.post("/", requireAdmin, async (req, res) => {
-  const generatePaths = req.query.generatePaths === "true";
   const section = (req.query.section as string) || "all";
   const results: string[] = [];
 
@@ -355,13 +352,6 @@ router.post("/", requireAdmin, async (req, res) => {
         .where(eq(transitLinesTable.lineNumber, line.lineNum)).limit(1);
       if (ex.length > 0) { results.push(`Skip: ${line.lineNum}`); continue; }
 
-      let routePath = null;
-      if (generatePaths && !line.hasFixedStops) {
-        try {
-          routePath = (await buildBusRoutePathAI(line.from, line.to, line.via, "Cairo")).routePath;
-        } catch { /* continue without path */ }
-      }
-
       await db.insert(transitLinesTable).values({
         transportTypeId: typeId,
         lineNumber: line.lineNum,
@@ -374,9 +364,9 @@ router.post("/", requireAdmin, async (req, res) => {
         isActive: true,
         frequencyMinutes: line.freq,
         hasFixedStops: line.hasFixedStops,
-        routePath: routePath,
+        routePath: null,
       });
-      results.push(`Seeded: ${line.lineNum}${generatePaths && routePath ? " ✓path" : ""}`);
+      results.push(`Seeded: ${line.lineNum}`);
     }
 
     const seeded = results.filter(r => r.startsWith("Seeded")).length;

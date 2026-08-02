@@ -30,7 +30,7 @@ function parseArgs(): Args {
     limit: Number(get("limit")) || Infinity,
     offset: Number(get("offset")) || 0,
     city: get("city"),
-    // I/O-bound work (AI + Mapbox) — process a few lines in parallel to keep the
+    // I/O-bound work (AI + routing) — process a few lines in parallel to keep the
     // bulk run to a sensible duration. Shared geocode/breadcrumb caches are safe
     // under Node's single-threaded async model.
     concurrency: Math.min(8, Math.max(1, Number(get("concurrency")) || 4)),

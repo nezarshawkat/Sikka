@@ -4,8 +4,6 @@ import { Search, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Language } from '@/lib/i18n';
 
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibmV6YXJpc21haWwiLCJhIjoiY21ucTdoZ3gxMDRiNzJxcjRhemY0ejhhbyJ9.fkkcuisxpZP9y0Uaq9HryQ';
-
 export interface Suggestion {
   id: string;
   place_name: string;
@@ -34,8 +32,7 @@ const langForSearch = (language?: Language) => {
 
 const EGYPT_VIEWBOX = '24.7,31.9,36.9,21.6';
 
-/** Geocode a free-text query via Nominatim (primary) + Mapbox (fallback).
- *  Returns the best single result or null. */
+/** Geocode a free-text query via Nominatim and return the best single result. */
 async function geocodeQuery(query: string, language?: Language): Promise<Suggestion | null> {
   const searchLanguage = langForSearch(language);
   const trimmed = query.trim();
@@ -43,8 +40,6 @@ async function geocodeQuery(query: string, language?: Language): Promise<Suggest
 
   const nominatimUrl =
     `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=eg&bounded=1&viewbox=${EGYPT_VIEWBOX}&limit=1&accept-language=${encodeURIComponent(searchLanguage)}&q=${encodeURIComponent(trimmed)}`;
-  const mapboxUrl =
-    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(trimmed)}.json?access_token=${MAPBOX_TOKEN}&country=eg&language=${encodeURIComponent(searchLanguage)}&limit=1&autocomplete=false&types=country,region,district,place,locality,neighborhood,address,poi`;
 
   interface OsmFeature {
     display_name: string;
@@ -54,37 +49,24 @@ async function geocodeQuery(query: string, language?: Language): Promise<Suggest
     osm_type: string;
     osm_id: number;
   }
-  interface MapboxFeature {
-    id: string;
-    place_name: string;
-    center: [number, number];
-    text: string;
-  }
-  interface MapboxResponse { features?: MapboxFeature[] }
 
-  const [osmRes, mbRes] = await Promise.allSettled([
-    fetch(nominatimUrl).then(r => r.json() as Promise<OsmFeature[]>),
-    fetch(mapboxUrl).then(r => r.json() as Promise<MapboxResponse>),
-  ]);
+  try {
+    const res = await fetch(nominatimUrl, {
+      headers: { 'Accept-Language': searchLanguage },
+    });
+    const data = (await res.json()) as OsmFeature[];
+    const f = Array.isArray(data) && data.length ? data[0] : null;
+    if (!f) return null;
 
-  // Prefer Nominatim since it's free and covers Egypt well
-  if (osmRes.status === 'fulfilled' && Array.isArray(osmRes.value) && osmRes.value.length) {
-    const f = osmRes.value[0];
     return {
       id: `osm.${f.osm_type}.${f.osm_id}`,
       place_name: f.display_name,
       center: [Number(f.lon), Number(f.lat)],
       text: f.name || f.display_name.split(',')[0],
     };
+  } catch {
+    return null;
   }
-
-  // Fallback to Mapbox
-  if (mbRes.status === 'fulfilled' && mbRes.value?.features?.length) {
-    const f = mbRes.value.features[0];
-    return { id: f.id, place_name: f.place_name, center: f.center, text: f.text };
-  }
-
-  return null;
 }
 
 const LocationAutocomplete = ({

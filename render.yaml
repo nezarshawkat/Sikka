@@ -19,8 +19,6 @@ services:
         sync: false
       - key: CLERK_PUBLISHABLE_KEY
         sync: false
-      - key: MAPBOX_TOKEN
-        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: ADMIN_USERNAME
