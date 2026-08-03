@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth, type Profile } from '@/contexts/AuthContext';
 import { t, type Language } from '@/lib/i18n';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Globe2, Shield, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, Globe2, MapPin, Shield, UserRound, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 
@@ -46,6 +46,8 @@ const slideVariants = {
   exit: { x: -50, opacity: 0 },
 };
 
+const LOCATION_DISCLOSURE_STORAGE_KEY = 'sikka_location_permission_disclosure';
+
 function countryNameFor(code: string, language: Language): string {
   const intlWithDisplayNames = typeof Intl !== 'undefined' ? Intl as unknown as DisplayNamesFactory : null;
   const displayNames = intlWithDisplayNames && 'DisplayNames' in Intl
@@ -73,6 +75,13 @@ const Auth = () => {
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = window.localStorage.getItem(LOCATION_DISCLOSURE_STORAGE_KEY);
+    setShowLocationDisclosure(!stored);
+  }, []);
 
   const countryOptions = useMemo(() => countryOptionsFor(language), [language]);
   const selectedCountry = countryOptions.find((country) => country.code === selectedCountryCode) ?? countryOptions[0];
@@ -121,8 +130,60 @@ const Auth = () => {
     }
   };
 
+  const persistLocationDisclosure = (decision: 'accepted' | 'dismissed') => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LOCATION_DISCLOSURE_STORAGE_KEY, decision);
+    }
+    setShowLocationDisclosure(false);
+  };
+
+  const handleLocationDisclosureContinue = () => {
+    persistLocationDisclosure('accepted');
+  };
+
+  const handleLocationDisclosureDismiss = () => {
+    persistLocationDisclosure('dismissed');
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
+      <AnimatePresence>
+        {showLocationDisclosure && (
+          <motion.div
+            key="location-disclosure"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/85 px-4 py-6 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ y: 16, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 12, opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-md rounded-[2rem] border border-primary/20 bg-card/95 p-6 shadow-2xl"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <MapPin className="h-5 w-5 text-primary" />
+                </div>
+                <div className="space-y-2">
+                  <h2 className="text-lg font-semibold text-foreground">{t('locationDisclosureTitle', language)}</h2>
+                  <p className="text-sm leading-6 text-muted-foreground">{t('locationDisclosureBody', language)}</p>
+                </div>
+              </div>
+              <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+                <Button variant="outline" className="flex-1 rounded-full" onClick={handleLocationDisclosureDismiss}>
+                  {t('locationDisclosureDismiss', language)}
+                </Button>
+                <Button className="flex-1 rounded-full" onClick={handleLocationDisclosureContinue}>
+                  {t('locationDisclosureContinue', language)}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
