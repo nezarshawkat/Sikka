@@ -25,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+<<<<<<< ours
       - uses: pnpm/setup@v1
         with:
           version: 11.5.2
@@ -32,6 +33,17 @@ jobs:
           cache: true
           install: false
 
+=======
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.28.1
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+>>>>>>> theirs
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
