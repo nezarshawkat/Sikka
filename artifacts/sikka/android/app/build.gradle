@@ -4,6 +4,13 @@ def releaseStoreFile = System.getenv("ANDROID_RELEASE_STORE_FILE")
 def releaseStorePassword = System.getenv("ANDROID_RELEASE_STORE_PASSWORD")
 def releaseKeyAlias = System.getenv("ANDROID_RELEASE_KEY_ALIAS")
 def releaseKeyPassword = System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
+def releaseStoreFilePath = releaseStoreFile ? file(releaseStoreFile) : null
+if (releaseStoreFilePath != null && !releaseStoreFilePath.exists() && !releaseStoreFilePath.isAbsolute()) {
+    def rootRelativeStoreFile = rootProject.file(releaseStoreFile)
+    if (rootRelativeStoreFile.exists()) {
+        releaseStoreFilePath = rootRelativeStoreFile
+    }
+}
 def releaseSigningReady = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every {
     it != null && it.toString().trim()
 }
@@ -33,7 +40,7 @@ android {
     signingConfigs {
         release {
             if (releaseSigningReady) {
-                storeFile file(releaseStoreFile)
+                storeFile releaseStoreFilePath
                 storePassword releaseStorePassword
                 keyAlias releaseKeyAlias
                 keyPassword releaseKeyPassword
