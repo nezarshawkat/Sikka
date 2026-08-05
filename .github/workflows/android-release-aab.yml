@@ -43,6 +43,9 @@ jobs:
           node-version: 24
           cache: pnpm
 
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
       - uses: actions/setup-java@v5
         with:
