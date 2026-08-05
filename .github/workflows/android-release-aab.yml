@@ -56,12 +56,38 @@ jobs:
       - name: Apply Android app icon
         run: node scripts/apply-android-icon.mjs
 
+      - name: Check release signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for name in \
+            ANDROID_KEYSTORE_BASE64 \
+            ANDROID_RELEASE_STORE_PASSWORD \
+            ANDROID_RELEASE_KEY_ALIAS \
+            ANDROID_RELEASE_KEY_PASSWORD
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing Android release signing secret::$name is not configured. Add it in GitHub repository Settings > Secrets and variables > Actions."
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            echo "Android release AAB builds require all four signing secrets listed above."
+            echo "If you do not have a keystore yet, create one locally with keytool, base64-encode it, then save the encoded value as ANDROID_KEYSTORE_BASE64."
+            exit 1
+          fi
+
       - name: Decode release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          test -n "$ANDROID_KEYSTORE_BASE64"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > artifacts/sikka/android/app/upload-keystore.jks
+          test -s artifacts/sikka/android/app/upload-keystore.jks
 
       - name: Build release AAB
         working-directory: artifacts/sikka/android
