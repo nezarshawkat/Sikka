@@ -161,7 +161,7 @@ const Auth = () => {
               animate={{ y: 0, opacity: 1, scale: 1 }}
               exit={{ y: 12, opacity: 0, scale: 0.98 }}
               transition={{ duration: 0.2 }}
-              className="w-full max-w-md rounded-[2rem] border border-primary/20 bg-card/95 p-6 shadow-2xl"
+              className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-[2rem] border border-primary/20 bg-card/95 p-6 shadow-2xl"
             >
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10">
@@ -170,7 +170,6 @@ const Auth = () => {
                 <div className="space-y-2">
                   <h2 className="text-lg font-semibold text-foreground">{t('locationDisclosureTitle', language)}</h2>
                   <p className="text-sm leading-6 text-muted-foreground">{t('locationDisclosureBody', language)}</p>
-                  <p className="text-sm leading-6 text-muted-foreground">{t('locationDisclosureBodyAdditional', language)}</p>
                 </div>
               </div>
               <div className="mt-6 flex flex-col gap-2 sm:flex-row">
