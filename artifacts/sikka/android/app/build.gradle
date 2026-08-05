@@ -4,16 +4,25 @@ def releaseStoreFile = System.getenv("ANDROID_RELEASE_STORE_FILE")
 def releaseStorePassword = System.getenv("ANDROID_RELEASE_STORE_PASSWORD")
 def releaseKeyAlias = System.getenv("ANDROID_RELEASE_KEY_ALIAS")
 def releaseKeyPassword = System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
-def releaseStoreFilePath = releaseStoreFile ? file(releaseStoreFile) : null
-if (releaseStoreFilePath != null && !releaseStoreFilePath.exists() && !releaseStoreFilePath.isAbsolute()) {
-    def rootRelativeStoreFile = rootProject.file(releaseStoreFile)
-    if (rootRelativeStoreFile.exists()) {
-        releaseStoreFilePath = rootRelativeStoreFile
-    }
+def releaseSigningValuePresent = { value ->
+    value != null && value.toString().trim()
 }
+
+def releaseStoreFilePath = null
+if (releaseSigningValuePresent(releaseStoreFile)) {
+    def releaseStoreFileName = releaseStoreFile.toString().trim()
+    def releaseStoreFileCandidates = [
+        file(releaseStoreFileName),
+        rootProject.file(releaseStoreFileName),
+        new File(rootDir.parentFile, releaseStoreFileName)
+    ]
+
+    releaseStoreFilePath = releaseStoreFileCandidates.find { it.exists() } ?: releaseStoreFileCandidates[0]
+}
+
 def releaseSigningReady = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every {
-    it != null && it.toString().trim()
-}
+    releaseSigningValuePresent(it)
+} && releaseStoreFilePath != null && releaseStoreFilePath.exists()
 
 android {
     namespace = "com.sikkago.app"
