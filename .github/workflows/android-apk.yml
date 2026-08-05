@@ -1,4 +1,4 @@
-name: Build Android Release AAB
+name: Build Android Debug APK
 
 on:
   workflow_dispatch:
@@ -21,11 +21,6 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       VITE_API_URL: https://sikka-mq6w.onrender.com
       VITE_CLERK_PUBLISHABLE_KEY: pk_test_Y2hhcm1lZC1nYXItMjMuY2xlcmsuYWNjb3VudHMuZGV2JA
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      ANDROID_RELEASE_STORE_FILE: upload-keystore.jks
-      ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
-      ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-      ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -56,23 +51,12 @@ jobs:
       - name: Apply Android app icon
         run: node scripts/apply-android-icon.mjs
 
-      - name: Decode Android release keystore
-        run: |
-          set -euo pipefail
-          for name in ANDROID_KEYSTORE_BASE64 ANDROID_RELEASE_STORE_PASSWORD ANDROID_RELEASE_KEY_ALIAS ANDROID_RELEASE_KEY_PASSWORD; do
-            if [ -z "${!name}" ]; then
-              echo "::error::$name is missing in GitHub Actions secrets"
-              exit 1
-            fi
-          done
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > artifacts/sikka/android/app/upload-keystore.jks
-
-      - name: Build release AAB
+      - name: Build debug APK
         working-directory: artifacts/sikka/android
-        run: ./gradlew bundleRelease
+        run: ./gradlew assembleDebug
 
-      - name: Upload AAB
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: sikka-release-aab
-          path: artifacts/sikka/android/app/build/outputs/bundle/release/*.aab
+          name: sikka-debug-apk
+          path: artifacts/sikka/android/app/build/outputs/apk/debug/*.apk
