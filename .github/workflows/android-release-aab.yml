@@ -23,49 +23,23 @@ jobs:
       VITE_CLERK_PUBLISHABLE_KEY: pk_test_Y2hhcm1lZC1nYXItMjMuY2xlcmsuYWNjb3VudHMuZGV2JA
 
     steps:
-<<<<<<< ours
-      - uses: actions/checkout@v7
-
-<<<<<<< ours
-      - uses: pnpm/setup@v1
-=======
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
->>>>>>> theirs
-        with:
-          version: 11.5.2
-          runtime: node@24
-          cache: true
-          install: false
-
-<<<<<<< ours
-=======
-      - uses: pnpm/action-setup@v6
         with:
           version: 10.28.1
+          install: false
 
-      - uses: actions/setup-node@v7
-=======
       - name: Set up Node.js
         uses: actions/setup-node@v4
->>>>>>> theirs
         with:
           node-version: 24
           cache: pnpm
 
-<<<<<<< ours
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-      - uses: actions/setup-java@v5
-=======
       - name: Set up Java
         uses: actions/setup-java@v5
->>>>>>> theirs
         with:
           distribution: temurin
           java-version: 21
@@ -99,7 +73,7 @@ jobs:
         run: ./gradlew bundleRelease
 
       - name: Upload release AAB
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: sikka-release-aab
           path: artifacts/sikka/android/app/build/outputs/bundle/release/*.aab
