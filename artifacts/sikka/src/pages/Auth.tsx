@@ -170,6 +170,7 @@ const Auth = () => {
                 <div className="space-y-2">
                   <h2 className="text-lg font-semibold text-foreground">{t('locationDisclosureTitle', language)}</h2>
                   <p className="text-sm leading-6 text-muted-foreground">{t('locationDisclosureBody', language)}</p>
+                  <p className="text-sm leading-6 text-muted-foreground">{t('locationDisclosureBodyAdditional', language)}</p>
                 </div>
               </div>
               <div className="mt-6 flex flex-col gap-2 sm:flex-row">
