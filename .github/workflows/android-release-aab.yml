@@ -1,4 +1,4 @@
-name: Build Android Debug APK
+name: Build Android Release AAB
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
-      - ".github/workflows/android-apk.yml"
+      - ".github/workflows/android-release-aab.yml"
 
 jobs:
   build:
@@ -53,7 +53,13 @@ jobs:
 
       - name: Build debug APK
         working-directory: artifacts/sikka/android
+<<<<<<< ours
         run: ./gradlew assembleDebug
+=======
+        env:
+          ANDROID_RELEASE_STORE_FILE: app/upload-keystore.jks
+        run: ./gradlew bundleRelease
+>>>>>>> theirs
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
