@@ -11,7 +11,8 @@
     "cap:open:android": "cap open android",
     "cap:open:ios": "cap open ios",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "android:bundle:release": "pnpm run cap:sync && cd android && ./gradlew bundleRelease"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
