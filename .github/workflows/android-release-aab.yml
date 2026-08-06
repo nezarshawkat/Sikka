@@ -1,0 +1,105 @@
+name: Build Android Release AAB
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/sikka/**"
+      - "lib/**"
+      - "scripts/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/android-release-aab.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      VITE_API_URL: https://sikka-mq6w.onrender.com
+      VITE_CLERK_PUBLISHABLE_KEY: pk_test_Y2hhcm1lZC1nYXItMjMuY2xlcmsuYWNjb3VudHMuZGV2JA
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.28.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web app
+        run: pnpm --filter @workspace/sikka run build:mobile
+
+      - name: Sync Capacitor Android
+        run: pnpm --filter @workspace/sikka exec cap sync android
+
+      - name: Apply Android app icon
+        run: node scripts/apply-android-icon.mjs
+
+      - name: Check release signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for name in \
+            ANDROID_KEYSTORE_BASE64 \
+            ANDROID_RELEASE_STORE_PASSWORD \
+            ANDROID_RELEASE_KEY_ALIAS \
+            ANDROID_RELEASE_KEY_PASSWORD
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing Android release signing secret::$name is not configured. Add it in GitHub repository Settings > Secrets and variables > Actions."
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            echo "Android release AAB builds require all four signing secrets listed above."
+            echo "If you do not have a keystore yet, create one locally with keytool, base64-encode it, then save the encoded value as ANDROID_KEYSTORE_BASE64."
+            exit 1
+          fi
+
+      - name: Decode release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > artifacts/sikka/android/app/upload-keystore.jks
+          test -s artifacts/sikka/android/app/upload-keystore.jks
+
+      - name: Build release AAB
+        working-directory: artifacts/sikka/android
+        env:
+          ANDROID_RELEASE_STORE_FILE: app/upload-keystore.jks
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: ./gradlew bundleRelease
+
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v6
+        with:
+          name: sikka-release-aab
+          path: artifacts/sikka/android/app/build/outputs/bundle/release/*.aab
