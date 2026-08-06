@@ -12,7 +12,9 @@
     "cap:open:ios": "cap open ios",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "android:bundle:release": "pnpm run cap:sync && cd android && ./gradlew bundleRelease"
+    "android:bundle:release": "pnpm run cap:sync && cd android && ./gradlew bundleRelease",
+    "android:apk:debug": "pnpm run cap:sync && cd android && ./gradlew assembleDebug",
+    "android:apk": "pnpm run android:apk:debug"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

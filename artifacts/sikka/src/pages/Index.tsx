@@ -31,6 +31,7 @@ import ContributeTransportDialog from '@/components/ContributeTransportDialog';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { nativeLocationIsEnabled, openNativeAppSettings, openNativeLocationSettings } from '@/lib/nativeLocationSettings';
+import { hasAcceptedLocationDisclosure, persistLocationDisclosure } from '@/lib/locationDisclosure';
 import {
   acknowledgeNativeDiscoveryTrip,
   getPendingNativeDiscoveryTrips,
@@ -152,6 +153,8 @@ const Index = () => {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationName, setLocationName] = useState('');
   const [showLocationPrompt, setShowLocationPrompt] = useState(false);
+  const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
+  const [pendingLocationRequest, setPendingLocationRequest] = useState(false);
   const [enablingLocation, setEnablingLocation] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -285,7 +288,10 @@ const Index = () => {
   }, [mapMode]);
 
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation || !hasAcceptedLocationDisclosure()) {
+      if (navigator.geolocation) setShowLocationPrompt(true);
+      return;
+    }
 
     // Resolve a real position before showing any warning. The previous
     // permission pre-check made the card flash while an enabled GPS was still
@@ -350,6 +356,11 @@ const Index = () => {
 
   const requestLocation = useCallback(async () => {
     if (!navigator.geolocation) return;
+    if (!hasAcceptedLocationDisclosure()) {
+      setPendingLocationRequest(true);
+      setShowLocationDisclosure(true);
+      return;
+    }
     setEnablingLocation(true);
 
     // Check the fast, local OS flag first instead of only finding out
@@ -385,6 +396,21 @@ const Index = () => {
       }, 1500);
     }
   }, [attemptGetPosition, language, stopEnablingPoll]);
+
+  const handleLocationDisclosureContinue = useCallback(() => {
+    persistLocationDisclosure('accepted');
+    setShowLocationDisclosure(false);
+    if (pendingLocationRequest) {
+      setPendingLocationRequest(false);
+      window.setTimeout(() => { void requestLocation(); }, 0);
+    }
+  }, [pendingLocationRequest, requestLocation]);
+
+  const handleLocationDisclosureDismiss = useCallback(() => {
+    persistLocationDisclosure('dismissed');
+    setPendingLocationRequest(false);
+    setShowLocationDisclosure(false);
+  }, []);
 
   useEffect(() => stopEnablingPoll, [stopEnablingPoll]);
 
@@ -700,6 +726,10 @@ const Index = () => {
 
   const startContributionRecording = useCallback(() => {
     if (!navigator.geolocation) { toast.error(t('gpsUnavailable', language)); return; }
+    if (!hasAcceptedLocationDisclosure()) {
+      setShowLocationDisclosure(true);
+      return;
+    }
     setContributionTrace([]);
     setContributionTimestamps([]);
     setIsContributingRoute(true);
@@ -1055,6 +1085,44 @@ const Index = () => {
         )}
       </div>
       )}
+
+      <AnimatePresence>
+        {showLocationDisclosure && (
+          <motion.div
+            key="location-disclosure"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/85 px-4 py-6 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ y: 16, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 12, opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.2 }}
+              className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-[2rem] border border-primary/20 bg-card/95 p-6 shadow-2xl"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <MapPin className="h-5 w-5 text-primary" />
+                </div>
+                <div className="space-y-2">
+                  <h2 className="text-lg font-semibold text-foreground">{t('locationDisclosureTitle', language)}</h2>
+                  <p className="text-sm leading-6 text-muted-foreground">{t('locationDisclosureBody', language)}</p>
+                </div>
+              </div>
+              <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+                <Button variant="outline" className="flex-1 rounded-full" onClick={handleLocationDisclosureDismiss}>
+                  {t('locationDisclosureDismiss', language)}
+                </Button>
+                <Button className="flex-1 rounded-full" onClick={handleLocationDisclosureContinue}>
+                  {t('locationDisclosureContinue', language)}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* "Turn on location" prompt — shown whenever location isn't granted yet,
           so trip planning can start from the rider's actual position instead

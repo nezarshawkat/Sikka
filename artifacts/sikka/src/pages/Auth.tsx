@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Globe2, MapPin, Shield, UserRound, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { LOCATION_DISCLOSURE_STORAGE_KEY, persistLocationDisclosure as saveLocationDisclosure } from '@/lib/locationDisclosure';
 
 type Step = 'name' | 'nationality' | 'admin';
 
@@ -46,7 +47,6 @@ const slideVariants = {
   exit: { x: -50, opacity: 0 },
 };
 
-const LOCATION_DISCLOSURE_STORAGE_KEY = 'sikka_location_permission_disclosure';
 
 function countryNameFor(code: string, language: Language): string {
   const intlWithDisplayNames = typeof Intl !== 'undefined' ? Intl as unknown as DisplayNamesFactory : null;
@@ -132,7 +132,7 @@ const Auth = () => {
 
   const persistLocationDisclosure = (decision: 'accepted' | 'dismissed') => {
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(LOCATION_DISCLOSURE_STORAGE_KEY, decision);
+      saveLocationDisclosure(decision);
     }
     setShowLocationDisclosure(false);
   };
