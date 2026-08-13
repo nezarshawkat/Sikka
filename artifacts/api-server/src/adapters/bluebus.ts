@@ -45,7 +45,9 @@ export async function searchBlueBus(
 
     const trips = res.data?.data?.trips ?? [];
     if (!Array.isArray(trips) || trips.length === 0) {
-      return mockBlueBusTrips(fromCity, toCity, date);
+      // No trips for this route/date -- report that honestly instead of
+      // inventing schedule/price data that would look real to a rider.
+      return [];
     }
 
     return trips.map((t: any) => ({
@@ -65,8 +67,9 @@ export async function searchBlueBus(
       distanceScore: null,
       busType: t.busClass ?? t.busType ?? null,
     }));
-  } catch {
-    return mockBlueBusTrips(fromCity, toCity, date);
+  } catch (err) {
+    console.warn("[bluebus] search failed", (err as Error)?.message ?? err);
+    return [];
   }
 }
 
@@ -80,44 +83,4 @@ function estimateDuration(dep?: string, arr?: string): number {
   } catch {
     return 200;
   }
-}
-
-function mockBlueBusTrips(from: string, to: string, date: string): InterTrip[] {
-  if (!from || !to) return [];
-  return [
-    {
-      operator: "BlueBus",
-      operatorSlug: "bluebus",
-      operatorLogo: null,
-      departure: "09:00",
-      arrival: "14:00",
-      durationMinutes: 300,
-      priceEgp: 170,
-      fromStation: `${from} - BlueBus Station`,
-      toStation: `${to} - BlueBus Station`,
-      bookingMethod: "online",
-      bookingUrl: "https://www.bluebus.com.eg",
-      availableSeats: 15,
-      distanceKm: null,
-      distanceScore: null,
-      busType: "VIP",
-    },
-    {
-      operator: "BlueBus",
-      operatorSlug: "bluebus",
-      operatorLogo: null,
-      departure: "16:30",
-      arrival: "21:30",
-      durationMinutes: 300,
-      priceEgp: 140,
-      fromStation: `${from} - BlueBus Station`,
-      toStation: `${to} - BlueBus Station`,
-      bookingMethod: "online",
-      bookingUrl: "https://www.bluebus.com.eg",
-      availableSeats: 5,
-      distanceKm: null,
-      distanceScore: null,
-      busType: "Economy",
-    },
-  ];
 }

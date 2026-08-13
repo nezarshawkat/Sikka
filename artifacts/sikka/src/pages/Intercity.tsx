@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import Map, { Marker, Source, Layer } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
+import { hasAcceptedLocationDisclosure } from '@/lib/locationDisclosure';
 
 interface City {
   id: string;
@@ -113,14 +114,34 @@ const Intercity = () => {
             : undefined;
         const fromMatch = byName(fromParam);
         const toMatch = byName(toParam);
-        // Deliberately no "default to Cairo" (or to wherever the rider
-        // currently is) fallback here anymore — intercity travel is
-        // governorate-to-governorate by the rider's own choice, not an
-        // assumption based on their current location. Only preselect from
-        // an explicit ?from=/?to= handoff (e.g. from the home map flow).
         if (fromMatch) setFromCity(fromMatch);
         if (toMatch) setToCity(toMatch);
         if (fromMatch && toMatch && fromMatch.id !== toMatch.id) setAutoSearch(true);
+
+        // No explicit ?from= handoff (e.g. opened directly rather than via
+        // the home map's destination flow, which already resolves this) —
+        // fall back to the rider's current governorate so they only have to
+        // pick where they're going.
+        if (!fromMatch && navigator.geolocation && hasAcceptedLocationDisclosure()) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              let best: City | null = null;
+              let bestKm = Infinity;
+              for (const c of data) {
+                if (typeof c.lat !== 'number' || typeof c.lng !== 'number') continue;
+                const dLat = ((c.lat - pos.coords.latitude) * Math.PI) / 180;
+                const dLng = ((c.lng - pos.coords.longitude) * Math.PI) / 180;
+                const a = Math.sin(dLat / 2) ** 2 +
+                  Math.cos((pos.coords.latitude * Math.PI) / 180) * Math.cos((c.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+                const km = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                if (km < bestKm) { bestKm = km; best = c; }
+              }
+              if (best) setFromCity(best);
+            },
+            () => {},
+            { enableHighAccuracy: false, timeout: 8000, maximumAge: 120_000 },
+          );
+        }
       })
       .catch(() => toast.error('Could not load cities'));
   }, []);

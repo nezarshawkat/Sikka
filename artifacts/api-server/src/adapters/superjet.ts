@@ -26,8 +26,14 @@ export async function getSuperJetCities(): Promise<SuperJetCity[]> {
       }
     });
     return cities;
-  } catch {
-    return FALLBACK_CITIES;
+  } catch (err) {
+    // We genuinely don't know SuperJet's real internal city IDs without
+    // reaching its live dropdown -- returning a guessed/invented list here
+    // would just cause `searchSuperJet` below to post the wrong form values
+    // and silently fail. An empty list correctly tells the caller "no
+    // SuperJet city data available right now" instead of pretending to.
+    console.warn("[superjet] failed to load city list", (err as Error)?.message ?? err);
+    return [];
   }
 }
 
@@ -84,9 +90,12 @@ export async function searchSuperJet(
       }
     });
 
-    return trips.length > 0 ? trips : mockSuperJetTrips(fromId, toId);
-  } catch {
-    return mockSuperJetTrips(fromId, toId);
+    // No trips parsed for this route/date -- report that honestly instead
+    // of inventing schedule/price data that would look real to a rider.
+    return trips;
+  } catch (err) {
+    console.warn("[superjet] search failed", (err as Error)?.message ?? err);
+    return [];
   }
 }
 
@@ -100,61 +109,3 @@ function estimateDuration(dep: string, arr: string): number {
     return 180;
   }
 }
-
-function mockSuperJetTrips(fromId: string, toId: string): InterTrip[] {
-  if (!fromId || !toId) return [];
-  return [
-    {
-      operator: "SuperJet",
-      operatorSlug: "superjet",
-      operatorLogo: null,
-      departure: "07:00",
-      arrival: "12:00",
-      durationMinutes: 300,
-      priceEgp: 180,
-      fromStation: "Cairo - Abbassiya Terminal",
-      toStation: "Destination Terminal",
-      bookingMethod: "online",
-      bookingUrl: `${BASE}/booking/start`,
-      availableSeats: null,
-      distanceKm: null,
-      distanceScore: null,
-      busType: "VIP",
-    },
-    {
-      operator: "SuperJet",
-      operatorSlug: "superjet",
-      operatorLogo: null,
-      departure: "14:00",
-      arrival: "19:00",
-      durationMinutes: 300,
-      priceEgp: 160,
-      fromStation: "Cairo - Abbassiya Terminal",
-      toStation: "Destination Terminal",
-      bookingMethod: "online",
-      bookingUrl: `${BASE}/booking/start`,
-      availableSeats: null,
-      distanceKm: null,
-      distanceScore: null,
-      busType: "Economy",
-    },
-  ];
-}
-
-const FALLBACK_CITIES: SuperJetCity[] = [
-  { id: "1", name: "Cairo" },
-  { id: "2", name: "Alexandria" },
-  { id: "3", name: "Hurghada" },
-  { id: "4", name: "Sharm El-Sheikh" },
-  { id: "5", name: "Luxor" },
-  { id: "6", name: "Aswan" },
-  { id: "7", name: "Marsa Matrouh" },
-  { id: "8", name: "Port Said" },
-  { id: "9", name: "Ismailia" },
-  { id: "10", name: "Suez" },
-  { id: "11", name: "Mansoura" },
-  { id: "12", name: "Tanta" },
-  { id: "13", name: "Sohag" },
-  { id: "14", name: "Minya" },
-  { id: "15", name: "Beni Suef" },
-];

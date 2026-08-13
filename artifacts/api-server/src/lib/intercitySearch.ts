@@ -53,8 +53,28 @@ export async function runIntercitySearch(
   const fromEn = fromCity.nameEn;
   const toEn = toCity.nameEn;
 
+  // SuperJet's own booking form uses its own internal city IDs (scraped
+  // from its live dropdown), a completely different ID space from this
+  // app's EGYPT_CITIES ids -- passing our own id straight through (as
+  // before) could never match SuperJet's form, so the search would always
+  // return zero real results. Resolve SuperJet's real id by matching name.
+  const superJetIds = await getSuperJetCities().catch(() => []);
+  const matchSuperJetId = (nameEn: string): string | null => {
+    const target = normalize(nameEn);
+    const hit = superJetIds.find((c) => normalize(c.name) === target)
+      ?? superJetIds.find((c) => normalize(c.name).includes(target) || target.includes(normalize(c.name)));
+    return hit?.id ?? null;
+  };
+  const superJetFromId = matchSuperJetId(fromEn);
+  const superJetToId = matchSuperJetId(toEn);
+
   const [superjetTrips, gobusTrips, bluebusTrips] = await Promise.allSettled([
-    searchSuperJet(fromCity.id ?? fromEn, toCity.id ?? toEn, date),
+    // Only actually call SuperJet's search once both ends resolved to a
+    // real SuperJet city id -- otherwise this route genuinely isn't in
+    // SuperJet's own network, so it isn't offered rather than guessed at.
+    superJetFromId && superJetToId
+      ? searchSuperJet(superJetFromId, superJetToId, date)
+      : Promise.resolve([]),
     searchGoBus(fromEn, toEn, date),
     searchBlueBus(fromEn, toEn, date),
   ]);

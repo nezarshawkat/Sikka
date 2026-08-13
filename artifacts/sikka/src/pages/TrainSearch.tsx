@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowLeftRight, Clock, MapPin, Train, ChevronDown, ChevronUp, Search, ExternalLink, Info } from 'lucide-react';
 import { toast } from 'sonner';
+import { hasAcceptedLocationDisclosure } from '@/lib/locationDisclosure';
 
 // The Egyptian National Railways booking site — Arabic-only, and booking
 // online requires an Egyptian national ID, so it's only offered as the
@@ -50,6 +51,34 @@ function isSummaryTrain(t: TrainRow) {
   return t.trainNumber.startsWith('SUM-');
 }
 
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function nearestGovernorate(
+  cities: { governorate: string; lat: number | null; lng: number | null }[],
+  lat: number,
+  lng: number,
+): string | null {
+  let best: string | null = null;
+  let bestKm = Infinity;
+  for (const c of cities) {
+    if (typeof c.lat !== 'number' || typeof c.lng !== 'number') continue;
+    const km = haversineKm(lat, lng, c.lat, c.lng);
+    if (km < bestKm) {
+      bestKm = km;
+      best = c.governorate;
+    }
+  }
+  return best;
+}
+
 const TrainSearch = () => {
   const navigate = useNavigate();
   const { language, profile } = useAuth();
@@ -69,7 +98,7 @@ const TrainSearch = () => {
   const [autoSearch, setAutoSearch] = useState(false);
 
   useEffect(() => {
-    api.get<GovernorateOption[]>('/intercity/governorates').then((data) => {
+    api.get<GovernorateOption[]>('/trains/governorates').then((data) => {
       setGovernorates(data ?? []);
       const params = new URLSearchParams(window.location.search);
       const fromParam = params.get('from');
@@ -81,6 +110,29 @@ const TrainSearch = () => {
       if (fromMatch) setFromGov(fromMatch);
       if (toMatch) setToGov(toMatch);
       if (fromMatch || toMatch) setAutoSearch(true);
+
+      // No explicit ?from= handoff (e.g. opened directly from a menu rather
+      // than through the destination-select flow that already resolves
+      // this) — fall back to the rider's current governorate so they only
+      // have to choose where they're going, same as trip planning already
+      // does elsewhere. Only applied when that governorate is actually
+      // reachable by train; otherwise the picker is left for manual choice.
+      if (!fromMatch && navigator.geolocation && hasAcceptedLocationDisclosure()) {
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              const cities = await api.get<{ governorate: string; lat: number | null; lng: number | null }[]>('/intercity/cities');
+              const governorate = nearestGovernorate(cities ?? [], pos.coords.latitude, pos.coords.longitude);
+              const match = governorate ? (data ?? []).find((g) => g.governorate === governorate) : undefined;
+              if (match) setFromGov(match);
+            } catch {
+              // Keep the picker available for manual selection.
+            }
+          },
+          () => {},
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 120_000 },
+        );
+      }
     }).catch(() => {});
   }, []);
 

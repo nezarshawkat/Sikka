@@ -13,6 +13,8 @@ interface TripNotificationOptions {
   transportCode?: string;
   /** Short, already-localized mode word for the badge, e.g. "Bus" / "Microbus" / "أتوبيس". */
   modeLabel?: string;
+  /** Mode key used to pick the native notification badge glyph (bus/metro/car/tuktuk/etc). */
+  icon?: string;
   language: Language;
   progress: number; // 0-100
 }
@@ -60,6 +62,7 @@ export function useTripNotification({
   transportColor,
   transportCode,
   modeLabel,
+  icon,
   language,
   progress,
 }: TripNotificationOptions) {
@@ -103,6 +106,7 @@ export function useTripNotification({
         to,
         transportName,
         modeLabel: modeLabel || transportCode || transportName,
+        icon,
         color: transportColor,
         language,
       });
@@ -124,7 +128,7 @@ export function useTripNotification({
       transportCode,
       progress,
     });
-  }, [active, isNative, from, to, transportName, transportColor, transportCode, modeLabel, language, progress]);
+  }, [active, isNative, from, to, transportName, transportColor, transportCode, modeLabel, icon, language, progress]);
 
   // Dismiss when trip ends.
   useEffect(() => {

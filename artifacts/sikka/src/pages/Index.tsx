@@ -54,6 +54,15 @@ import {
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
 const FLIGHT_CITY_IDS = new Set(['cairo', 'alexandria', 'luxor', 'aswan', 'hurghada', 'sharm']);
 const NILE_CITY_IDS = new Set(['cairo', 'giza', 'luxor', 'aswan']);
+// Mirrors the governorates actually reachable in the seeded Egyptian
+// National Railways timetables (src/data/egyptTrainsSeed.json) -- Egypt's
+// rail network doesn't reach Sinai or several Red Sea/coastal towns at all,
+// so those must never be offered as a train option in the first place.
+const TRAIN_CITY_IDS = new Set([
+  'cairo', 'alexandria', 'giza', 'aswan', 'asyut', 'beniSuef', 'damanhour',
+  'damietta', 'fayoum', 'hurghada', 'ismailia', 'luxor', 'mansoura',
+  'matrouh', 'minya', 'portSaid', 'qena', 'sohag', 'suez', 'tanta', 'zagazig',
+]);
 const PENDING_FEEDBACK_KEY = 'sikkaPendingTripFeedback';
 const EARTH_RADIUS_M = 6371000;
 
@@ -205,7 +214,7 @@ const Index = () => {
   const [pendingTrip, setPendingTrip] = useState<{
     planUrl: string; intercityUrl: string; trainUrl: string;
     flightUrl: string; taxiUrl: string; nileUrl: string;
-    fromName: string; toName: string; hasSerfis: boolean; hasFlight: boolean; hasNile: boolean;
+    fromName: string; toName: string; hasSerfis: boolean; hasFlight: boolean; hasNile: boolean; hasTrain: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -605,6 +614,7 @@ const Index = () => {
       case 'train': return t('train', language);
       case 'car': return t('taxi', language);
       case 'bike': return t('tuktuk', language);
+      case 'tuktuk': return t('tuktuk', language);
       case 'bus': return t('bus', language);
       default: return seg.transport_name || t('bus', language);
     }
@@ -618,6 +628,7 @@ const Index = () => {
     transportColor: currentSeg?.color ?? '#3B82F6',
     transportCode: currentSeg?.line_number || undefined,
     modeLabel: modeLabelFor(currentSeg),
+    icon: currentSeg?.icon,
     language,
     progress,
   });
@@ -811,6 +822,7 @@ const Index = () => {
         const travelParams = `from=${encodeURIComponent(fromCity.nameEn)}&to=${encodeURIComponent(toCity.nameEn)}&fromLabel=${encodeURIComponent(fromName)}&toLabel=${encodeURIComponent(toName)}`;
         const hasFlight = FLIGHT_CITY_IDS.has(fromCity.id) && FLIGHT_CITY_IDS.has(toCity.id);
         const hasNile = NILE_CITY_IDS.has(fromCity.id) && NILE_CITY_IDS.has(toCity.id);
+        const hasTrain = TRAIN_CITY_IDS.has(fromCity.id) && TRAIN_CITY_IDS.has(toCity.id);
         setPendingTrip({
           planUrl: planUrl(true), intercityUrl,
           trainUrl: `/trains/search?from=${encodeURIComponent(fromCity.nameEn)}&to=${encodeURIComponent(toCity.nameEn)}`,
@@ -818,7 +830,7 @@ const Index = () => {
           taxiUrl: `/travel/taxi?${travelParams}`,
           nileUrl: `/travel/nile?${travelParams}`,
           fromName, toName,
-          hasSerfis: check.hasSerfis, hasFlight, hasNile,
+          hasSerfis: check.hasSerfis, hasFlight, hasNile, hasTrain,
         });
         setChoiceOpen(true);
         return;
@@ -1421,6 +1433,7 @@ const Index = () => {
         toName={pendingTrip?.toName}
         showSerfis={pendingTrip?.hasSerfis}
         showFlight={pendingTrip?.hasFlight}
+        showTrain={pendingTrip?.hasTrain}
         showNile={pendingTrip?.hasNile}
         language={language}
       />

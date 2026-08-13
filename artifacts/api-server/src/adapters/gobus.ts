@@ -49,8 +49,11 @@ export async function searchGoBus(
         busType: t.busType ?? t.bus_type ?? t.type ?? null,
       }))
       .filter((t) => t.departure && t.priceEgp > 0);
-  } catch {
-    return mockGoBusTrips(fromCity, toCity, date);
+  } catch (err) {
+    // Genuinely no data for this route/date -- report zero results rather
+    // than inventing schedule/price data that would look real to a rider.
+    console.warn("[gobus] search failed", (err as Error)?.message ?? err);
+    return [];
   }
 }
 
@@ -64,44 +67,4 @@ function estimateDuration(dep?: string, arr?: string): number {
   } catch {
     return 240;
   }
-}
-
-function mockGoBusTrips(from: string, to: string, date: string): InterTrip[] {
-  if (!from || !to) return [];
-  return [
-    {
-      operator: "GoBus",
-      operatorSlug: "gobus",
-      operatorLogo: null,
-      departure: "08:00",
-      arrival: "13:30",
-      durationMinutes: 330,
-      priceEgp: 150,
-      fromStation: `${from} - GoBus Terminal`,
-      toStation: `${to} - GoBus Terminal`,
-      bookingMethod: "online",
-      bookingUrl: `${BASE}/search?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&date=${date}`,
-      availableSeats: 12,
-      distanceKm: null,
-      distanceScore: null,
-      busType: "Standard",
-    },
-    {
-      operator: "GoBus",
-      operatorSlug: "gobus",
-      operatorLogo: null,
-      departure: "22:00",
-      arrival: "03:30",
-      durationMinutes: 330,
-      priceEgp: 130,
-      fromStation: `${from} - GoBus Terminal`,
-      toStation: `${to} - GoBus Terminal`,
-      bookingMethod: "online",
-      bookingUrl: `${BASE}/search?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&date=${date}`,
-      availableSeats: 8,
-      distanceKm: null,
-      distanceScore: null,
-      busType: "Night Coach",
-    },
-  ];
 }

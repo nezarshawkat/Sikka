@@ -12,6 +12,7 @@ import { requireAdmin } from "../middlewares/requireAdmin";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import path from "path";
+import { EGYPT_CITIES } from "../lib/intercityTypes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,56 @@ router.get("/cities", async (_req, res) => {
     cities.add(r.toCity);
   }
   res.json([...cities].sort());
+});
+
+// GET /api/trains/governorates — unlike /api/intercity/governorates (which
+// lists every governorate Egypt's intercity buses reasonably reach),
+// Egypt's rail network genuinely doesn't go everywhere -- there is, for
+// example, no line into South Sinai at all. This resolves the governorates
+// actually reachable from the real seeded timetables (every fromCity/toCity
+// and every named stop) so the train picker only ever offers a destination
+// a train can really take you to, per each train's own stop order.
+router.get("/governorates", async (_req, res) => {
+  const rows = await db
+    .select({ fromCity: trainsTable.fromCity, toCity: trainsTable.toCity, stops: trainsTable.stops })
+    .from(trainsTable)
+    .where(eq(trainsTable.isActive, true));
+
+  const rawNames = new Set<string>();
+  for (const r of rows) {
+    rawNames.add(r.fromCity);
+    rawNames.add(r.toCity);
+    for (const s of r.stops as { name: string }[]) rawNames.add(s.name);
+  }
+
+  // Station names sometimes carry a terminal suffix (e.g. "Alexandria (Sidi
+  // Gaber)") that a plain EGYPT_CITIES lookup won't match verbatim -- strip
+  // any "(...)" qualifier before resolving to a known city/governorate.
+  const stripQualifier = (name: string) => name.replace(/\s*\([^)]*\)\s*/g, "").trim();
+  const norm = (s: string) => s.toLowerCase().trim();
+
+  const matchedByGovernorate = new Map<string, (typeof EGYPT_CITIES)[number]>();
+  for (const raw of rawNames) {
+    const bare = stripQualifier(raw);
+    const city = EGYPT_CITIES.find((c) => norm(c.nameEn) === norm(bare))
+      ?? EGYPT_CITIES.find((c) => norm(c.nameEn).includes(norm(bare)) || norm(bare).includes(norm(c.nameEn)));
+    if (city && !matchedByGovernorate.has(city.governorate)) {
+      matchedByGovernorate.set(city.governorate, city);
+    }
+  }
+
+  const governorates = Array.from(matchedByGovernorate.entries())
+    .map(([governorate, hubCity]) => ({
+      governorate,
+      nameEn: hubCity.nameEn,
+      nameAr: hubCity.nameAr,
+      hubCityId: hubCity.id,
+      hubCityNameEn: hubCity.nameEn,
+      hubCityNameAr: hubCity.nameAr,
+    }))
+    .sort((a, b) => a.nameEn.localeCompare(b.nameEn));
+
+  res.json(governorates);
 });
 
 router.get("/search", async (req, res) => {

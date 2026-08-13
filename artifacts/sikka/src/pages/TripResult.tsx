@@ -47,7 +47,7 @@ const OPTION_COLORS: Record<string, string> = {
 };
 
 const ICONS: Record<string, string> = {
-  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
+  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', tuktuk: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
 };
 
 const TripResult = () => {

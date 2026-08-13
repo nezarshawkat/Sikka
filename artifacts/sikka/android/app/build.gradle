@@ -31,8 +31,8 @@ android {
         applicationId "sikka.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 35
-        versionName "1.0.34"
+        versionCode 36
+        versionName "1.0.35"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders = [
             GOOGLE_MAPS_ANDROID_API_KEY: System.getenv("GOOGLE_MAPS_ANDROID_API_KEY")

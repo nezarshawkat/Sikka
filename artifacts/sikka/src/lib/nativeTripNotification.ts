@@ -7,6 +7,10 @@ type TripNotificationPayload = {
   transportName: string;
   /** Short, already-localized mode word shown in the colored badge, e.g. "Bus" / "أتوبيس". */
   modeLabel: string;
+  /** Mode key ('bus' | 'metro' | 'train' | 'monorail' | 'lrt' | 'brt' | 'car' |
+   *  'bike'/'tuktuk' | 'walk' | 'ship' | 'plane') used to pick the notification
+   *  badge glyph. Same keys the web UI's own ICONS maps already use. */
+  icon?: string;
   color: string;
   language: Language;
 };

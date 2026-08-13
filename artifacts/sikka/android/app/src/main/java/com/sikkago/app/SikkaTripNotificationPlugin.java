@@ -12,6 +12,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 
 import androidx.core.app.NotificationCompat;
@@ -24,6 +25,10 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
 /**
  * Persistent active-trip notification.
  */
@@ -33,6 +38,28 @@ public class SikkaTripNotificationPlugin extends Plugin {
     private static final int NOTIFICATION_ID = 3107;
     private static final int REQUEST_NOTIFICATIONS = 3108;
     private static final int SIKKA_BLUE = Color.parseColor("#258DFF");
+
+    // Maps the same `icon` keys the web UI already uses for each transport
+    // segment (see ICONS in TripGuideSheet.tsx / offlineTripPlanner.ts) to a
+    // drawable so the notification badge shows the actual mode of transport
+    // instead of just its first letter. "bike" and "tuktuk" both map to the
+    // tuktuk glyph since the online engine emits "bike" while the offline
+    // planner emits "tuktuk" for the same mode.
+    private static final Map<String, Integer> MODE_ICONS = new HashMap<>();
+    static {
+        MODE_ICONS.put("bus", R.drawable.ic_mode_bus);
+        MODE_ICONS.put("metro", R.drawable.ic_mode_metro);
+        MODE_ICONS.put("train", R.drawable.ic_mode_train);
+        MODE_ICONS.put("monorail", R.drawable.ic_mode_monorail);
+        MODE_ICONS.put("lrt", R.drawable.ic_mode_lrt);
+        MODE_ICONS.put("brt", R.drawable.ic_mode_brt);
+        MODE_ICONS.put("car", R.drawable.ic_mode_car);
+        MODE_ICONS.put("bike", R.drawable.ic_mode_tuktuk);
+        MODE_ICONS.put("tuktuk", R.drawable.ic_mode_tuktuk);
+        MODE_ICONS.put("walk", R.drawable.ic_mode_walk);
+        MODE_ICONS.put("ship", R.drawable.ic_mode_ship);
+        MODE_ICONS.put("plane", R.drawable.ic_mode_plane);
+    }
 
     @PluginMethod
     public void show(PluginCall call) {
@@ -54,6 +81,7 @@ public class SikkaTripNotificationPlugin extends Plugin {
         String to = call.getString("to", "");
         String transportName = call.getString("transportName", "Sikka");
         String modeLabel = call.getString("modeLabel", "");
+        String icon = call.getString("icon", "");
         String language = call.getString("language", "en");
         int badgeColor = parseColor(call.getString("color", "#258DFF"));
         boolean isArabic = isArabicLang(language);
@@ -70,7 +98,7 @@ public class SikkaTripNotificationPlugin extends Plugin {
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.sikka_app_icon)
-            .setLargeIcon(buildBadgeIcon(context, badgeColor, badgeTextFor(modeLabel, transportName)))
+            .setLargeIcon(buildBadgeIcon(context, badgeColor, icon, badgeTextFor(modeLabel, transportName)))
             .setContentTitle(shortenText(transportName, 40))
             .setContentText(subtitle)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(subtitle))
@@ -127,7 +155,12 @@ public class SikkaTripNotificationPlugin extends Plugin {
         return source.length() <= 2 ? source : source.substring(0, 1).toUpperCase(java.util.Locale.ROOT);
     }
 
-    private Bitmap buildBadgeIcon(Context context, int badgeColor, String text) {
+    /**
+     * Builds the round, colored notification badge. When the segment's mode
+     * icon key is recognized, draws that transport's glyph (bus/metro/tuktuk/
+     * etc.) instead of the first-letter fallback used previously.
+     */
+    private Bitmap buildBadgeIcon(Context context, int badgeColor, String iconKey, String fallbackText) {
         int size = dp(context, 48);
         Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
@@ -136,14 +169,26 @@ public class SikkaTripNotificationPlugin extends Plugin {
         circlePaint.setColor(badgeColor);
         canvas.drawCircle(size / 2f, size / 2f, size / 2f, circlePaint);
 
+        Integer iconRes = iconKey == null ? null : MODE_ICONS.get(iconKey.trim().toLowerCase(Locale.ROOT));
+        if (iconRes != null) {
+            Drawable glyph = ContextCompat.getDrawable(context, iconRes);
+            if (glyph != null) {
+                int inset = Math.round(size * 0.2f);
+                glyph.setBounds(inset, inset, size - inset, size - inset);
+                glyph.draw(canvas);
+                return bitmap;
+            }
+        }
+
+        // Fallback: unknown/future mode keys still get a readable badge.
         Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         textPaint.setColor(Color.WHITE);
         textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         textPaint.setTextAlign(Paint.Align.CENTER);
-        textPaint.setTextSize(dp(context, text.length() > 1 ? 18 : 22));
+        textPaint.setTextSize(dp(context, fallbackText.length() > 1 ? 18 : 22));
         Paint.FontMetrics metrics = textPaint.getFontMetrics();
         float y = size / 2f - (metrics.ascent + metrics.descent) / 2f;
-        canvas.drawText(text, size / 2f, y, textPaint);
+        canvas.drawText(fallbackText, size / 2f, y, textPaint);
         return bitmap;
     }
 

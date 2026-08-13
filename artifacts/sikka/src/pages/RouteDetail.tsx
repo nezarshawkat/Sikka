@@ -76,7 +76,7 @@ interface GeometryVersion {
 }
 
 const ICONS: Record<string, string> = {
-  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
+  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', tuktuk: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
 };
 
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357, zoom: 12 };

@@ -13,6 +13,7 @@ interface IntercityChoiceDialogProps {
   toName?: string;
   showSerfis?: boolean;
   showFlight?: boolean;
+  showTrain?: boolean;
   showNile?: boolean;
   language: Language;
 }
@@ -34,6 +35,7 @@ export default function IntercityChoiceDialog({
   toName,
   showSerfis = false,
   showFlight = true,
+  showTrain = true,
   showNile = false,
   language,
 }: IntercityChoiceDialogProps) {
@@ -42,7 +44,7 @@ export default function IntercityChoiceDialog({
     'intercity',
     ...(showSerfis ? ['serfis' as const] : []),
     ...(showFlight ? ['flight' as const] : []),
-    'train',
+    ...(showTrain ? ['train' as const] : []),
     'taxi',
     ...(showNile ? ['nile' as const] : []),
   ];

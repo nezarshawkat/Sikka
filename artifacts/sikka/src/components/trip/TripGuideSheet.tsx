@@ -13,7 +13,7 @@ import { useVoiceInstructions } from '@/hooks/useVoiceInstructions';
 import TaxiAppButton from '@/components/trip/TaxiAppButton';
 
 const ICONS: Record<string, string> = {
-  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
+  bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', tuktuk: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
 };
 
 export interface GuideAlternative {

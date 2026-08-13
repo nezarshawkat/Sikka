@@ -1,11 +1,15 @@
 import { Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { openNativeShareSheet } from '@/lib/nativeShare';
+import { openNativeShareSheet, openNativeDestinationChooser } from '@/lib/nativeShare';
 
 interface TaxiAppButtonProps {
   fromName: string;
   toName: string;
+  /** Destination coordinates, when known -- lets the Android geo chooser
+   *  pre-fill an exact pin instead of relying on the app to geocode a name. */
+  toLat?: number;
+  toLng?: number;
   label: string;
   className?: string;
 }
@@ -16,11 +20,21 @@ function routeShareUrl(fromName: string, toName: string): string {
   return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=driving`;
 }
 
-export default function TaxiAppButton({ fromName, toName, label, className }: TaxiAppButtonProps) {
+export default function TaxiAppButton({ fromName, toName, toLat, toLng, label, className }: TaxiAppButtonProps) {
   const shareRoute = async () => {
-    const url = routeShareUrl(fromName, toName);
-    const text = `${fromName || 'Pickup'} -> ${toName || 'Destination'}`;
     try {
+      const hasCoords = typeof toLat === 'number' && typeof toLng === 'number' && Number.isFinite(toLat) && Number.isFinite(toLng);
+      // Android: hand the destination to the OS geo chooser so the rider
+      // picks any installed taxi/maps app themselves.
+      if (await openNativeDestinationChooser({
+        latitude: hasCoords ? toLat : undefined,
+        longitude: hasCoords ? toLng : undefined,
+        name: toName,
+      })) return;
+
+      // Web / older native builds: fall back to the previous share-sheet flow.
+      const url = routeShareUrl(fromName, toName);
+      const text = `${fromName || 'Pickup'} -> ${toName || 'Destination'}`;
       if (await openNativeShareSheet({ title: 'Sikka taxi route', text, url })) return;
       if (navigator.share) {
         await navigator.share({ title: 'Sikka taxi route', text, url });

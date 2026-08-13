@@ -677,7 +677,16 @@ async function promoteDiscoveredRoute(params: {
   });
 
   const baseMatch = geometricMatch ?? corridorMatch;
-  const copyMatchedRoute = params.discoverySource === "trip" || params.discoverySource === "native";
+  // Every discovery source (a deliberate recording from the "Discover a new
+  // journey" flow or Profile's "Contribute a route" button, a route noticed
+  // passively during a normal trip, or a native background trace) must
+  // always end up as a NEW route candidate rather than silently overwriting
+  // an existing, already-established line just because the GPS path happens
+  // to resemble it. Below, `existingTripCopy` still lets repeat submissions
+  // of the SAME not-yet-verified candidate merge into each other (that's how
+  // confidence builds toward "active"); it just never merges into a line
+  // that wasn't itself created by this same copy-on-match mechanism.
+  const copyMatchedRoute = true;
   const existingTripCopy = copyMatchedRoute
     ? existingLines.find((line) => {
         const quality = (line.routeQuality ?? {}) as { source?: string };

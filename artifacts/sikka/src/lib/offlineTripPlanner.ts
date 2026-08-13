@@ -79,6 +79,31 @@ type OfflineSnapshot = {
 
 const bundledSnapshot = bundledSnapshotRaw as unknown as OfflineSnapshot;
 
+// Tuktuks (and White Taxis) aren't fixed-route transit -- they only operate
+// within admin-drawn coverage zones (see AdminMap's heatmap editor / the
+// `/heatmaps` endpoint). The online planner already gates tuktuk connectors
+// to these zones (engine/planner.ts's insideModeHeatmap); this mirrors that
+// so the offline fallback doesn't offer tuktuk everywhere on the map.
+const TUKTUK_TYPE_IDS = new Set(
+  bundledSnapshot.types
+    .filter((type) => type.icon === "bike" || /tuk.?tuk/i.test(type.nameEn) || /توك/.test(type.nameAr))
+    .map((type) => type.id),
+);
+
+function isInsideTuktukHeatmap(coord: Coord): boolean {
+  const heatPoints = bundledSnapshot.heatmaps;
+  if (!heatPoints || heatPoints.length === 0) {
+    // No heatmap data bundled offline: fail closed (no tuktuk) rather than
+    // offering it everywhere -- matches the online engine's zone-gated
+    // behaviour, it just means offline users see taxi/walk instead here.
+    return false;
+  }
+  return heatPoints.some(
+    (hp) => TUKTUK_TYPE_IDS.has(hp.transportTypeId) &&
+      haversineKm(coord, { lat: hp.latitude, lng: hp.longitude }) <= hp.radiusKm,
+  );
+}
+
 type PlannerRequest = {
   startLat: number;
   startLng: number;
@@ -520,10 +545,18 @@ function connectorFor(distanceKm: number, from: Coord, to: Coord, planKey: PlanK
   if (distanceKm <= WALK_MAX_KM) {
     return { mode: "walk", nameEn: "Walk", nameAr: "مشي", color: "#64748B", icon: "walk", cost: 0, minutes: walkMinutes(distanceKm), geometry };
   }
-  if (planKey === "economic" && distanceKm <= 3.5) {
+  // Tuktuks only operate within their admin-drawn coverage zones -- both
+  // ends of this short hop need to fall inside one, otherwise it's not a
+  // real option here and we fall through to taxi instead.
+  if (
+    planKey === "economic" &&
+    distanceKm <= 3.5 &&
+    isInsideTuktukHeatmap(from) &&
+    isInsideTuktukHeatmap(to)
+  ) {
     return { mode: "tuktuk", nameEn: "Tuktuk", nameAr: "توك توك", color: "#F59E0B", icon: "tuktuk", cost: Math.round(8 + distanceKm * 7), minutes: (distanceKm / 22) * 60, geometry };
   }
-  if (planKey !== "economic" && distanceKm <= 5) {
+  if (distanceKm <= 5) {
     return { mode: "taxi", nameEn: "Taxi app", nameAr: "تطبيق تاكسي", color: "#111827", icon: "car", cost: Math.round(15 + distanceKm * 5), minutes: (distanceKm / 28) * 60, geometry };
   }
   return null;
