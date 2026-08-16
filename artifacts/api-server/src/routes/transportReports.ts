@@ -24,15 +24,15 @@ const STATIONARY_CLUSTER_KM = 0.1;
 const STATIONARY_CLUSTER_RATIO = 0.8;
 const MIN_DISCOVERY_DURATION_MS = 90_000;
 const MAX_DISCOVERY_DURATION_MS = 3 * 60 * 60 * 1000;
-const MAX_DISCOVERY_JUMP_KMH = 120;
+const MAX_DISCOVERY_JUMP_KMH = 160;
 const SNAP_AVG_DEVIATION_KM = 0.18;
 const SNAP_ENDPOINT_DEVIATION_KM = 0.45;
 const SNAP_MIN_DISTANCE_RATIO = 0.45;
 const SNAP_MAX_DISTANCE_RATIO = 2.4;
 const VALHALLA_URL = (process.env.VALHALLA_URL || "").replace(/\/+$/, "");
 
-type TracePoint = [number, number];
-type SnapProvider = "valhalla" | "osrm";
+export type TracePoint = [number, number];
+export type SnapProvider = "valhalla" | "osrm" | "raw_fallback";
 type DiscoverySource = "profile" | "trip" | "manual" | "native";
 type DiscoveryMeta = {
   routeCompleteness?: "full" | "partial";
@@ -41,7 +41,7 @@ type DiscoveryMeta = {
   direction?: string | null;
   source?: DiscoverySource;
   snapProvider?: SnapProvider;
-  snapStatus?: "snapped" | "snap_failed" | "not_required";
+  snapStatus?: "snapped" | "snap_failed" | "not_required" | "raw_fallback";
   validationStatus?: "accepted" | "deleted_invalid" | "pending_review";
   validationReason?: string | null;
   rawPointCount?: number;
@@ -350,7 +350,7 @@ function validateSnappedTrace(raw: TracePoint[], snapped: TracePoint[]): {
   return { ok: true, quality };
 }
 
-async function snapDiscoveryTrace(raw: TracePoint[]): Promise<{
+export async function snapDiscoveryTrace(raw: TracePoint[]): Promise<{
   path: TracePoint[];
   provider: SnapProvider;
   quality: ReturnType<typeof snapQuality>;
@@ -370,6 +370,28 @@ async function snapDiscoveryTrace(raw: TracePoint[]): Promise<{
       return { path: snapped, provider: attempt.provider, quality: validation.quality };
     }
     return { path: null, reason: validation.reason, quality: validation.quality };
+  }
+
+  // Neither Valhalla nor OSRM returned anything at all (as opposed to
+  // returning a path that failed quality validation, handled above) --
+  // most often because the free, keyless OSRM demo server this falls back
+  // to (routing.openstreetmap.de) is rate-limiting or unreachable, not
+  // because the rider's trip was invalid. Discarding a real contribution
+  // over a third-party outage is worse than keeping the rider's own
+  // recorded path -- so use it directly instead, clearly tagged as
+  // road-unmatched so admins (and the discovery pipeline itself) never
+  // treat it as equivalent to a verified, road-snapped route.
+  const rawSimplified = simplifyTrace(raw);
+  if (rawSimplified.length >= MIN_TRACE_POINTS && traceKm(rawSimplified) >= MIN_DISCOVERY_DISTANCE_KM) {
+    console.warn("[transport-reports] road-matching unavailable, using raw GPS trace", {
+      pointCount: rawSimplified.length,
+      distanceKm: traceKm(rawSimplified),
+    });
+    return {
+      path: rawSimplified,
+      provider: "raw_fallback",
+      quality: snapQuality(raw, rawSimplified),
+    };
   }
 
   return { path: null, reason: "snap_failed", quality: null };
@@ -537,6 +559,11 @@ async function promoteDiscoveredRoute(params: {
   fromArea: string | null;
   toArea: string | null;
   discoverySource?: DiscoverySource;
+  /** False when this specific submission's geometry is the rider's raw GPS
+   *  trace rather than a real Valhalla/OSRM road-match (routing service was
+   *  unavailable) -- keeps that route always review-gated and visibly
+   *  tagged rather than treated as equivalent to a verified road-match. */
+  roadMatched?: boolean;
 }) {
   const baseFilters: SQL[] = [sql`${transportReportsTable.gpsTrace} is not null`];
   if (params.transportTypeId) {
@@ -571,7 +598,12 @@ async function promoteDiscoveredRoute(params: {
   const candidates = (rows as ReportClusterRow[]).filter((row) => {
     const trace = sanitizeTrace(row.gpsTrace);
     if (!trace) return false;
-    if (row.discoveryMeta?.snapStatus !== "snapped") return false;
+    // Raw-fallback reports (road-matching was unavailable) still reflect a
+    // real recorded trip and should still count toward "how many people
+    // reported this" -- excluding them would let a routing-service outage
+    // permanently stall discovery, since no submission made during the
+    // outage could ever reach the report threshold.
+    if (row.discoveryMeta?.snapStatus !== "snapped" && row.discoveryMeta?.snapStatus !== "raw_fallback") return false;
     const sameDirection = !!wantedFrom && !!wantedTo && norm(row.fromArea) === wantedFrom && norm(row.toArea) === wantedTo;
     if (!sameDirection) return false;
     if (isMicrobus) {
@@ -645,7 +677,8 @@ async function promoteDiscoveredRoute(params: {
 
   const samePathReports = (rows as ReportClusterRow[]).filter((row) => {
     const trace = sanitizeTrace(row.gpsTrace);
-    return row.discoveryMeta?.snapStatus === "snapped" && !!trace && samePath(path, trace);
+    const status = row.discoveryMeta?.snapStatus;
+    return (status === "snapped" || status === "raw_fallback") && !!trace && samePath(path, trace);
   });
 
   // Primary: the existing line's geometry genuinely overlaps the freshly-stitched
@@ -719,6 +752,11 @@ async function promoteDiscoveredRoute(params: {
   if (updateTarget) {
     const existingCoords = (updateTarget.routePath?.coordinates ?? []) as TracePoint[];
     const isCorridorFallback = updateTarget.id === corridorMatch?.id && !geometricMatch;
+    const priorRoadMatched = (updateTarget.routeQuality as { metrics?: { roadMatched?: boolean } } | null)?.metrics?.roadMatched;
+    // Once a route has a real road-match on record, a later raw-fallback
+    // report merging into it shouldn't downgrade it back to unmatched.
+    const roadMatched = (params.roadMatched ?? true) || priorRoadMatched !== false;
+    const needsReview = copyMatchedRoute || !roadMatched;
     const routeQuality = copyMatchedRoute
       ? {
           ...((updateTarget.routeQuality ?? {}) as Record<string, unknown>),
@@ -730,6 +768,7 @@ async function promoteDiscoveredRoute(params: {
             copiedFromLineId: baseMatch?.id ?? null,
             matchedReportCount: samePathReports.length,
             discoverySource: params.discoverySource ?? "trip",
+            roadMatched,
           },
         }
       : updateTarget.routeQuality;
@@ -759,17 +798,21 @@ async function promoteDiscoveredRoute(params: {
         dataSource: "discovery",
         sourcePriority: 40,
         confidenceScore,
-        routeStatus: copyMatchedRoute ? "needs_review" : "active",
+        routeStatus: needsReview ? "needs_review" : "active",
         routeQuality,
         lastConfirmedAt: new Date(),
-        needsReviewReason: copyMatchedRoute
-          ? "Trip discovery matched an existing route; saved as a separate copy for admin review."
-          : null,
+        needsReviewReason: !roadMatched
+          ? "Road-matching service was unavailable when this route was recorded — showing the rider's raw GPS path, not matched to real roads. Please verify before approving."
+          : copyMatchedRoute
+            ? "Trip discovery matched an existing route; saved as a separate copy for admin review."
+            : null,
         updatedAt: new Date(),
       })
       .where(eq(transitLinesTable.id, updateTarget.id));
   } else {
+    const roadMatched = params.roadMatched ?? true;
     const isMatchedTripCopy = copyMatchedRoute && !!baseMatch;
+    const needsReview = isMatchedTripCopy || !roadMatched;
     await db.insert(transitLinesTable).values({
       transportTypeId: params.transportTypeId,
       lineNumber,
@@ -789,7 +832,7 @@ async function promoteDiscoveredRoute(params: {
       dataSource: "discovery",
       sourcePriority: 40,
       confidenceScore: Math.min(0.9, 0.6 + samePathReports.length * 0.05 + completeTraces.length * 0.03),
-      routeStatus: isMatchedTripCopy ? "needs_review" : "active",
+      routeStatus: needsReview ? "needs_review" : "active",
       routeQuality: isMatchedTripCopy
         ? {
             source: "trip_discovery_copy",
@@ -799,6 +842,7 @@ async function promoteDiscoveredRoute(params: {
               copiedFromLineId: baseMatch?.id ?? null,
               matchedReportCount: samePathReports.length,
               discoverySource: params.discoverySource ?? "trip",
+              roadMatched,
             },
           }
         : {
@@ -808,11 +852,14 @@ async function promoteDiscoveredRoute(params: {
             metrics: {
               matchedReportCount: samePathReports.length,
               discoverySource: params.discoverySource ?? "manual",
+              roadMatched,
             },
           },
-      needsReviewReason: isMatchedTripCopy
-        ? "Trip discovery matched an existing route; saved as a separate copy for admin review."
-        : null,
+      needsReviewReason: !roadMatched
+        ? "Road-matching service was unavailable when this route was recorded — showing the rider's raw GPS path, not matched to real roads. Please verify before approving."
+        : isMatchedTripCopy
+          ? "Trip discovery matched an existing route; saved as a separate copy for admin review."
+          : null,
       lastConfirmedAt: new Date(),
     });
   }
@@ -942,6 +989,13 @@ router.post("/", requireAuth, async (req, res) => {
       directionConfirmed: discoveryMeta.directionConfirmed === true,
     });
     if (!validation.ok) {
+      console.warn("[transport-reports] rejected (raw trace)", {
+        reason: validation.reason,
+        rawPointCount,
+        cleanedPointCount: cleanGpsTrace?.length ?? 0,
+        fromArea: cleanFromArea,
+        toArea: cleanToArea,
+      });
       return res.json({
         accepted: false,
         deleted: true,
@@ -953,6 +1007,12 @@ router.post("/", requireAuth, async (req, res) => {
     const observedSpeedKmh = cleanGpsTrace && cleanGpsTimestamps ? traceSpeedKmh(cleanGpsTrace, cleanGpsTimestamps) : null;
     const snapped = await snapDiscoveryTrace(cleanGpsTrace!);
     if (!snapped.path) {
+      console.warn("[transport-reports] rejected (road-snap)", {
+        reason: snapped.reason,
+        quality: snapped.quality,
+        fromArea: cleanFromArea,
+        toArea: cleanToArea,
+      });
       return res.json({
         accepted: false,
         deleted: true,
@@ -966,7 +1026,7 @@ router.post("/", requireAuth, async (req, res) => {
     finalDiscoveryMeta = {
       ...finalDiscoveryMeta,
       snapProvider: snapped.provider,
-      snapStatus: "snapped",
+      snapStatus: snapped.provider === "raw_fallback" ? "raw_fallback" : "snapped",
       validationStatus: "accepted",
       validationReason: null,
       rawPointCount,
@@ -1020,6 +1080,7 @@ router.post("/", requireAuth, async (req, res) => {
       fromArea: cleanFromArea,
       toArea: cleanToArea,
       discoverySource: finalDiscoveryMeta.source,
+      roadMatched: finalDiscoveryMeta.snapStatus !== "raw_fallback",
     });
   }
   return res.json(row);
@@ -1044,6 +1105,7 @@ router.put("/:id", requireAdmin, async (req, res) => {
       fromArea: row.fromArea,
       toArea: row.toArea,
       discoverySource: (row.discoveryMeta as DiscoveryMeta | null | undefined)?.source,
+      roadMatched: (row.discoveryMeta as DiscoveryMeta | null | undefined)?.snapStatus !== "raw_fallback",
     });
   }
   return res.json(row);

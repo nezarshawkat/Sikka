@@ -4,6 +4,7 @@ import { transitLinesTable, reviewsTable, reportsTable } from "@workspace/db";
 import { eq, asc, inArray } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAdmin";
 import { haversineKm } from "../utils/routePathGenerator.js";
+import { snapDiscoveryTrace, type TracePoint } from "./transportReports.js";
 
 const router = Router();
 
@@ -114,6 +115,53 @@ router.put("/:id", requireAdmin, async (req, res) => {
 router.delete("/:id", requireAdmin, async (req, res) => {
   await db.delete(transitLinesTable).where(eq(transitLinesTable.id, req.params.id as string));
   res.json({ success: true });
+});
+
+// POST /api/transit-lines/:id/resnap — retries road-matching for a route
+// that's currently flagged routeQuality.metrics.roadMatched: false (its
+// geometry is the rider's raw GPS trace because Valhalla/OSRM were
+// unavailable when it was recorded). Safe to call repeatedly: on failure
+// nothing changes, so the "Retry snapping" button in the admin UI can stay
+// clickable until a retry actually succeeds.
+router.post("/:id/resnap", requireAdmin, async (req, res) => {
+  const [line] = await db.select().from(transitLinesTable).where(eq(transitLinesTable.id, req.params.id as string));
+  if (!line) return res.status(404).json({ error: "route not found" });
+
+  const currentPath = (line.routePath?.coordinates ?? null) as TracePoint[] | null;
+  if (!currentPath || currentPath.length < 2) {
+    return res.json({ success: false, roadMatched: false, reason: "no_geometry" });
+  }
+
+  const result = await snapDiscoveryTrace(currentPath);
+  if (!result.path) {
+    // Still couldn't road-match (service still down, or this genuinely
+    // isn't a good corridor match) -- leave the route exactly as it was.
+    return res.json({ success: false, roadMatched: false, reason: result.reason });
+  }
+
+  const quality = (line.routeQuality ?? {}) as { source?: string; metrics?: Record<string, unknown> };
+  const nextQuality = {
+    ...quality,
+    metrics: { ...(quality.metrics ?? {}), roadMatched: true },
+  };
+  // If road-matching was the *only* reason this needed review, resolving it
+  // clears the review flag; if it was also a trip-discovery copy of an
+  // existing route, that separate reason still stands and still needs a
+  // human look, so it's left as-is.
+  const wasOnlyBlockedByRoadMatch = quality.source !== "trip_discovery_copy";
+  const [updated] = await db
+    .update(transitLinesTable)
+    .set({
+      routePath: { type: "LineString", coordinates: result.path },
+      routeQuality: nextQuality,
+      routeStatus: wasOnlyBlockedByRoadMatch ? "active" : line.routeStatus,
+      needsReviewReason: wasOnlyBlockedByRoadMatch ? null : line.needsReviewReason,
+      updatedAt: new Date(),
+    })
+    .where(eq(transitLinesTable.id, line.id))
+    .returning();
+
+  res.json({ success: true, roadMatched: true, provider: result.provider, route: updated });
 });
 
 interface DuplicateGroup {

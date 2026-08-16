@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Route, Search, ShieldAlert } from 'lucide-react';
+import { Route, Search, ShieldAlert, RefreshCw } from 'lucide-react';
 import { deleteLocalTransitLines, getLocalRouteCatalog, saveLocalTransitLine } from '@/lib/localRouteStore';
 
 interface TransitLine {
@@ -32,6 +32,7 @@ interface TransitLine {
   reviewReportCount?: number;
   verifiedAt?: string | null;
   lastConfirmedAt?: string | null;
+  routeQualityDetails?: { metrics?: { roadMatched?: boolean } } | null;
 }
 
 interface TransportType {
@@ -125,6 +126,36 @@ const AdminRoutes = () => {
       toast.success('Route quality updated');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update route');
+    }
+  };
+
+  const [resnappingIds, setResnappingIds] = useState<Set<string>>(new Set());
+
+  const retrySnapping = async (route: TransitLine) => {
+    setResnappingIds((prev) => new Set(prev).add(route.id));
+    try {
+      const result = await api.post<{ success: boolean; roadMatched: boolean; route?: TransitLine; reason?: string }>(
+        `/transit-lines/${route.id}/resnap`,
+        {},
+      );
+      if (result.success && result.route) {
+        await saveLocalTransitLine(result.route as unknown as Record<string, unknown>);
+        setRoutes((prev) => prev.map((item) => (item.id === route.id ? { ...item, ...result.route } : item)));
+        toast.success('Route successfully matched to real roads');
+      } else {
+        // Still not snapped -- button stays available below (its condition
+        // is roadMatched === false, which hasn't changed) so it can be
+        // tried again once the road-matching service is back.
+        toast.error('Still could not match this route to real roads. Try again shortly.');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Retry failed');
+    } finally {
+      setResnappingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(route.id);
+        return next;
+      });
     }
   };
 
@@ -304,6 +335,23 @@ const AdminRoutes = () => {
                   <span>{route.priceEgp} EGP</span>
                   <span>{route.routePath ? `${route.routePath.coordinates.length} pts` : 'No geometry'}</span>
                 </div>
+                {route.routeQualityDetails?.metrics?.roadMatched === false && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="w-fit gap-1 border-yellow-500 text-yellow-600">
+                      <ShieldAlert className="h-3 w-3" /> Raw GPS · not road-matched
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1 text-xs"
+                      disabled={resnappingIds.has(route.id)}
+                      onClick={(e) => { e.stopPropagation(); retrySnapping(route); }}
+                    >
+                      <RefreshCw className={`h-3 w-3 ${resnappingIds.has(route.id) ? 'animate-spin' : ''}`} />
+                      {resnappingIds.has(route.id) ? 'Retrying…' : 'Retry snapping'}
+                    </Button>
+                  </div>
+                )}
                 <div className="space-y-1 text-xs text-muted-foreground">
                   <p>Confidence: {Math.round((route.confidenceScore ?? 0.6) * 100)}% · Reports: {route.reviewReportCount ?? 0}</p>
                   {route.needsReviewReason && (
