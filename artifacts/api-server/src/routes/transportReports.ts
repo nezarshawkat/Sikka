@@ -5,7 +5,7 @@ import { eq, desc, and, inArray, sql, type SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
 import { invalidateGraph } from "../engine/graph.js";
-import { matchToRoads } from "../utils/routePathGenerator.js";
+import { matchToRoads, reverseGeocodeBilingual, searchBilingualPlace } from "../utils/routePathGenerator.js";
 
 const router = Router();
 
@@ -30,6 +30,55 @@ const SNAP_ENDPOINT_DEVIATION_KM = 0.45;
 const SNAP_MIN_DISTANCE_RATIO = 0.45;
 const SNAP_MAX_DISTANCE_RATIO = 2.4;
 const VALHALLA_URL = (process.env.VALHALLA_URL || "").replace(/\/+$/, "");
+
+// How likely a rejected discovery is to become a good route if the
+// contributor just tries again (or an admin clicks "Improve route quality").
+// 1 = fundamental problem with the recording itself (retrying the same way
+// won't help); 5 = almost certainly a transient/service issue, very likely
+// to succeed on a fresh attempt. Used to sort the rejected list so the most
+// recoverable ones surface for follow-up.
+const RECOVERABILITY_BY_REASON: Record<string, number> = {
+  stationary_trace: 1,
+  missing_route_direction: 1,
+  same_start_and_destination: 1,
+  recording_too_long: 2,
+  outside_supported_region: 2,
+  start_and_end_too_close: 2,
+  direction_not_confirmed: 2,
+  too_few_valid_gps_points: 3,
+  no_gps_points: 3,
+  trace_too_short: 3,
+  recording_too_short: 3,
+  snapped_route_too_short: 3,
+  snapped_route_too_sparse: 3,
+  impossible_gps_jump: 4,
+  snap_failed: 5,
+  snap_too_far_from_trace: 5,
+  snap_endpoint_mismatch: 5,
+  snap_distance_ratio_bad: 5,
+};
+function recoverabilityScore(reason: string | null | undefined): number {
+  return (reason && RECOVERABILITY_BY_REASON[reason]) ?? 3;
+}
+
+/** Averages a set of hex colors' RGB channels -- the same "paint mixing"
+ *  effect the admin map uses where two contributors' traces overlap, but
+ *  computed once here for the final single line after multiple reports
+ *  merge into one route. */
+function mixHexColors(colors: string[]): string {
+  if (colors.length === 0) return "#3B82F6";
+  if (colors.length === 1) return colors[0];
+  let r = 0, g = 0, b = 0;
+  for (const c of colors) {
+    const hex = c.replace("#", "");
+    r += parseInt(hex.slice(0, 2), 16);
+    g += parseInt(hex.slice(2, 4), 16);
+    b += parseInt(hex.slice(4, 6), 16);
+  }
+  const n = colors.length;
+  const toHex = (v: number) => Math.round(v / n).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
 
 export type TracePoint = [number, number];
 export type SnapProvider = "valhalla" | "osrm" | "raw_fallback";
@@ -203,13 +252,14 @@ function traceDurationMs(timestamps: (number | null)[] | null | undefined): numb
 
 function maxJumpSpeedKmh(trace: TracePoint[], timestamps: (number | null)[] | null | undefined): number | null {
   if (!timestamps?.length) return null;
+  const MIN_INTERVAL_SECONDS = 1.5;
   let maxSpeed: number | null = null;
   for (let i = 1; i < trace.length; i++) {
     const prevTs = timestamps[i - 1];
     const nextTs = timestamps[i];
     if (prevTs == null || nextTs == null || nextTs <= prevTs) continue;
     const hours = (nextTs - prevTs) / 3_600_000;
-    if (hours <= 0) continue;
+    if (hours * 3600 < MIN_INTERVAL_SECONDS) continue;
     const speed = pointKm(trace[i - 1], trace[i]) / hours;
     if (Number.isFinite(speed)) maxSpeed = Math.max(maxSpeed ?? 0, speed);
   }
@@ -350,16 +400,27 @@ function validateSnappedTrace(raw: TracePoint[], snapped: TracePoint[]): {
   return { ok: true, quality };
 }
 
-export async function snapDiscoveryTrace(raw: TracePoint[]): Promise<{
+export async function snapDiscoveryTrace(
+  raw: TracePoint[],
+  preferredProvider?: "valhalla" | "osrm",
+): Promise<{
   path: TracePoint[];
   provider: SnapProvider;
   quality: ReturnType<typeof snapQuality>;
 } | { path: null; reason: string; quality: ReturnType<typeof snapQuality> | null }> {
-  const attempts: Array<{ provider: SnapProvider; path: TracePoint[] | null }> = [
-    { provider: "valhalla", path: await matchWithValhalla(raw) },
-  ];
-  if (!attempts[0].path) {
+  const attempts: Array<{ provider: SnapProvider; path: TracePoint[] | null }> = [];
+  if (preferredProvider === "osrm") {
     attempts.push({ provider: "osrm", path: await matchToRoads(raw, "car") });
+  } else if (preferredProvider === "valhalla") {
+    attempts.push({ provider: "valhalla", path: await matchWithValhalla(raw) });
+    if (!attempts[0].path) {
+      return { path: null, reason: VALHALLA_URL ? "snap_failed" : "valhalla_not_configured", quality: null };
+    }
+  } else {
+    attempts.push({ provider: "valhalla", path: await matchWithValhalla(raw) });
+    if (!attempts[0].path) {
+      attempts.push({ provider: "osrm", path: await matchToRoads(raw, "car") });
+    }
   }
 
   for (const attempt of attempts) {
@@ -370,6 +431,13 @@ export async function snapDiscoveryTrace(raw: TracePoint[]): Promise<{
       return { path: snapped, provider: attempt.provider, quality: validation.quality };
     }
     return { path: null, reason: validation.reason, quality: validation.quality };
+  }
+
+  // An explicit provider choice that returned nothing at all is reported
+  // as-is rather than silently substituting the raw trace -- the admin
+  // asked for a specific provider's road-match, not a fallback.
+  if (preferredProvider) {
+    return { path: null, reason: "snap_failed", quality: null };
   }
 
   // Neither Valhalla nor OSRM returned anything at all (as opposed to
@@ -552,6 +620,83 @@ function recentNumberIsDominant(number: string, rows: ReportClusterRow[]): boole
   return count >= 3 && count >= Math.ceil(total / 2);
 }
 
+/**
+ * A contribution that fails validation or road-matching used to just
+ * vanish (the client got a rejection message, nothing was ever saved).
+ * Now it becomes a "rejected" transit_lines row instead -- same shape as a
+ * pending discovery card, carrying whatever geometry actually exists (even
+ * a handful of raw points), the specific rejection reason, and a
+ * recoverability score, so it shows up in the Discovery page's Rejected
+ * filter rather than disappearing.
+ */
+async function createRejectedDiscoveryLine(params: {
+  transportName: string;
+  transportNumber: string | null;
+  transportTypeId: string | null;
+  fromArea: string | null;
+  toArea: string | null;
+  discoverySource?: DiscoverySource;
+  rawTrace: TracePoint[] | null;
+  reason: string;
+}) {
+  const trace = params.rawTrace ?? [];
+  const hasGeometry = trace.length >= 2;
+  const fromArea = params.fromArea || "Unknown start";
+  const toArea = params.toArea || "Unknown destination";
+  const isMicrobus = norm(params.transportName).includes("microbus");
+  const lineNumber = !isMicrobus && params.transportNumber ? params.transportNumber : null;
+  const routeName = isMicrobus ? `${fromArea} \u2192 ${toArea}` : `${params.transportName}${lineNumber ? ` ${lineNumber}` : ""}: ${fromArea} \u2192 ${toArea}`;
+
+  let nameEn = routeName;
+  let nameAr = routeName;
+  if (params.fromArea && params.toArea) {
+    const [fromNames, toNames] = await Promise.all([
+      searchBilingualPlace(params.fromArea).catch(() => null),
+      searchBilingualPlace(params.toArea).catch(() => null),
+    ]);
+    const fromEn = fromNames?.nameEn ?? params.fromArea;
+    const fromAr = fromNames?.nameAr ?? params.fromArea;
+    const toEn = toNames?.nameEn ?? params.toArea;
+    const toAr = toNames?.nameAr ?? params.toArea;
+    nameEn = isMicrobus ? `${fromEn} \u2192 ${toEn}` : `${params.transportName}${lineNumber ? ` ${lineNumber}` : ""}: ${fromEn} \u2192 ${toEn}`;
+    nameAr = isMicrobus ? `${fromAr} \u2192 ${toAr}` : `${params.transportName}${lineNumber ? ` ${lineNumber}` : ""}: ${fromAr} \u2192 ${toAr}`;
+  }
+
+  await db.insert(transitLinesTable).values({
+    transportTypeId: params.transportTypeId,
+    lineNumber,
+    nameEn,
+    nameAr,
+    fromArea,
+    toArea,
+    governorate: "Cairo",
+    viaStops: [],
+    routePath: hasGeometry ? { type: "LineString", coordinates: trace } : null,
+    routeDirection: "forward",
+    priceEgp: 5,
+    hasFixedStops: false,
+    isActive: true,
+    dataSource: "discovery",
+    sourcePriority: 40,
+    confidenceScore: 0,
+    routeStatus: "rejected",
+    routeQuality: {
+      source: "discovery_rejected",
+      generatedAt: new Date().toISOString(),
+      confidenceScore: 0,
+      metrics: {
+        rejectionReason: params.reason,
+        recoverabilityScore: recoverabilityScore(params.reason),
+        discoverySource: params.discoverySource ?? "manual",
+        pointCount: trace.length,
+        roadMatched: false,
+      },
+    },
+    needsReviewReason: `Rejected: ${params.reason}`,
+    lastConfirmedAt: new Date(),
+  });
+}
+
 async function promoteDiscoveredRoute(params: {
   transportName: string;
   transportNumber: string | null;
@@ -681,6 +826,18 @@ async function promoteDiscoveredRoute(params: {
     return (status === "snapped" || status === "raw_fallback") && !!trace && samePath(path, trace);
   });
 
+  // Distinct, visually separable colors for up to 8 contributing traces
+  // (matches the app's existing vivid transport-color palette). Rendering
+  // and any overlap-blending happens client-side against this list.
+  const TRACE_PALETTE = ["#3B82F6", "#F97316", "#10B981", "#A855F7", "#EF4444", "#0EA5E9", "#EAB308", "#EC4899"];
+  const contributingTraces = samePathReports.slice(0, 8).map((row, i) => ({
+    reportId: row.id,
+    trace: sanitizeTrace(row.gpsTrace) ?? [],
+    color: TRACE_PALETTE[i % TRACE_PALETTE.length],
+    roadMatched: row.discoveryMeta?.snapStatus === "snapped",
+  }));
+  const blendedColor = mixHexColors(contributingTraces.map((t) => t.color));
+
   // Primary: the existing line's geometry genuinely overlaps the freshly-stitched
   // GPS path. This is the strongest signal and is checked first.
   const geometricMatch = existingLines.find((line) => {
@@ -745,6 +902,20 @@ async function promoteDiscoveredRoute(params: {
   const routeName = isMicrobus
     ? `${fromArea} → ${toArea}`
     : `${params.transportName}${lineNumber ? ` ${lineNumber}` : ""}: ${fromArea} → ${toArea}`;
+  const [fromBilingual, toBilingual] = await Promise.all([
+    searchBilingualPlace(fromArea).catch(() => null),
+    searchBilingualPlace(toArea).catch(() => null),
+  ]);
+  const fromEnResolved = fromBilingual?.nameEn ?? fromArea;
+  const fromArResolved = fromBilingual?.nameAr ?? fromArea;
+  const toEnResolved = toBilingual?.nameEn ?? toArea;
+  const toArResolved = toBilingual?.nameAr ?? toArea;
+  const nameEnFinal = isMicrobus
+    ? `${fromEnResolved} → ${toEnResolved}`
+    : `${params.transportName}${lineNumber ? ` ${lineNumber}` : ""}: ${fromEnResolved} → ${toEnResolved}`;
+  const nameArFinal = isMicrobus
+    ? `${fromArResolved} → ${toArResolved}`
+    : `${params.transportName}${lineNumber ? ` ${lineNumber}` : ""}: ${fromArResolved} → ${toArResolved}`;
   const routePath = { type: "LineString", coordinates: path };
   const priceEgp = Number.isFinite(avgPrice) && avgPrice > 0 ? avgPrice : isMicrobus ? 5 : 10;
   const confidenceScore = Math.min(0.95, 0.65 + samePathReports.length * 0.05 + completeTraces.length * 0.03);
@@ -769,6 +940,8 @@ async function promoteDiscoveredRoute(params: {
             matchedReportCount: samePathReports.length,
             discoverySource: params.discoverySource ?? "trip",
             roadMatched,
+            contributingTraces,
+            blendedColor,
           },
         }
       : updateTarget.routeQuality;
@@ -776,8 +949,8 @@ async function promoteDiscoveredRoute(params: {
       .update(transitLinesTable)
       .set({
         lineNumber,
-        nameEn: routeName,
-        nameAr: routeName,
+        nameEn: nameEnFinal,
+        nameAr: nameArFinal,
         fromArea,
         toArea,
         // A corridor-fallback match means the existing geometry failed the overlap
@@ -816,8 +989,8 @@ async function promoteDiscoveredRoute(params: {
     await db.insert(transitLinesTable).values({
       transportTypeId: params.transportTypeId,
       lineNumber,
-      nameEn: routeName,
-      nameAr: routeName,
+      nameEn: nameEnFinal,
+      nameAr: nameArFinal,
       fromArea,
       toArea,
       governorate: "Cairo",
@@ -843,6 +1016,8 @@ async function promoteDiscoveredRoute(params: {
               matchedReportCount: samePathReports.length,
               discoverySource: params.discoverySource ?? "trip",
               roadMatched,
+              contributingTraces,
+              blendedColor,
             },
           }
         : {
@@ -853,6 +1028,8 @@ async function promoteDiscoveredRoute(params: {
               matchedReportCount: samePathReports.length,
               discoverySource: params.discoverySource ?? "manual",
               roadMatched,
+              contributingTraces,
+              blendedColor,
             },
           },
       needsReviewReason: !roadMatched
@@ -870,6 +1047,20 @@ async function promoteDiscoveredRoute(params: {
     .where(inArray(transportReportsTable.id, candidates.map((row) => row.id)));
   invalidateGraph();
 }
+
+// GET /api/transport-reports/reverse-geocode?lat=&lng= — resolves a bilingual
+// place name for a point, used to auto-fill the "get in" / boarding area
+// from where a contributor's GPS trace actually started, instead of asking
+// them to type it by hand.
+router.get("/reverse-geocode", requireAuth, async (req, res) => {
+  const lat = parseFloat(String(req.query.lat));
+  const lng = parseFloat(String(req.query.lng));
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return res.status(400).json({ error: "lat and lng are required" });
+  }
+  const result = await reverseGeocodeBilingual(lng, lat).catch(() => null);
+  res.json(result ?? { nameEn: null, nameAr: null });
+});
 
 router.get("/", requireAdmin, async (req, res) => {
   const { discovery, status } = req.query as { discovery?: string; status?: string };
@@ -996,6 +1187,16 @@ router.post("/", requireAuth, async (req, res) => {
         fromArea: cleanFromArea,
         toArea: cleanToArea,
       });
+      await createRejectedDiscoveryLine({
+        transportName: cleanTransportName,
+        transportNumber: cleanTransportNumber,
+        transportTypeId: resolvedTransportTypeId,
+        fromArea: cleanFromArea,
+        toArea: cleanToArea,
+        discoverySource: discoveryMeta.source,
+        rawTrace: cleanGpsTrace,
+        reason: validation.reason,
+      }).catch((err) => console.error("[transport-reports] failed to save rejected discovery", err));
       return res.json({
         accepted: false,
         deleted: true,
@@ -1013,6 +1214,16 @@ router.post("/", requireAuth, async (req, res) => {
         fromArea: cleanFromArea,
         toArea: cleanToArea,
       });
+      await createRejectedDiscoveryLine({
+        transportName: cleanTransportName,
+        transportNumber: cleanTransportNumber,
+        transportTypeId: resolvedTransportTypeId,
+        fromArea: cleanFromArea,
+        toArea: cleanToArea,
+        discoverySource: discoveryMeta.source,
+        rawTrace: cleanGpsTrace,
+        reason: snapped.reason,
+      }).catch((err) => console.error("[transport-reports] failed to save rejected discovery", err));
       return res.json({
         accepted: false,
         deleted: true,

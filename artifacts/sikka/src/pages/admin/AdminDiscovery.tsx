@@ -1,419 +1,474 @@
-import { Component, useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
-import { api } from '@/lib/api';
-import { useAuth } from '@/contexts/AuthContext';
-import { t } from '@/lib/i18n';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { toast } from 'sonner';
-import { Users, ArrowRight, Star, Brain, Route, MapPinned, Maximize2 } from 'lucide-react';
-import Map, { Source, Layer, type MapRef } from 'react-map-gl/maplibre';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import Map, { Source, Layer } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { api } from '@/lib/api';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { MAP_STYLE_DARK } from '@/hooks/useIsDark';
+import { toast } from 'sonner';
+import {
+  ArrowLeft, Search, ShieldAlert, CheckCircle2, XCircle,
+  Trash2, RotateCcw, MapPin, Sparkles,
+} from 'lucide-react';
+import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
+import { buildBlendedSegments, computeBounds, type LngLat } from '@/lib/traceBlend';
+import { saveLocalTransitLine, deleteLocalTransitLines } from '@/lib/localRouteStore';
 
-interface DiscoveryRow {
-  transportName: string;
-  transportNumber: string | null;
-  reportCount: number;
-  sampleFromArea: string | null;
-  sampleToArea: string | null;
-  avgPrice: number | null;
-  gpsTraceCount?: number;
-  avgGpsPoints?: number | null;
-  fullTraceCount?: number;
-  goodGpsCount?: number;
-  confidenceScore?: number;
-  routeGeometry?: unknown;
-  centerLat?: number | null;
-  centerLng?: number | null;
+interface ContributingTrace {
+  reportId?: string;
+  trace: LngLat[];
+  color: string;
+  roadMatched?: boolean;
 }
 
-interface TransportReport {
+interface RouteQualityMetrics {
+  roadMatched?: boolean;
+  contributingTraces?: ContributingTrace[];
+  blendedColor?: string;
+  matchedReportCount?: number;
+  rejectionReason?: string;
+  recoverabilityScore?: number;
+  pointCount?: number;
+}
+
+interface DiscoveryLine {
   id: string;
-  transportName: string;
-  transportNumber: string | null;
+  transportTypeId: string | null;
+  lineNumber: string | null;
+  nameEn: string;
+  nameAr: string;
   fromArea: string | null;
   toArea: string | null;
-  priceEgp: number | null;
-  discoveryMeta?: {
-    routeCompleteness?: 'full' | 'partial';
-    directionConfirmed?: boolean;
-    gpsQuality?: 'good' | 'ok' | 'poor';
-    direction?: string | null;
-    snapProvider?: 'valhalla' | 'osrm';
-    snapStatus?: 'snapped' | 'snap_failed' | 'not_required';
-    validationStatus?: 'accepted' | 'deleted_invalid' | 'pending_review';
-    rawPointCount?: number;
-    cleanedPointCount?: number;
-    snappedPointCount?: number;
-    snapAverageDeviationM?: number;
-    snapEndpointDeviationM?: number;
-  } | null;
-  status: string;
+  routePath: { coordinates: LngLat[] } | null;
+  priceEgp: number;
+  confidenceScore: number | null;
+  reviewReportCount?: number;
+  routeStatus: string;
+  needsReviewReason: string | null;
+  routeQuality: { source?: string; metrics?: RouteQualityMetrics } | null;
   createdAt: string;
+  updatedAt: string;
 }
 
-type GeoJSONLine = {
-  type: 'FeatureCollection';
-  features: { type: 'Feature'; geometry: { type: 'LineString'; coordinates: [number, number][] }; properties: Record<string, never> }[];
-};
-
-const toFiniteNumber = (value: unknown, fallback = 0): number => {
-  const numeric = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
-};
-
-const lineToGeoJSON = (value: unknown): GeoJSONLine | null => {
-  let parsed = value;
-  if (typeof parsed === 'string') {
-    try { parsed = JSON.parse(parsed); } catch { return null; }
-  }
-  if (!Array.isArray(parsed)) return null;
-  const coords = parsed
-    .filter((point): point is [number, number] => (
-      Array.isArray(point)
-      && point.length >= 2
-      && point[0] != null && point[1] != null
-      && Number.isFinite(Number(point[0]))
-      && Number.isFinite(Number(point[1]))
-      && Number(point[0]) >= -180 && Number(point[0]) <= 180
-      && Number(point[1]) >= -90 && Number(point[1]) <= 90
-    ))
-    .map((point) => [Number(point[0]), Number(point[1])] as [number, number]);
-  if (coords.length < 2) return null;
-  return {
-    type: 'FeatureCollection',
-    features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }],
-  };
-};
-
-class AdminDiscoveryErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
-  state: { error: string | null } = { error: null };
-
-  static getDerivedStateFromError(error: Error) {
-    return { error: error.message || 'Discovery failed to render' };
-  }
-
-  componentDidCatch(error: Error) {
-    console.error('[admin-discovery] render failed', error);
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <Card className="border-destructive/40">
-          <CardContent className="p-4 text-sm text-destructive">
-            Discovery could not render: {this.state.error}
-          </CardContent>
-        </Card>
-      );
-    }
-    return this.props.children;
-  }
+interface TransportType {
+  id: string;
+  nameEn: string;
+  nameAr: string;
 }
 
-const AdminDiscoveryContent = () => {
-  const { language } = useAuth();
-  const [discovery, setDiscovery] = useState<DiscoveryRow[]>([]);
-  const [pending, setPending] = useState<TransportReport[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedDiscovery, setSelectedDiscovery] = useState<DiscoveryRow | null>(null);
-  const [showFullMap, setShowFullMap] = useState(false);
-  const mapRef = useRef<MapRef | null>(null);
+const REASON_LABELS: Record<string, string> = {
+  no_gps_points: 'No GPS points were recorded',
+  too_few_valid_gps_points: 'Too few valid GPS points',
+  outside_supported_region: 'Trip appears to be outside Egypt',
+  missing_route_direction: 'Start/destination area missing',
+  same_start_and_destination: 'Start and destination were the same',
+  direction_not_confirmed: 'Direction not confirmed',
+  trace_too_short: 'Recorded trip was too short',
+  snapped_route_too_short: 'Matched route was too short',
+  snapped_route_too_sparse: 'Matched route had too few points',
+  start_and_end_too_close: 'Start and end points too close together',
+  stationary_trace: "Device didn't appear to move",
+  recording_too_short: 'Recording under 90 seconds',
+  recording_too_long: 'Recording over 3 hours',
+  impossible_gps_jump: 'GPS recorded an impossibly fast jump',
+  snap_failed: 'Road-matching service unavailable',
+  snap_too_far_from_trace: "Matched road didn't follow the GPS trace closely enough",
+  snap_endpoint_mismatch: 'Matched road endpoints too far from the real start/end',
+  snap_distance_ratio_bad: 'Matched road length was very different from the recorded trip',
+  valhalla_not_configured: 'Valhalla is not configured on this server',
+  admin_rejected: 'Rejected by admin',
+};
 
-  const fetchData = () => {
-    setIsLoading(true);
-    setLoadError(null);
-    Promise.allSettled([
-      api.get<DiscoveryRow[]>('/transport-reports?discovery=true'),
-      api.get<TransportReport[]>('/transport-reports?status=pending'),
-    ])
-      .then(([discResult, pendingResult]) => {
-        if (discResult.status === 'fulfilled') {
-          setDiscovery(Array.isArray(discResult.value) ? discResult.value : []);
-        } else {
-          setDiscovery([]);
-        }
-        if (pendingResult.status === 'fulfilled') {
-          setPending(Array.isArray(pendingResult.value) ? pendingResult.value : []);
-        } else {
-          setPending([]);
-        }
+function reasonLabel(reason?: string | null): string {
+  if (!reason) return 'Unknown reason';
+  return REASON_LABELS[reason] ?? reason.replace(/_/g, ' ');
+}
 
-        const failures = [discResult, pendingResult]
-          .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-          .map((result) => result.reason instanceof Error ? result.reason.message : 'Failed to load');
-        if (failures.length) {
-          const message = [...new Set(failures)].join(' · ');
-          setLoadError(message);
-          toast.error(message);
-        }
-      })
-      .finally(() => setIsLoading(false));
-  };
+function DiscoveryMap({ line }: { line: DiscoveryLine }) {
+  const isDark = useIsDark();
+  const traces = useMemo(
+    () => (line.routeQuality?.metrics?.contributingTraces ?? []).filter((t) => t.trace?.length >= 2),
+    [line.id, line.routeQuality],
+  );
+  const hasMultiple = traces.length >= 2;
+  const segments = useMemo(() => (hasMultiple ? buildBlendedSegments(traces) : []), [line.id, hasMultiple]);
+  const allPoints: LngLat[] = hasMultiple ? traces.flatMap((t) => t.trace) : (line.routePath?.coordinates ?? []);
+  const bounds = useMemo(() => computeBounds(allPoints), [line.id]);
 
-  useEffect(() => { fetchData(); }, []);
-
-  const updateStatus = async (id: string, status: string) => {
-    try {
-      await api.put(`/transport-reports/${id}`, { status });
-      setPending((prev) => prev.filter((r) => r.id !== id));
-      toast.success(t('planUpdated', language));
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update');
-    }
-  };
-
-  // Single source of truth for the selected cluster's route geometry — used by both
-  // the inline preview map and the full-screen map, so neither ever references an
-  // undefined variable.
-  const routeGeoJSON = useMemo(() => lineToGeoJSON(selectedDiscovery?.routeGeometry), [selectedDiscovery]);
-
-  if (isLoading) {
-    return <p className="text-muted-foreground text-sm">Loading discovery data...</p>;
+  if (!allPoints.length || !bounds) {
+    return (
+      <div className="h-40 rounded-xl bg-muted/50 flex items-center justify-center text-xs text-muted-foreground gap-1">
+        <MapPin className="h-3.5 w-3.5" /> No GPS data recorded
+      </div>
+    );
   }
+
+  const soloColor = line.routeQuality?.metrics?.blendedColor || '#3B82F6';
+  const geojson = {
+    type: 'FeatureCollection' as const,
+    features: hasMultiple
+      ? segments.map((s) => ({
+          type: 'Feature' as const,
+          properties: { color: s.color },
+          geometry: { type: 'LineString' as const, coordinates: s.coordinates },
+        }))
+      : line.routePath
+        ? [{
+            type: 'Feature' as const,
+            properties: { color: soloColor },
+            geometry: { type: 'LineString' as const, coordinates: line.routePath.coordinates },
+          }]
+        : [],
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="h-40 rounded-xl overflow-hidden border">
+      <Map
+        key={line.id}
+        initialViewState={{ bounds, fitBoundsOptions: { padding: 24 } }}
+        style={{ width: '100%', height: '100%' }}
+        mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+        interactive={false}
+        attributionControl={false}
+      >
+        <Source id={`trace-${line.id}`} type="geojson" data={geojson}>
+          <Layer
+            id={`trace-line-${line.id}`}
+            type="line"
+            paint={{ 'line-color': ['get', 'color'], 'line-width': 4, 'line-opacity': 0.92 }}
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+          />
+        </Source>
+      </Map>
+    </div>
+  );
+}
 
-      <Card className="glass-panel rounded-[2rem]">
-        <CardContent className="p-4 space-y-3">
-          <div className="flex items-start gap-3">
-            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-              <Brain className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">Discovery learning brain</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Each contributed journey is split into single transport legs, clustered by mode/operator/number and overlapping GPS geometry, converted into GTFS-style stop_times + shapes, then scored from 1–5 by report volume, GPS completeness, route stability, and rider confirmations.
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <div className="rounded-2xl bg-background/35 border p-3">
-              <Route className="h-4 w-4 text-primary mb-1" />
-              <p className="text-xs font-semibold">Segment-first storage</p>
-              <p className="text-[11px] text-muted-foreground">Bus + microbus in one journey become two scored route candidates.</p>
-            </div>
-            <div className="rounded-2xl bg-background/35 border p-3">
-              <MapPinned className="h-4 w-4 text-primary mb-1" />
-              <p className="text-xs font-semibold">GTFS geometry lock</p>
-              <p className="text-[11px] text-muted-foreground">A candidate only graduates when repeated traces agree on stops and shape.</p>
-            </div>
-            <div className="rounded-2xl bg-background/35 border p-3">
-              <Star className="h-4 w-4 text-primary mb-1" />
-              <p className="text-xs font-semibold">1–5 confidence</p>
-              <p className="text-[11px] text-muted-foreground">Scores rise with unique riders, completed GPS, and positive reviews.</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+export default function AdminDiscovery() {
+  const navigate = useNavigate();
+  const [lines, setLines] = useState<DiscoveryLine[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'rejected'>('pending');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'bus' | 'microbus'>('all');
+  const [query, setQuery] = useState('');
+  const [transportTypes, setTransportTypes] = useState<TransportType[]>([]);
+  const [providerDialogFor, setProviderDialogFor] = useState<DiscoveryLine | null>(null);
+  const [retrying, setRetrying] = useState<Set<string>>(new Set());
+  const [retryErrors, setRetryErrors] = useState<Record<string, string>>({});
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
 
-      {loadError && (
-        <Card className="border-destructive/40">
-          <CardContent className="p-4 text-sm text-destructive">
-            Could not load discovery data: {loadError}
-            <Button size="sm" variant="outline" className="ml-3 h-7" onClick={fetchData}>Retry</Button>
-          </CardContent>
-        </Card>
-      )}
+  useEffect(() => {
+    api.get<TransportType[]>('/transport-types').then((data) => setTransportTypes(data ?? [])).catch(() => {});
+  }, []);
 
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-foreground">{t('routeDiscovery', language)}</h3>
-        {discovery.length === 0 && !loadError && <p className="text-muted-foreground text-sm">{t('noDiscovery', language)}</p>}
-        {discovery.map((d, i) => {
-          const isSelected = selectedDiscovery?.transportNumber === d.transportNumber && selectedDiscovery?.transportName === d.transportName;
-          const previewGeoJSON = isSelected ? routeGeoJSON : null;
+  const busTypeId = transportTypes.find((t) => t.nameEn.toLowerCase() === 'bus')?.id;
+  const microbusTypeId = transportTypes.find((t) => t.nameEn.toLowerCase() === 'microbus')?.id;
+
+  const load = () => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    params.set('routeStatus', statusFilter === 'pending' ? 'needs_review' : 'rejected');
+    params.set('dataSource', 'discovery');
+    if (typeFilter === 'bus' && busTypeId) params.set('transportTypeId', busTypeId);
+    if (typeFilter === 'microbus' && microbusTypeId) params.set('transportTypeId', microbusTypeId);
+    if (query.trim()) params.set('q', query.trim());
+    api.get<DiscoveryLine[]>(`/transit-lines?${params.toString()}`)
+      .then((data) => setLines(data ?? []))
+      .catch(() => toast.error('Failed to load discovery routes'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, typeFilter, busTypeId, microbusTypeId]);
+
+  useEffect(() => {
+    const timer = setTimeout(load, 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  const sortedLines = useMemo(() => {
+    if (statusFilter !== 'rejected') {
+      return [...lines].sort((a, b) => (b.reviewReportCount ?? 0) - (a.reviewReportCount ?? 0));
+    }
+    // Least recoverable first, most recoverable (highest chance of being
+    // fixed by a re-attempt or "Improve route quality") last.
+    return [...lines].sort((a, b) => {
+      const scoreA = a.routeQuality?.metrics?.recoverabilityScore ?? 3;
+      const scoreB = b.routeQuality?.metrics?.recoverabilityScore ?? 3;
+      return scoreA - scoreB;
+    });
+  }, [lines, statusFilter]);
+
+  const withBusy = async (id: string, fn: () => Promise<void>) => {
+    setBusyIds((prev) => new Set(prev).add(id));
+    try {
+      await fn();
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  const acceptRoute = (line: DiscoveryLine) => withBusy(line.id, async () => {
+    try {
+      const updated = await api.put<DiscoveryLine>(`/transit-lines/${line.id}`, {
+        routeStatus: 'active',
+        needsReviewReason: null,
+        verifiedAt: new Date().toISOString(),
+      });
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
+      setLines((prev) => prev.filter((l) => l.id !== line.id));
+      toast.success('Route accepted — now live on the Routes page');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to accept route');
+    }
+  });
+
+  const rejectRoute = (line: DiscoveryLine) => withBusy(line.id, async () => {
+    try {
+      const nextQuality = {
+        ...(line.routeQuality ?? {}),
+        metrics: {
+          ...(line.routeQuality?.metrics ?? {}),
+          rejectionReason: line.routeQuality?.metrics?.rejectionReason ?? 'admin_rejected',
+          recoverabilityScore: line.routeQuality?.metrics?.recoverabilityScore ?? 3,
+        },
+      };
+      const updated = await api.put<DiscoveryLine>(`/transit-lines/${line.id}`, {
+        routeStatus: 'rejected',
+        needsReviewReason: 'Rejected by admin',
+        routeQuality: nextQuality,
+      });
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
+      setLines((prev) => prev.filter((l) => l.id !== line.id));
+      toast.success('Route rejected');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reject route');
+    }
+  });
+
+  const moveToPending = (line: DiscoveryLine) => withBusy(line.id, async () => {
+    try {
+      const updated = await api.put<DiscoveryLine>(`/transit-lines/${line.id}`, {
+        routeStatus: 'needs_review',
+        needsReviewReason: 'Recovered from rejected for another look',
+      });
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
+      setLines((prev) => prev.filter((l) => l.id !== line.id));
+      toast.success('Moved back to pending');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to move route');
+    }
+  });
+
+  const deleteRoute = (line: DiscoveryLine) => withBusy(line.id, async () => {
+    try {
+      await api.delete(`/transit-lines/${line.id}`);
+      await deleteLocalTransitLines([line.id]);
+      setLines((prev) => prev.filter((l) => l.id !== line.id));
+      toast.success('Route deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete route');
+    }
+  });
+
+  const retrySnap = async (line: DiscoveryLine, provider: 'valhalla' | 'osrm') => {
+    setProviderDialogFor(null);
+    setRetrying((prev) => new Set(prev).add(line.id));
+    setRetryErrors((prev) => { const next = { ...prev }; delete next[line.id]; return next; });
+    try {
+      const result = await api.post<{ success: boolean; roadMatched: boolean; route?: DiscoveryLine; reason?: string }>(
+        `/transit-lines/${line.id}/resnap`,
+        { provider },
+      );
+      if (result.success && result.route) {
+        await saveLocalTransitLine(result.route as unknown as Record<string, unknown>);
+        setLines((prev) => prev.map((l) => (l.id === line.id ? { ...l, ...result.route } : l)));
+        toast.success('Route successfully matched to real roads');
+      } else {
+        setRetryErrors((prev) => ({ ...prev, [line.id]: reasonLabel(result.reason) }));
+        toast.error('Still could not match this route to real roads.');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Retry failed';
+      setRetryErrors((prev) => ({ ...prev, [line.id]: message }));
+      toast.error(message);
+    } finally {
+      setRetrying((prev) => { const next = new Set(prev); next.delete(line.id); return next; });
+    }
+  };
+
+  return (
+    <div className="min-h-screen pb-24">
+      <div className="sticky top-0 z-10 glass-panel border-b px-4 py-3 flex items-center gap-3">
+        <Button variant="ghost" size="icon" onClick={() => navigate('/admin')}>
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <h1 className="text-lg font-semibold">Discovery</h1>
+      </div>
+
+      <div className="p-4 space-y-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search area, name, or line number…"
+            className="pl-9 rounded-[2rem]"
+          />
+        </div>
+        <div className="flex gap-2">
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as 'pending' | 'rejected')}>
+            <SelectTrigger className="rounded-[2rem]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as 'all' | 'bus' | 'microbus')}>
+            <SelectTrigger className="rounded-[2rem]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="bus">Bus</SelectItem>
+              <SelectItem value="microbus">Microbus</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {statusFilter === 'rejected' && (
+          <p className="text-xs text-muted-foreground">
+            Sorted from least to most likely to be recoverable — rejected routes are deleted automatically after 7 days.
+          </p>
+        )}
+      </div>
+
+      <div className="px-4 space-y-3">
+        {loading && <p className="text-sm text-muted-foreground text-center py-8">Loading…</p>}
+        {!loading && sortedLines.length === 0 && (
+          <p className="text-sm text-muted-foreground text-center py-8">
+            {statusFilter === 'pending' ? 'No pending discoveries.' : 'No rejected routes.'}
+          </p>
+        )}
+
+        {sortedLines.map((line) => {
+          const roadMatched = line.routeQuality?.metrics?.roadMatched;
+          const isRejected = line.routeStatus === 'rejected';
+          const rejectionReason = line.routeQuality?.metrics?.rejectionReason;
+          const recoverability = line.routeQuality?.metrics?.recoverabilityScore ?? 3;
+          const busy = busyIds.has(line.id);
+          const isRetrying = retrying.has(line.id);
+          const retryError = retryErrors[line.id];
+
           return (
-            <Card key={`${d.transportName}-${d.transportNumber}-${i}`} className="cursor-pointer hover:bg-accent/20 transition-colors">
-              <CardContent
-                className="p-4 space-y-3"
-                onClick={() => setSelectedDiscovery((prev) => (isSelected ? null : d))}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-foreground">
-                    {d.transportNumber ? `${d.transportNumber} · ` : ''}{d.transportName}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="gap-1">
-                      <Star className="h-3 w-3 fill-current" />
-                      {toFiniteNumber(d.confidenceScore, 1).toFixed(1)}/5
-                    </Badge>
-                    <Badge variant="secondary" className="gap-1">
-                      <Users className="h-3 w-3" />
-                      {d.reportCount}
-                    </Badge>
+            <Card key={line.id} className="glass-panel rounded-[2rem] overflow-hidden">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm truncate">{line.nameEn}</p>
+                    {line.nameAr && line.nameAr !== line.nameEn && (
+                      <p className="text-sm text-muted-foreground truncate" dir="rtl">{line.nameAr}</p>
+                    )}
                   </div>
+                  {line.lineNumber && <Badge variant="secondary" className="shrink-0">#{line.lineNumber}</Badge>}
                 </div>
+
+                <DiscoveryMap line={line} />
+
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{line.fromArea} → {line.toArea}</span>
+                  <span>{line.priceEgp} EGP</span>
+                </div>
+
                 <p className="text-xs text-muted-foreground">
-                  {d.reportCount} {t('usersReported', language)}
-                </p>
-                {(d.sampleFromArea || d.sampleToArea) && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    {d.sampleFromArea || '?'} <ArrowRight className="h-3 w-3" /> {d.sampleToArea || '?'}
-                  </p>
-                )}
-                {d.avgPrice != null && (
-                  <p className="text-xs text-muted-foreground">
-                    {t('avgPrice', language)}: {Math.round(d.avgPrice)} {t('egp', language)}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  GPS traces: {d.gpsTraceCount ?? 0} · full: {d.fullTraceCount ?? 0} · good GPS: {d.goodGpsCount ?? 0} · avg points: {Math.round(toFiniteNumber(d.avgGpsPoints, 0))}
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  Approve only clusters whose merged trace follows one real route, not merely routes sharing the same streets.
+                  Confidence: {Math.round((line.confidenceScore ?? 0) * 100)}% · Reports: {line.reviewReportCount ?? line.routeQuality?.metrics?.matchedReportCount ?? 0}
                 </p>
 
-                {/* Small embedded route map preview — shown only when this card is selected */}
-                {isSelected && previewGeoJSON && (
-                  <div
-                    className="relative rounded-2xl overflow-hidden border-2 border-primary/30 mt-3 cursor-pointer group"
-                    onClick={(e) => { e.stopPropagation(); setShowFullMap(true); }}
-                  >
-                    <div className="h-40 w-full bg-background/50 relative">
-                      <Map
-                        initialViewState={{ latitude: d.centerLat ?? 30.0444, longitude: d.centerLng ?? 31.2357, zoom: 12 }}
-                        mapStyle={MAP_STYLE_DARK}
-                        style={{ width: '100%', height: '100%' }}
-                        attributionControl={false}
-                        interactive={false}
-                      >
-                        <Source id={`route-preview-${i}`} type="geojson" data={previewGeoJSON}>
-                          <Layer id={`route-line-preview-${i}`} type="line" paint={{
-                            'line-color': '#3B82F6',
-                            'line-width': 3,
-                            'line-opacity': 0.8,
-                          }} />
-                        </Source>
-                      </Map>
-                    </div>
-                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <Maximize2 className="h-6 w-6 text-white" />
-                    </div>
+                {roadMatched === false && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="w-fit gap-1 border-yellow-500 text-yellow-600">
+                      <ShieldAlert className="h-3 w-3" /> Raw GPS · not road-matched
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1 text-xs"
+                      disabled={isRetrying}
+                      onClick={() => setProviderDialogFor(line)}
+                    >
+                      <Sparkles className={`h-3 w-3 ${isRetrying ? 'animate-pulse' : ''}`} />
+                      {isRetrying ? 'Improving…' : 'Improve route quality'}
+                    </Button>
                   </div>
                 )}
-                {isSelected && !previewGeoJSON && (
-                  <p className="text-[11px] text-muted-foreground italic">No GPS trace recorded yet for this cluster.</p>
+                {retryError && (
+                  <p className="text-[11px] text-red-500">Failed: {retryError}</p>
                 )}
+
+                {isRejected && (
+                  <div className="rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 space-y-1">
+                    <p className="text-xs font-medium text-red-600 flex items-center gap-1">
+                      <XCircle className="h-3.5 w-3.5" /> {reasonLabel(rejectionReason)}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Recovery chance: {['', 'very low', 'low', 'medium', 'high', 'very high'][recoverability] ?? 'medium'}
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-1">
+                  {!isRejected ? (
+                    <>
+                      <Button size="sm" className="flex-1 gap-1" disabled={busy} onClick={() => acceptRoute(line)}>
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Accept
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1 gap-1" disabled={busy} onClick={() => rejectRoute(line)}>
+                        <XCircle className="h-3.5 w-3.5" /> Reject
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button size="sm" variant="outline" className="flex-1 gap-1" disabled={busy} onClick={() => moveToPending(line)}>
+                        <RotateCcw className="h-3.5 w-3.5" /> Move to pending
+                      </Button>
+                      <Button size="sm" variant="destructive" className="flex-1 gap-1" disabled={busy} onClick={() => deleteRoute(line)}>
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                      </Button>
+                    </>
+                  )}
+                </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
 
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-foreground">{t('pending', language)}</h3>
-        {pending.length === 0 && <p className="text-muted-foreground text-sm">{t('noReports', language)}</p>}
-        {pending.map((r) => (
-          <Card key={r.id}>
-            <CardContent className="p-4 space-y-2">
-              <p className="text-sm font-medium text-foreground">
-                {r.transportNumber ? `${r.transportNumber} · ` : ''}{r.transportName}
-              </p>
-              {(r.fromArea || r.toArea) && (
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  {r.fromArea || '?'} <ArrowRight className="h-3 w-3" /> {r.toArea || '?'}
-                </p>
-              )}
-              {r.priceEgp != null && (
-                <p className="text-xs text-muted-foreground">{Math.round(r.priceEgp)} {t('egp', language)}</p>
-              )}
-              {r.discoveryMeta && (
-                <div className="flex flex-wrap gap-1">
-                  <Badge variant="secondary">{r.discoveryMeta.routeCompleteness ?? 'full'}</Badge>
-                  <Badge variant="secondary">{r.discoveryMeta.gpsQuality ?? 'good'} GPS</Badge>
-                  <Badge variant={r.discoveryMeta.directionConfirmed ? 'secondary' : 'outline'}>
-                    {r.discoveryMeta.directionConfirmed ? 'direction confirmed' : 'direction uncertain'}
-                  </Badge>
-                  {r.discoveryMeta.direction && (
-                    <Badge variant="outline" className="gap-1">
-                      <ArrowRight className="h-3 w-3" />
-                      {r.discoveryMeta.direction}
-                    </Badge>
-                  )}
-                  {r.discoveryMeta.snapStatus === 'snapped' && (
-                    <Badge variant="secondary">
-                      snapped{r.discoveryMeta.snapProvider ? `: ${r.discoveryMeta.snapProvider}` : ''}
-                    </Badge>
-                  )}
-                  {r.discoveryMeta.snappedPointCount != null && (
-                    <Badge variant="outline">
-                      {r.discoveryMeta.cleanedPointCount ?? '?'} {'->'} {r.discoveryMeta.snappedPointCount} pts
-                    </Badge>
-                  )}
-                  {r.discoveryMeta.snapAverageDeviationM != null && (
-                    <Badge variant="outline">
-                      avg drift {r.discoveryMeta.snapAverageDeviationM}m
-                    </Badge>
-                  )}
-                </div>
-              )}
-              <p className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</p>
-              <div className="flex gap-2 pt-1">
-                <Button size="sm" className="h-8" onClick={() => updateStatus(r.id, 'approved')}>
-                  {t('approve', language)}
-                </Button>
-                <Button size="sm" variant="outline" className="h-8" onClick={() => updateStatus(r.id, 'rejected')}>
-                  {t('reject', language)}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Full-screen map modal for route preview */}
-      {selectedDiscovery && showFullMap && routeGeoJSON && (
-        <Dialog
-          open={true}
-          onOpenChange={(open) => {
-            if (!open) setShowFullMap(false);
-          }}
-        >
-          <DialogContent className="max-w-4xl h-[80vh] p-0 gap-0 rounded-[2rem] overflow-hidden">
-            <DialogHeader className="p-4 border-b">
-              <div className="flex items-center justify-between">
-                <DialogTitle>
-                  {selectedDiscovery.transportNumber ? `${selectedDiscovery.transportNumber} · ` : ''}
-                  {selectedDiscovery.transportName}
-                </DialogTitle>
-              </div>
-            </DialogHeader>
-            <div className="flex-1 overflow-hidden">
-              <Map
-                ref={mapRef}
-                initialViewState={{
-                  latitude: selectedDiscovery.centerLat ?? 30.0444,
-                  longitude: selectedDiscovery.centerLng ?? 31.2357,
-                  zoom: 12,
-                }}
-                mapStyle={MAP_STYLE_DARK}
-                style={{ width: '100%', height: '100%' }}
-                attributionControl={false}
-              >
-                <Source id="route-full" type="geojson" data={routeGeoJSON}>
-                  <Layer id="route-line-full" type="line" paint={{
-                    'line-color': '#3B82F6',
-                    'line-width': 4,
-                    'line-opacity': 0.9,
-                  }} />
-                </Source>
-              </Map>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
+      <Dialog open={!!providerDialogFor} onOpenChange={(open) => !open && setProviderDialogFor(null)}>
+        <DialogContent className="rounded-[2rem]">
+          <DialogHeader>
+            <DialogTitle>Improve route quality</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Choose which road-matching service to try for this route.
+          </p>
+          <div className="flex gap-2 pt-2">
+            <Button className="flex-1" onClick={() => providerDialogFor && retrySnap(providerDialogFor, 'valhalla')}>
+              Valhalla
+            </Button>
+            <Button className="flex-1" variant="outline" onClick={() => providerDialogFor && retrySnap(providerDialogFor, 'osrm')}>
+              OSRM
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
-  );
-};
-
-export default function AdminDiscovery() {
-  return (
-    <AdminDiscoveryErrorBoundary>
-      <AdminDiscoveryContent />
-    </AdminDiscoveryErrorBoundary>
   );
 }

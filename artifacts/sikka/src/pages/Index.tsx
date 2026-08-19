@@ -744,13 +744,37 @@ const Index = () => {
     setContributionTrace([]);
     setContributionTimestamps([]);
     setIsContributingRoute(true);
+    let lastAccepted: { lng: number; lat: number; ts: number } | null = null;
     contributionWatchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        const point: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+        const lng = pos.coords.longitude;
+        const lat = pos.coords.latitude;
+        const ts = pos.timestamp || Date.now();
+        // Match the native trip-discovery service's own location request
+        // (5s / 5m minimums) instead of accepting every raw callback.
+        // Unthrottled high-accuracy GPS fires rapidly with normal jitter
+        // (a few meters is typical, more under tall buildings), and
+        // dividing that jitter by a very short elapsed time computes to an
+        // implausibly high point-to-point speed -- which is what was
+        // silently failing nearly every manual contribution, even though
+        // the same trip wouldn't have tripped that check via native
+        // tracking. Throttling here fixes it at the source rather than
+        // just loosening the server-side threshold further.
+        if (lastAccepted) {
+          const dtSeconds = (ts - lastAccepted.ts) / 1000;
+          const dLat = ((lat - lastAccepted.lat) * Math.PI) / 180;
+          const dLng = ((lng - lastAccepted.lng) * Math.PI) / 180;
+          const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos((lastAccepted.lat * Math.PI) / 180) * Math.cos((lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+          const distanceMeters = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          if (dtSeconds < 4 && distanceMeters < 5) return;
+        }
+        lastAccepted = { lng, lat, ts };
+        const point: [number, number] = [lng, lat];
         setContributionTrace((prev) => [...prev, point]);
         // Recorded in lockstep with contributionTrace (same index) so the
         // discovery pipeline can compute real travel speed from elapsed time.
-        setContributionTimestamps((prev) => [...prev, pos.timestamp || Date.now()]);
+        setContributionTimestamps((prev) => [...prev, ts]);
       },
       () => toast.error(t('gpsUnavailable', language)),
       { enableHighAccuracy: true, maximumAge: 0 },
@@ -1368,7 +1392,7 @@ const Index = () => {
         initialOperator={contributionOperator}
         initialFromArea={pendingNativeFromArea}
         initialToArea={pendingNativeToArea}
-        initialRouteCompleteness={pendingNativeDiscovery ? 'partial' : 'full'}
+        initialRouteCompleteness={'partial'}
         discoverySource={pendingNativeDiscovery ? 'trip' : 'profile'}
         language={language}
       />

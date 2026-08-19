@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { profilesTable, tripsTable, reviewsTable, transitLinesTable, reportsTable, transportReportsTable } from "@workspace/db";
-import { count, eq } from "drizzle-orm";
+import { count, eq, gte, and, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAdmin";
 import { countSuspectPaths } from "../engine/graph";
 
@@ -32,6 +32,7 @@ router.get("/", requireAdmin, async (_req, res) => {
     activeRoutes,
     needsReviewRoutes,
     discoveryRoutes,
+    discoveredLastMonth,
     openReports,
     pendingDiscovery,
     pathHealth,
@@ -44,6 +45,10 @@ router.get("/", requireAdmin, async (_req, res) => {
     db.select({ count: count() }).from(transitLinesTable).where(eq(transitLinesTable.routeStatus, "active")),
     db.select({ count: count() }).from(transitLinesTable).where(eq(transitLinesTable.routeStatus, "needs_review")),
     db.select({ count: count() }).from(transitLinesTable).where(eq(transitLinesTable.dataSource, "discovery")),
+    db
+      .select({ count: count() })
+      .from(transitLinesTable)
+      .where(and(eq(transitLinesTable.dataSource, "discovery"), gte(transitLinesTable.createdAt, sql`now() - interval '30 days'`))),
     db.select({ count: count() }).from(reportsTable).where(eq(reportsTable.status, "open")),
     db.select({ count: count() }).from(transportReportsTable).where(eq(transportReportsTable.status, "pending")),
     countSuspectPaths().catch(() => ({ suspect: 0, total: 0 })),
@@ -67,6 +72,7 @@ router.get("/", requireAdmin, async (_req, res) => {
     activeRoutes: activeRoutes[0]?.count ?? 0,
     needsReviewRoutes: needsReviewRoutes[0]?.count ?? 0,
     discoveryRoutes: discoveryRoutes[0]?.count ?? 0,
+    discoveredLastMonth: discoveredLastMonth[0]?.count ?? 0,
     openReports: openReports[0]?.count ?? 0,
     pendingDiscovery: pendingDiscovery[0]?.count ?? 0,
     suspectPaths: pathHealth.suspect,

@@ -8,6 +8,34 @@ import type { Language } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { Bus, MapPin, Square } from 'lucide-react';
 
+const REJECTION_REASON_KEYS: Record<string, string> = {
+  no_gps_points: 'discoveryReasonFewPoints',
+  too_few_valid_gps_points: 'discoveryReasonFewPoints',
+  outside_supported_region: 'discoveryReasonOutsideRegion',
+  missing_route_direction: 'discoveryReasonMissingDirection',
+  same_start_and_destination: 'discoveryReasonMissingDirection',
+  direction_not_confirmed: 'discoveryReasonMissingDirection',
+  trace_too_short: 'discoveryReasonTooShort',
+  snapped_route_too_short: 'discoveryReasonTooShort',
+  snapped_route_too_sparse: 'discoveryReasonTooShort',
+  start_and_end_too_close: 'discoveryReasonEndpointsClose',
+  stationary_trace: 'discoveryReasonStationary',
+  recording_too_short: 'discoveryReasonTooBrief',
+  recording_too_long: 'discoveryReasonTooLong',
+  // The most common real-world trigger: highway driving with a weak/lost
+  // GPS signal computes as an "impossible" jump between two points.
+  impossible_gps_jump: 'discoveryReasonImpossibleJump',
+  snap_failed: 'discoveryReasonSnapFailed',
+  snap_too_far_from_trace: 'discoveryReasonSnapFailed',
+  snap_endpoint_mismatch: 'discoveryReasonSnapFailed',
+  snap_distance_ratio_bad: 'discoveryReasonSnapFailed',
+};
+
+function rejectionMessage(reason: string | undefined, language: Language): string {
+  const key = (reason && REJECTION_REASON_KEYS[reason]) || 'discoveryReasonGeneric';
+  return t(key, language);
+}
+
 interface ContributeTransportDialogProps {
   open: boolean;
   onClose: () => void;
@@ -42,7 +70,7 @@ export default function ContributeTransportDialog({
   initialOperator = 'microbus',
   initialFromArea = '',
   initialToArea = '',
-  initialRouteCompleteness = 'full',
+  initialRouteCompleteness = 'partial',
   discoverySource = 'manual',
   onSubmitted,
 }: ContributeTransportDialogProps) {
@@ -51,6 +79,7 @@ export default function ContributeTransportDialog({
   const [operator, setOperator] = useState<Operator>(initialOperator);
   const [busOperator, setBusOperator] = useState<'nta' | 'cta'>('nta');
   const [fromArea, setFromArea] = useState('');
+  const [fromAreaResolving, setFromAreaResolving] = useState(false);
   const [toArea, setToArea] = useState('');
   const [price, setPrice] = useState('');
   const [routeCompleteness, setRouteCompleteness] = useState<'full' | 'partial'>('full');
@@ -88,6 +117,33 @@ export default function ContributeTransportDialog({
     if (initialToArea) setToArea((current) => current || initialToArea);
   }, [open, initialFromArea, initialToArea]);
 
+  useEffect(() => {
+    if (!open || initialFromArea) return; // already known from the caller (e.g. a native trip discovery)
+    const firstPoint = (initialTrace?.length ? initialTrace : trace)[0];
+    if (!firstPoint) return;
+    let cancelled = false;
+    setFromAreaResolving(true);
+    api
+      .get<{ nameEn: string | null; nameAr: string | null }>(
+        `/transport-reports/reverse-geocode?lat=${firstPoint[1]}&lng=${firstPoint[0]}`,
+      )
+      .then((result) => {
+        if (cancelled) return;
+        const resolved = language === 'ar' ? (result?.nameAr || result?.nameEn) : (result?.nameEn || result?.nameAr);
+        if (resolved) setFromArea(resolved);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setFromAreaResolving(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Only re-resolve when the starting point itself changes (first capture),
+    // not on every subsequent GPS point appended while recording continues.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialFromArea, initialTrace?.[0]?.[0], initialTrace?.[0]?.[1], trace[0]?.[0], trace[0]?.[1], language]);
+
   const reset = () => {
     setTransportNumber('');
     setOperator(initialOperator);
@@ -95,7 +151,7 @@ export default function ContributeTransportDialog({
     setFromArea('');
     setToArea('');
     setPrice('');
-    setRouteCompleteness('full');
+    setRouteCompleteness('partial');
     setTrace([]);
     setTimestamps([]);
     stopRecording();
@@ -116,10 +172,27 @@ export default function ContributeTransportDialog({
     }
     if (!navigator.geolocation) return;
     setRecording(true);
+    let lastAccepted: { lng: number; lat: number; ts: number } | null = null;
     watchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        setTrace((prev) => [...prev, [pos.coords.longitude, pos.coords.latitude]]);
-        setTimestamps((prev) => [...prev, pos.timestamp || Date.now()]);
+        const lng = pos.coords.longitude;
+        const lat = pos.coords.latitude;
+        const ts = pos.timestamp || Date.now();
+        // Matches the native trip-discovery service's own 5s/5m minimums --
+        // unthrottled high-accuracy GPS fires rapidly with normal jitter,
+        // which reads as an implausible point-to-point speed server-side.
+        if (lastAccepted) {
+          const dtSeconds = (ts - lastAccepted.ts) / 1000;
+          const dLat = ((lat - lastAccepted.lat) * Math.PI) / 180;
+          const dLng = ((lng - lastAccepted.lng) * Math.PI) / 180;
+          const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos((lastAccepted.lat * Math.PI) / 180) * Math.cos((lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+          const distanceMeters = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          if (dtSeconds < 4 && distanceMeters < 5) return;
+        }
+        lastAccepted = { lng, lat, ts };
+        setTrace((prev) => [...prev, [lng, lat]]);
+        setTimestamps((prev) => [...prev, ts]);
       },
       () => {},
       { enableHighAccuracy: true, maximumAge: 0 },
@@ -145,7 +218,7 @@ export default function ContributeTransportDialog({
           const name = operator === 'bus' ? (busOperator === 'cta' ? 'CTA Bus' : 'NTA Bus') : OPERATOR_TYPE_NAME[operator];
           return tt.nameEn.toLowerCase() === name.toLowerCase() || tt.nameEn.toLowerCase() === OPERATOR_TYPE_NAME[operator].toLowerCase();
         })?.id ?? null;
-      await api.post('/transport-reports', {
+      const response = await api.post<{ accepted?: boolean; reason?: string }>('/transport-reports', {
         transportName: operator === 'microbus' ? 'Microbus' : (busOperator === 'cta' ? 'CTA Bus' : 'NTA Bus'),
         transportNumber: transportNumber || null,
         transportTypeId,
@@ -160,6 +233,13 @@ export default function ContributeTransportDialog({
         directionConfirmed,
         discoverySource,
       });
+      // The backend responds 200 OK even when it rejects a submission (bad
+      // GPS data, failed road-matching, etc.) -- accepted:false there means
+      // nothing was saved, so this must not be treated as success.
+      if (response?.accepted === false) {
+        toast.error(rejectionMessage(response.reason, language));
+        return;
+      }
       toast.success(t('contributeSubmitted', language));
       reset();
       onSubmitted?.();
@@ -244,7 +324,13 @@ export default function ContributeTransportDialog({
               <label className="text-xs text-muted-foreground">
                 {t(operator === 'microbus' ? 'microbusBoardingArea' : 'fromArea', language)}
               </label>
-              <Input value={fromArea} onChange={(e) => setFromArea(e.target.value)} className="text-sm rounded-[2rem]" />
+              <div className="h-9 flex items-center px-3 rounded-[2rem] border bg-muted/40 text-sm truncate">
+                {fromAreaResolving ? (
+                  <span className="text-muted-foreground animate-pulse">…</span>
+                ) : (
+                  fromArea || <span className="text-muted-foreground">{t('locating', language)}</span>
+                )}
+              </div>
             </div>
             <div>
               <label className="text-xs text-muted-foreground">

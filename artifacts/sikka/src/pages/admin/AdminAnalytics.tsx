@@ -14,6 +14,7 @@ interface AnalyticsStats {
   activeRoutes?: number;
   needsReviewRoutes?: number;
   discoveryRoutes?: number;
+  discoveredLastMonth?: number;
   openReports?: number;
   pendingDiscovery?: number;
   suspectPaths?: number;
@@ -156,6 +157,17 @@ const AdminAnalytics = () => {
                 {stats.suspectPaths ?? 0}/{stats.suspectPathsTotal} suspect paths
               </p>
             )}
+          </CardContent>
+        </Card>
+
+        <Card className="glass-panel rounded-[2rem]">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp className="h-4 w-4 text-orange-500" />
+              <p className="text-xs text-muted-foreground">Discovered This Month</p>
+            </div>
+            <p className="text-2xl font-bold">{stats.discoveredLastMonth ?? 0}</p>
+            <p className="text-xs text-muted-foreground mt-2">new discovery routes in the last 30 days</p>
           </CardContent>
         </Card>
 

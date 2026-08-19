@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { transitLinesTable, reviewsTable, reportsTable } from "@workspace/db";
-import { eq, asc, inArray } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, or, ilike, lt, sql, type SQL } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAdmin";
 import { haversineKm } from "../utils/routePathGenerator.js";
 import { snapDiscoveryTrace, type TracePoint } from "./transportReports.js";
@@ -52,11 +52,43 @@ interface TransitLineUpdate {
 }
 
 router.get("/", async (req, res) => {
+  // Rejected discoveries are cleaned up lazily here (no separate cron
+  // needed): anything rejected more than 7 days ago is deleted as a side
+  // effect of listing, before the query below runs.
+  await db
+    .delete(transitLinesTable)
+    .where(and(eq(transitLinesTable.routeStatus, "rejected"), lt(transitLinesTable.updatedAt, sql`now() - interval '7 days'`)));
+
   if (req.query.active === "true") {
     const rows = await db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true)).orderBy(asc(transitLinesTable.lineNumber));
     return res.json(rows);
   }
-  const rows = await db.select().from(transitLinesTable).orderBy(asc(transitLinesTable.lineNumber));
+
+  const filters: SQL[] = [];
+  const { routeStatus, dataSource, transportTypeId, q } = req.query as Record<string, string | undefined>;
+  if (routeStatus) {
+    const statuses = routeStatus.split(",").map((s) => s.trim()).filter(Boolean);
+    if (statuses.length === 1) filters.push(eq(transitLinesTable.routeStatus, statuses[0] as "active"));
+    else if (statuses.length > 1) filters.push(inArray(transitLinesTable.routeStatus, statuses as "active"[]));
+  }
+  if (dataSource) filters.push(eq(transitLinesTable.dataSource, dataSource));
+  if (transportTypeId) filters.push(eq(transitLinesTable.transportTypeId, transportTypeId));
+  if (q?.trim()) {
+    const needle = `%${q.trim()}%`;
+    filters.push(
+      or(
+        ilike(transitLinesTable.nameEn, needle),
+        ilike(transitLinesTable.nameAr, needle),
+        ilike(transitLinesTable.fromArea, needle),
+        ilike(transitLinesTable.toArea, needle),
+        ilike(transitLinesTable.lineNumber, needle),
+      ) as SQL,
+    );
+  }
+
+  const rows = filters.length
+    ? await db.select().from(transitLinesTable).where(and(...filters)).orderBy(desc(transitLinesTable.createdAt))
+    : await db.select().from(transitLinesTable).orderBy(asc(transitLinesTable.lineNumber));
   return res.json(rows);
 });
 
@@ -96,6 +128,7 @@ router.put("/:id", requireAdmin, async (req, res) => {
     "lineNumber", "nameEn", "nameAr", "fromArea", "toArea", "viaStops",
     "routePath", "routeDirection", "governorate", "priceEgp", "frequencyMinutes", "hasFixedStops", "isActive", "transportTypeId",
     "dataSource", "sourcePriority", "confidenceScore", "routeStatus", "verifiedAt", "lastConfirmedAt", "needsReviewReason", "reviewReportCount",
+    "routeQuality",
   ];
   const updates: TransitLineUpdate = { updatedAt: new Date() };
   for (const key of allowed) {
@@ -127,12 +160,16 @@ router.post("/:id/resnap", requireAdmin, async (req, res) => {
   const [line] = await db.select().from(transitLinesTable).where(eq(transitLinesTable.id, req.params.id as string));
   if (!line) return res.status(404).json({ error: "route not found" });
 
+  const requestedProvider = req.body?.provider;
+  const preferredProvider: "valhalla" | "osrm" | undefined =
+    requestedProvider === "valhalla" || requestedProvider === "osrm" ? requestedProvider : undefined;
+
   const currentPath = (line.routePath?.coordinates ?? null) as TracePoint[] | null;
   if (!currentPath || currentPath.length < 2) {
     return res.json({ success: false, roadMatched: false, reason: "no_geometry" });
   }
 
-  const result = await snapDiscoveryTrace(currentPath);
+  const result = await snapDiscoveryTrace(currentPath, preferredProvider);
   if (!result.path) {
     // Still couldn't road-match (service still down, or this genuinely
     // isn't a good corridor match) -- leave the route exactly as it was.

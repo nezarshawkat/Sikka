@@ -101,6 +101,75 @@ export function checkPathQuality(points: [number, number][]): PathQuality {
   return { ok: true, reason: null, lengthRatio: ratio };
 }
 
+/** Best-effort extraction of an EN/AR name pair from a Nominatim result's
+ *  `namedetails` block (present when `namedetails=1` is requested), falling
+ *  back sensibly when one language isn't tagged on that OSM feature. */
+function extractBilingualName(
+  namedetails: Record<string, string> | undefined,
+  displayName: string | undefined,
+  requestedLanguageName: string | undefined,
+): { nameEn: string | null; nameAr: string | null } {
+  const base = namedetails?.name ?? requestedLanguageName ?? displayName?.split(",")[0]?.trim() ?? null;
+  const en = namedetails?.["name:en"] ?? (base && !/[\u0600-\u06FF]/.test(base) ? base : null);
+  const ar = namedetails?.["name:ar"] ?? (base && /[\u0600-\u06FF]/.test(base) ? base : null);
+  return { nameEn: en, nameAr: ar };
+}
+
+/** Reverse-geocodes a point to a bilingual place name -- used to auto-fill
+ *  the boarding-point ("get in") area from where a rider's GPS trace
+ *  actually started, instead of asking them to type it. */
+export async function reverseGeocodeBilingual(
+  lng: number,
+  lat: number,
+): Promise<{ nameEn: string | null; nameAr: string | null } | null> {
+  if (!validLngLat(lng, lat)) return null;
+  await respectNominatimRateLimit();
+  const url = `${NOMINATIM_BASE}/reverse?format=jsonv2&namedetails=1&zoom=17&lat=${lat}&lon=${lng}`;
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { "User-Agent": USER_AGENT, "Accept-Language": "ar,en" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { display_name?: string; namedetails?: Record<string, string>; name?: string };
+    const result = extractBilingualName(data.namedetails, data.display_name, data.name);
+    if (!result.nameEn && !result.nameAr) return null;
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+/** Forward-searches free text (whatever language a contributor typed) and
+ *  returns both an English and Arabic name for the same real place, so a
+ *  route only ever needs one language typed in and still ends up with both
+ *  stored -- never done by hand, never left half-translated. */
+export async function searchBilingualPlace(
+  query: string,
+  city = "Cairo",
+): Promise<{ nameEn: string | null; nameAr: string | null } | null> {
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+  await respectNominatimRateLimit();
+  const url =
+    `${NOMINATIM_BASE}/search?format=jsonv2&limit=1&countrycodes=eg&namedetails=1`
+    + `&bounded=0&viewbox=${EGYPT_VIEWBOX}&q=${encodeURIComponent(`${trimmed}, ${city}, Egypt`)}`;
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { "User-Agent": USER_AGENT, "Accept-Language": "ar,en" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as Array<{ display_name?: string; namedetails?: Record<string, string>; name?: string }>;
+    if (!data?.length) return null;
+    const result = extractBilingualName(data[0].namedetails, data[0].display_name, data[0].name);
+    if (!result.nameEn && !result.nameAr) return null;
+    return result;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Nominatim geocoding (free, no key, no billing) ─────────────────────────
 
 const NOMINATIM_BASE = (process.env.NOMINATIM_URL || "https://nominatim.openstreetmap.org").replace(/\/+$/, "");

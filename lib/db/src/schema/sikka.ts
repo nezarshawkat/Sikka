@@ -3,7 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const appRoleEnum = pgEnum("app_role", ["admin", "user"]);
-export const routeStatusEnum = pgEnum("route_status", ["active", "needs_review", "inactive", "pending_discovery"]);
+export const routeStatusEnum = pgEnum("route_status", ["active", "needs_review", "inactive", "pending_discovery", "rejected"]);
 
 export type RoutePathGeoJson = { type: "LineString" | string; coordinates: [number, number][] };
 export type RouteQualitySnapshot = {
@@ -253,8 +253,8 @@ export const transportReportsTable = pgTable("transport_reports", {
     gpsQuality?: "good" | "ok" | "poor";
     direction?: string | null;
     source?: "profile" | "trip" | "manual" | "native";
-    snapProvider?: "valhalla" | "osrm";
-    snapStatus?: "snapped" | "snap_failed" | "not_required";
+    snapProvider?: "valhalla" | "osrm" | "raw_fallback";
+    snapStatus?: "snapped" | "snap_failed" | "not_required" | "raw_fallback";
     validationStatus?: "accepted" | "deleted_invalid" | "pending_review";
     validationReason?: string | null;
     rawPointCount?: number;
