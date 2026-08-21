@@ -14,6 +14,7 @@ type NativeDiscoveryPlugin = {
   startAlwaysOn(): Promise<{ enabled: boolean; notificationPermission: boolean }>;
   stopAlwaysOn(): Promise<{ enabled: boolean }>;
   requestPermissions(options: { permissions: string[] }): Promise<Record<string, string>>;
+  getStatus(): Promise<{ enabled: boolean; pendingCount: number }>;
   getPendingTrips(): Promise<{ trips: NativeDiscoveryTrip[] }>;
   acknowledgeTrip(options: { id: string }): Promise<{ removed: boolean }>;
 };
@@ -41,6 +42,19 @@ export async function stopNativeDiscovery(): Promise<boolean> {
   try {
     await SikkaDiscovery.stopAlwaysOn();
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the native durable recorder is currently running, independent of
+ *  who turned it on -- used so a feature that needs it running temporarily
+ *  (e.g. a manual "Contribute a route" recording) can restore the prior
+ *  state afterward instead of always leaving it on or always turning it off. */
+export async function isNativeDiscoveryEnabled(): Promise<boolean> {
+  if (Capacitor.getPlatform() !== 'android') return false;
+  try {
+    return !!(await SikkaDiscovery.getStatus()).enabled;
   } catch {
     return false;
   }

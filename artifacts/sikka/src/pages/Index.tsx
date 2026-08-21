@@ -35,6 +35,9 @@ import { hasAcceptedLocationDisclosure, persistLocationDisclosure } from '@/lib/
 import {
   acknowledgeNativeDiscoveryTrip,
   getPendingNativeDiscoveryTrips,
+  startNativeDiscovery,
+  stopNativeDiscovery,
+  isNativeDiscoveryEnabled,
   type NativeDiscoveryTrip,
 } from '@/lib/nativeDiscovery';
 import { onTripPipChange, setTripPipEnabled } from '@/lib/nativeMapUi';
@@ -186,6 +189,8 @@ const Index = () => {
   const [contributionDialogOpen, setContributionDialogOpen] = useState(false);
   const [contributionOperator, setContributionOperator] = useState<'microbus' | 'bus'>('microbus');
   const contributionWatchRef = useRef<number | null>(null);
+  const nativeDiscoveryWasEnabledRef = useRef<boolean | null>(null);
+  const contributionStartTsRef = useRef<number | null>(null);
   const tripReportInFlightRef = useRef<string | null>(null);
   const [pendingNativeDiscovery, setPendingNativeDiscovery] = useState<NativeDiscoveryTrip | null>(null);
   const [pendingNativeFromArea, setPendingNativeFromArea] = useState('');
@@ -724,6 +729,13 @@ const Index = () => {
       contributionWatchRef.current = null;
     }
     setIsContributingRoute(false);
+    // Restore the native durable recorder to whatever state it was in
+    // before this contribution started -- only switch it off if this
+    // session was the one that switched it on.
+    if (nativeDiscoveryWasEnabledRef.current === false) {
+      void stopNativeDiscovery();
+    }
+    nativeDiscoveryWasEnabledRef.current = null;
   }, []);
 
   const clearContributionFlow = useCallback(() => {
@@ -744,6 +756,17 @@ const Index = () => {
     setContributionTrace([]);
     setContributionTimestamps([]);
     setIsContributingRoute(true);
+    contributionStartTsRef.current = Date.now();
+    // Safety net: the JS-side watcher below only runs while this page is
+    // open. Also start the same native durable recorder trip discovery
+    // already uses (a real Android foreground service, persisted to disk
+    // after every fix) so the recording survives the app being
+    // backgrounded or closed entirely, not just while this screen stays
+    // open. Restored to its prior state again in stopContributionRecording.
+    void isNativeDiscoveryEnabled().then((alreadyOn) => {
+      nativeDiscoveryWasEnabledRef.current = alreadyOn;
+      if (!alreadyOn) void startNativeDiscovery();
+    });
     let lastAccepted: { lng: number; lat: number; ts: number } | null = null;
     contributionWatchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
@@ -1383,6 +1406,20 @@ const Index = () => {
             void acknowledgeNativeDiscoveryTrip(pendingId).then(() => {
               setPendingNativeDiscovery(null);
               void loadPendingNativeDiscovery();
+            });
+          } else if (contributionStartTsRef.current) {
+            // This was an explicit "Contribute a route" recording, not an
+            // organic prompt -- the native safety-net service was running
+            // in parallel the whole time, so suppress any trip it detected
+            // that overlaps this same window to avoid asking twice about
+            // the same physical journey.
+            const windowStart = contributionStartTsRef.current;
+            const windowEnd = Date.now();
+            void getPendingNativeDiscoveryTrips().then((trips) => {
+              const overlapping = trips.filter((trip) => trip.startedAt <= windowEnd && trip.endedAt >= windowStart);
+              void Promise.all(overlapping.map((trip) => acknowledgeNativeDiscoveryTrip(trip.id))).then(() => {
+                if (overlapping.length) void loadPendingNativeDiscovery();
+              });
             });
           }
           clearContributionFlow();

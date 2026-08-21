@@ -8,34 +8,6 @@ import type { Language } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { Bus, MapPin, Square } from 'lucide-react';
 
-const REJECTION_REASON_KEYS: Record<string, string> = {
-  no_gps_points: 'discoveryReasonFewPoints',
-  too_few_valid_gps_points: 'discoveryReasonFewPoints',
-  outside_supported_region: 'discoveryReasonOutsideRegion',
-  missing_route_direction: 'discoveryReasonMissingDirection',
-  same_start_and_destination: 'discoveryReasonMissingDirection',
-  direction_not_confirmed: 'discoveryReasonMissingDirection',
-  trace_too_short: 'discoveryReasonTooShort',
-  snapped_route_too_short: 'discoveryReasonTooShort',
-  snapped_route_too_sparse: 'discoveryReasonTooShort',
-  start_and_end_too_close: 'discoveryReasonEndpointsClose',
-  stationary_trace: 'discoveryReasonStationary',
-  recording_too_short: 'discoveryReasonTooBrief',
-  recording_too_long: 'discoveryReasonTooLong',
-  // The most common real-world trigger: highway driving with a weak/lost
-  // GPS signal computes as an "impossible" jump between two points.
-  impossible_gps_jump: 'discoveryReasonImpossibleJump',
-  snap_failed: 'discoveryReasonSnapFailed',
-  snap_too_far_from_trace: 'discoveryReasonSnapFailed',
-  snap_endpoint_mismatch: 'discoveryReasonSnapFailed',
-  snap_distance_ratio_bad: 'discoveryReasonSnapFailed',
-};
-
-function rejectionMessage(reason: string | undefined, language: Language): string {
-  const key = (reason && REJECTION_REASON_KEYS[reason]) || 'discoveryReasonGeneric';
-  return t(key, language);
-}
-
 interface ContributeTransportDialogProps {
   open: boolean;
   onClose: () => void;
@@ -81,8 +53,9 @@ export default function ContributeTransportDialog({
   const [fromArea, setFromArea] = useState('');
   const [fromAreaResolving, setFromAreaResolving] = useState(false);
   const [toArea, setToArea] = useState('');
+  const [toAreaResolving, setToAreaResolving] = useState(false);
   const [price, setPrice] = useState('');
-  const [routeCompleteness, setRouteCompleteness] = useState<'full' | 'partial'>('full');
+  const [routeCompleteness, setRouteCompleteness] = useState<'full' | 'partial'>(initialRouteCompleteness);
   // Direction is always taken to be the direction actually recorded by GPS —
   // there's nothing for the rider to confirm, so this is no longer a UI toggle.
   const directionConfirmed = true;
@@ -90,6 +63,7 @@ export default function ContributeTransportDialog({
   const [timestamps, setTimestamps] = useState<number[]>([]);
   const [recording, setRecording] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set());
   const [transportTypes, setTransportTypes] = useState<TransportType[]>([]);
   const watchRef = useRef<number | null>(null);
 
@@ -144,6 +118,45 @@ export default function ContributeTransportDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialFromArea, initialTrace?.[0]?.[0], initialTrace?.[0]?.[1], trace[0]?.[0], trace[0]?.[1], language]);
 
+  useEffect(() => {
+    // Only meaningful for a full route -- for a partial one, wherever the
+    // recording ends is just where the rider happened to get off, not the
+    // real end of the route, so that stays a manual field.
+    if (!open || routeCompleteness !== 'full' || initialToArea) return;
+    const finalTrace = initialTrace?.length ? initialTrace : trace;
+    // While actively recording with the internal recorder, wait until it
+    // stops so this isn't re-fetching on every new point.
+    if (!initialTrace?.length && recording) return;
+    const lastPoint = finalTrace[finalTrace.length - 1];
+    if (!lastPoint) return;
+    let cancelled = false;
+    setToAreaResolving(true);
+    api
+      .get<{ nameEn: string | null; nameAr: string | null }>(
+        `/transport-reports/reverse-geocode?lat=${lastPoint[1]}&lng=${lastPoint[0]}`,
+      )
+      .then((result) => {
+        if (cancelled) return;
+        const resolved = language === 'ar' ? (result?.nameAr || result?.nameEn) : (result?.nameEn || result?.nameAr);
+        if (resolved) setToArea(resolved);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setToAreaResolving(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    open, routeCompleteness, initialToArea, recording,
+    initialTrace?.length ? initialTrace[initialTrace.length - 1]?.[0] : undefined,
+    initialTrace?.length ? initialTrace[initialTrace.length - 1]?.[1] : undefined,
+    !initialTrace?.length && trace.length ? trace[trace.length - 1]?.[0] : undefined,
+    !initialTrace?.length && trace.length ? trace[trace.length - 1]?.[1] : undefined,
+    language,
+  ]);
+
   const reset = () => {
     setTransportNumber('');
     setOperator(initialOperator);
@@ -154,6 +167,7 @@ export default function ContributeTransportDialog({
     setRouteCompleteness('partial');
     setTrace([]);
     setTimestamps([]);
+    setFieldErrors(new Set());
     stopRecording();
   };
 
@@ -199,17 +213,27 @@ export default function ContributeTransportDialog({
     );
   };
 
-  const handleSubmit = async () => {
-    if (operator === 'bus' && !transportNumber.trim()) {
-      toast.error(t('busNumberRequired', language));
-      return;
+  useEffect(() => {
+    if (fromArea.trim() && fieldErrors.has('fromArea')) {
+      setFieldErrors((prev) => { const n = new Set(prev); n.delete('fromArea'); return n; });
     }
+  }, [fromArea, fieldErrors]);
+
+  const handleSubmit = async () => {
+    const nextErrors = new Set<string>();
+    if (operator === 'bus' && !transportNumber.trim()) nextErrors.add('transportNumber');
     // Require from/to areas for both operators when recording a GPS trace, so the
     // direction of travel is always captured for the route the contributor rode.
-    if (isTraceSubmit && (!fromArea.trim() || !toArea.trim())) {
-      toast.error(t('microbusRouteDetailsRequired', language));
+    if (isTraceSubmit && !fromArea.trim()) nextErrors.add('fromArea');
+    if (isTraceSubmit && !toArea.trim()) nextErrors.add('toArea');
+    if (nextErrors.size > 0) {
+      setFieldErrors(nextErrors);
+      toast.error(
+        nextErrors.has('transportNumber') ? t('busNumberRequired', language) : t('microbusRouteDetailsRequired', language),
+      );
       return;
     }
+    setFieldErrors(new Set());
     setSubmitting(true);
     try {
       const priceNum = Number(price);
@@ -218,7 +242,7 @@ export default function ContributeTransportDialog({
           const name = operator === 'bus' ? (busOperator === 'cta' ? 'CTA Bus' : 'NTA Bus') : OPERATOR_TYPE_NAME[operator];
           return tt.nameEn.toLowerCase() === name.toLowerCase() || tt.nameEn.toLowerCase() === OPERATOR_TYPE_NAME[operator].toLowerCase();
         })?.id ?? null;
-      const response = await api.post<{ accepted?: boolean; reason?: string }>('/transport-reports', {
+      await api.post<{ accepted?: boolean; reason?: string }>('/transport-reports', {
         transportName: operator === 'microbus' ? 'Microbus' : (busOperator === 'cta' ? 'CTA Bus' : 'NTA Bus'),
         transportNumber: transportNumber || null,
         transportTypeId,
@@ -233,19 +257,25 @@ export default function ContributeTransportDialog({
         directionConfirmed,
         discoverySource,
       });
-      // The backend responds 200 OK even when it rejects a submission (bad
-      // GPS data, failed road-matching, etc.) -- accepted:false there means
-      // nothing was saved, so this must not be treated as success.
-      if (response?.accepted === false) {
-        toast.error(rejectionMessage(response.reason, language));
-        return;
-      }
+      // Whatever the backend decides (accepted, or saved as a reviewable
+      // "rejected" route for GPS/road-matching reasons the contributor
+      // can't fix by re-typing anything) is not the rider's problem to
+      // troubleshoot -- the data is safely saved either way, so they
+      // always just get thanked. Genuine form mistakes above (missing
+      // required fields) are the only errors shown to them directly.
       toast.success(t('contributeSubmitted', language));
       reset();
       onSubmitted?.();
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('contributeFailed', language));
+      // Network/offline failures are already queued for automatic retry by
+      // the API client itself; anything else is logged for debugging but
+      // still doesn't block the contributor with a technical error.
+      console.warn('[contribute] submission error (still shown as success to the contributor)', err);
+      toast.success(t('contributeSubmitted', language));
+      reset();
+      onSubmitted?.();
+      onClose();
     } finally {
       setSubmitting(false);
     }
@@ -309,22 +339,23 @@ export default function ContributeTransportDialog({
               </div>
               <div>
                 <label className="text-xs text-muted-foreground">{t('busNumber', language)}</label>
-                <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm rounded-[2rem]" />
+                <Input
+                  value={transportNumber}
+                  onChange={(e) => {
+                    setTransportNumber(e.target.value);
+                    if (e.target.value.trim()) setFieldErrors((prev) => { const n = new Set(prev); n.delete('transportNumber'); return n; });
+                  }}
+                  className={`text-sm rounded-[2rem] ${fieldErrors.has('transportNumber') ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                />
               </div>
             </>
-          )}
-          {operator === 'microbus' && (
-            <div>
-              <label className="text-xs text-muted-foreground">{t('microbusNumberOptional', language)}</label>
-              <Input value={transportNumber} onChange={(e) => setTransportNumber(e.target.value)} className="text-sm rounded-[2rem]" />
-            </div>
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted-foreground">
                 {t(operator === 'microbus' ? 'microbusBoardingArea' : 'fromArea', language)}
               </label>
-              <div className="h-9 flex items-center px-3 rounded-[2rem] border bg-muted/40 text-sm truncate">
+              <div className={`h-9 flex items-center px-3 rounded-[2rem] border bg-muted/40 text-sm truncate ${fieldErrors.has('fromArea') ? 'border-red-500' : ''}`}>
                 {fromAreaResolving ? (
                   <span className="text-muted-foreground animate-pulse">…</span>
                 ) : (
@@ -336,7 +367,24 @@ export default function ContributeTransportDialog({
               <label className="text-xs text-muted-foreground">
                 {t(operator === 'microbus' ? 'microbusRouteEnd' : 'toArea', language)}
               </label>
-              <Input value={toArea} onChange={(e) => setToArea(e.target.value)} className="text-sm rounded-[2rem]" />
+              {routeCompleteness === 'full' ? (
+                <div className={`h-9 flex items-center px-3 rounded-[2rem] border bg-muted/40 text-sm truncate ${fieldErrors.has('toArea') ? 'border-red-500' : ''}`}>
+                  {toAreaResolving ? (
+                    <span className="text-muted-foreground animate-pulse">…</span>
+                  ) : (
+                    toArea || <span className="text-muted-foreground">{t('locating', language)}</span>
+                  )}
+                </div>
+              ) : (
+                <Input
+                  value={toArea}
+                  onChange={(e) => {
+                    setToArea(e.target.value);
+                    if (e.target.value.trim()) setFieldErrors((prev) => { const n = new Set(prev); n.delete('toArea'); return n; });
+                  }}
+                  className={`text-sm rounded-[2rem] ${fieldErrors.has('toArea') ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                />
+              )}
             </div>
           </div>
           <div>

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import Map, { Source, Layer } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { api } from '@/lib/api';
@@ -11,8 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import {
-  ArrowLeft, Search, ShieldAlert, CheckCircle2, XCircle,
-  Trash2, RotateCcw, MapPin, Sparkles,
+  Search, ShieldAlert, CheckCircle2, XCircle,
+  Trash2, RotateCcw, MapPin, Sparkles, Brain, Route, MapPinned, Star, Maximize2,
 } from 'lucide-react';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
 import { buildBlendedSegments, computeBounds, type LngLat } from '@/lib/traceBlend';
@@ -88,16 +87,39 @@ function reasonLabel(reason?: string | null): string {
   return REASON_LABELS[reason] ?? reason.replace(/_/g, ' ');
 }
 
-function DiscoveryMap({ line }: { line: DiscoveryLine }) {
-  const isDark = useIsDark();
+function useTraceGeometry(line: DiscoveryLine | null) {
   const traces = useMemo(
-    () => (line.routeQuality?.metrics?.contributingTraces ?? []).filter((t) => t.trace?.length >= 2),
-    [line.id, line.routeQuality],
+    () => (line?.routeQuality?.metrics?.contributingTraces ?? []).filter((t) => t.trace?.length >= 2),
+    [line?.id, line?.routeQuality],
   );
   const hasMultiple = traces.length >= 2;
-  const segments = useMemo(() => (hasMultiple ? buildBlendedSegments(traces) : []), [line.id, hasMultiple]);
-  const allPoints: LngLat[] = hasMultiple ? traces.flatMap((t) => t.trace) : (line.routePath?.coordinates ?? []);
-  const bounds = useMemo(() => computeBounds(allPoints), [line.id]);
+  const segments = useMemo(() => (hasMultiple ? buildBlendedSegments(traces) : []), [line?.id, hasMultiple]);
+  const allPoints: LngLat[] = hasMultiple ? traces.flatMap((t) => t.trace) : (line?.routePath?.coordinates ?? []);
+  const bounds = useMemo(() => computeBounds(allPoints), [line?.id]);
+  const soloColor = line?.routeQuality?.metrics?.blendedColor || '#3B82F6';
+  const geojson = useMemo(() => ({
+    type: 'FeatureCollection' as const,
+    features: hasMultiple
+      ? segments.map((s) => ({
+          type: 'Feature' as const,
+          properties: { color: s.color },
+          geometry: { type: 'LineString' as const, coordinates: s.coordinates },
+        }))
+      : line?.routePath
+        ? [{
+            type: 'Feature' as const,
+            properties: { color: soloColor },
+            geometry: { type: 'LineString' as const, coordinates: line.routePath.coordinates },
+          }]
+        : [],
+  }), [hasMultiple, segments, line?.routePath, soloColor]);
+
+  return { allPoints, bounds, geojson, hasMultiple, contributorCount: traces.length };
+}
+
+function DiscoveryMap({ line, onExpand }: { line: DiscoveryLine; onExpand: () => void }) {
+  const isDark = useIsDark();
+  const { allPoints, bounds, geojson, hasMultiple, contributorCount } = useTraceGeometry(line);
 
   if (!allPoints.length || !bounds) {
     return (
@@ -107,26 +129,13 @@ function DiscoveryMap({ line }: { line: DiscoveryLine }) {
     );
   }
 
-  const soloColor = line.routeQuality?.metrics?.blendedColor || '#3B82F6';
-  const geojson = {
-    type: 'FeatureCollection' as const,
-    features: hasMultiple
-      ? segments.map((s) => ({
-          type: 'Feature' as const,
-          properties: { color: s.color },
-          geometry: { type: 'LineString' as const, coordinates: s.coordinates },
-        }))
-      : line.routePath
-        ? [{
-            type: 'Feature' as const,
-            properties: { color: soloColor },
-            geometry: { type: 'LineString' as const, coordinates: line.routePath.coordinates },
-          }]
-        : [],
-  };
-
   return (
-    <div className="h-40 rounded-xl overflow-hidden border">
+    <button
+      type="button"
+      onClick={onExpand}
+      className="relative h-40 w-full rounded-xl overflow-hidden border block text-left"
+      aria-label="Open enlarged map"
+    >
       <Map
         key={line.id}
         initialViewState={{ bounds, fitBoundsOptions: { padding: 24 } }}
@@ -144,12 +153,65 @@ function DiscoveryMap({ line }: { line: DiscoveryLine }) {
           />
         </Source>
       </Map>
-    </div>
+      <div className="absolute bottom-2 right-2 h-7 w-7 rounded-full bg-background/90 border flex items-center justify-center shadow-sm">
+        <Maximize2 className="h-3.5 w-3.5" />
+      </div>
+      {hasMultiple && (
+        <div className="absolute top-2 left-2 rounded-full bg-background/90 border px-2 py-0.5 text-[10px]">
+          {contributorCount} contributors
+        </div>
+      )}
+    </button>
+  );
+}
+
+function EnlargedMapDialog({ line, onClose }: { line: DiscoveryLine | null; onClose: () => void }) {
+  const isDark = useIsDark();
+  const geometry = useTraceGeometry(line);
+
+  return (
+    <Dialog open={!!line} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="rounded-[2rem] max-w-2xl p-0 overflow-hidden">
+        {line && geometry && (
+          <>
+            <DialogHeader className="p-4 pb-0">
+              <DialogTitle className="text-base">{line.nameEn}</DialogTitle>
+              {line.nameAr && line.nameAr !== line.nameEn && (
+                <p className="text-sm text-muted-foreground" dir="rtl">{line.nameAr}</p>
+              )}
+            </DialogHeader>
+            <div className="h-[70vh] w-full">
+              {geometry.bounds ? (
+                <Map
+                  key={line.id}
+                  initialViewState={{ bounds: geometry.bounds, fitBoundsOptions: { padding: 40 } }}
+                  style={{ width: '100%', height: '100%' }}
+                  mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+                  attributionControl={false}
+                >
+                  <Source id={`trace-enlarged-${line.id}`} type="geojson" data={geometry.geojson}>
+                    <Layer
+                      id={`trace-line-enlarged-${line.id}`}
+                      type="line"
+                      paint={{ 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 0.92 }}
+                      layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+                    />
+                  </Source>
+                </Map>
+              ) : (
+                <div className="h-full flex items-center justify-center text-sm text-muted-foreground gap-1">
+                  <MapPin className="h-4 w-4" /> No GPS data recorded
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
 export default function AdminDiscovery() {
-  const navigate = useNavigate();
   const [lines, setLines] = useState<DiscoveryLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'pending' | 'rejected'>('pending');
@@ -160,6 +222,7 @@ export default function AdminDiscovery() {
   const [retrying, setRetrying] = useState<Set<string>>(new Set());
   const [retryErrors, setRetryErrors] = useState<Record<string, string>>({});
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const [enlargedMapFor, setEnlargedMapFor] = useState<DiscoveryLine | null>(null);
 
   useEffect(() => {
     api.get<TransportType[]>('/transport-types').then((data) => setTransportTypes(data ?? [])).catch(() => {});
@@ -309,15 +372,41 @@ export default function AdminDiscovery() {
   };
 
   return (
-    <div className="min-h-screen pb-24">
-      <div className="sticky top-0 z-10 glass-panel border-b px-4 py-3 flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/admin')}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <h1 className="text-lg font-semibold">Discovery</h1>
-      </div>
+    <div className="space-y-4">
+      <Card className="glass-panel rounded-[2rem]">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <Brain className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Discovery learning brain</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Each contributed journey is split into single transport legs, clustered by mode/operator/number and overlapping GPS geometry, converted into GTFS-style stop_times + shapes, then scored from 1–5 by report volume, GPS completeness, route stability, and rider confirmations.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="rounded-2xl bg-background/35 border p-3">
+              <Route className="h-4 w-4 text-primary mb-1" />
+              <p className="text-xs font-semibold">Segment-first storage</p>
+              <p className="text-[11px] text-muted-foreground">Bus + microbus in one journey become two scored route candidates.</p>
+            </div>
+            <div className="rounded-2xl bg-background/35 border p-3">
+              <MapPinned className="h-4 w-4 text-primary mb-1" />
+              <p className="text-xs font-semibold">GTFS geometry lock</p>
+              <p className="text-[11px] text-muted-foreground">A candidate only graduates when repeated traces agree on stops and shape.</p>
+            </div>
+            <div className="rounded-2xl bg-background/35 border p-3">
+              <Star className="h-4 w-4 text-primary mb-1" />
+              <p className="text-xs font-semibold">1–5 confidence</p>
+              <p className="text-[11px] text-muted-foreground">Scores rise with unique riders, completed GPS, and positive reviews.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-      <div className="p-4 space-y-3">
+      <div className="space-y-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -351,7 +440,7 @@ export default function AdminDiscovery() {
         )}
       </div>
 
-      <div className="px-4 space-y-3">
+      <div className="space-y-3">
         {loading && <p className="text-sm text-muted-foreground text-center py-8">Loading…</p>}
         {!loading && sortedLines.length === 0 && (
           <p className="text-sm text-muted-foreground text-center py-8">
@@ -381,7 +470,7 @@ export default function AdminDiscovery() {
                   {line.lineNumber && <Badge variant="secondary" className="shrink-0">#{line.lineNumber}</Badge>}
                 </div>
 
-                <DiscoveryMap line={line} />
+                <DiscoveryMap line={line} onExpand={() => setEnlargedMapFor(line)} />
 
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>{line.fromArea} → {line.toArea}</span>
@@ -469,6 +558,8 @@ export default function AdminDiscovery() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <EnlargedMapDialog line={enlargedMapFor} onClose={() => setEnlargedMapFor(null)} />
     </div>
   );
 }
