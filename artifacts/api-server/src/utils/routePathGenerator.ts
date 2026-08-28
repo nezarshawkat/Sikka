@@ -228,6 +228,59 @@ export async function geocodeStopNominatim(
 
 const OSRM_DRIVING_BASE = (process.env.OSRM_DRIVING_URL || "https://routing.openstreetmap.de/routed-car").replace(/\/+$/, "");
 const OSRM_FOOT_BASE = (process.env.OSRM_FOOT_URL || "https://routing.openstreetmap.de/routed-foot").replace(/\/+$/, "");
+// Keep a second public OSRM instance available for map matching. The primary
+// instance is occasionally rate limited, and a routing outage must not make
+// a valid discovery unusable. A configured server remains the first choice.
+const OSRM_DRIVING_BASES = [...new Set([
+  OSRM_DRIVING_BASE,
+  "https://router.project-osrm.org",
+])];
+const GOOGLE_ROADS_URL = "https://roads.googleapis.com/v1/snapToRoads";
+
+/**
+ * Google Roads is an opt-in production fallback for road matching. Unlike
+ * public OSRM demos, it has an authenticated service contract. Keep this
+ * behind a server-only key: the Android Maps key is intentionally unsuitable
+ * because it is restricted to the mobile app.
+ */
+async function matchWithGoogleRoads(points: [number, number][]): Promise<[number, number][] | null> {
+  const apiKey = process.env.GOOGLE_ROADS_API_KEY?.trim();
+  if (!apiKey || points.length < 2) return null;
+
+  const allCoords: [number, number][] = [];
+  const CHUNK = 100; // Snap to Roads accepts at most 100 original points.
+  for (let i = 0; i < points.length - 1; i += CHUNK - 1) {
+    const chunk = points.slice(i, Math.min(i + CHUNK, points.length));
+    if (chunk.length < 2) continue;
+    const url = new URL(GOOGLE_ROADS_URL);
+    url.searchParams.set("path", chunk.map(([lng, lat]) => `${lat},${lng}`).join("|"));
+    url.searchParams.set("interpolate", "true");
+    url.searchParams.set("key", apiKey);
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(15_000),
+        headers: { "User-Agent": USER_AGENT },
+      });
+      if (!response.ok) return null;
+      const data = await response.json() as {
+        snappedPoints?: Array<{ location?: { latitude?: number; longitude?: number } }>;
+      };
+      const coords = (data.snappedPoints ?? [])
+        .map((point): [number, number] | null => {
+          const lat = point.location?.latitude;
+          const lng = point.location?.longitude;
+          return typeof lng === "number" && typeof lat === "number" ? [lng, lat] : null;
+        })
+        .filter((point): point is [number, number] => point != null);
+      if (coords.length < 2) return null;
+      if (allCoords.length === 0) allCoords.push(...coords);
+      else allCoords.push(...coords.slice(1));
+    } catch {
+      return null;
+    }
+  }
+  return allCoords.length >= 2 ? allCoords : null;
+}
 
 /**
  * OSRM Map Matching: given a rough, possibly-noisy ordered sequence of
@@ -243,41 +296,61 @@ export async function matchToRoads(
   profile: "car" | "foot" = "car",
 ): Promise<[number, number][] | null> {
   if (points.length < 2) return null;
-  const base = profile === "foot" ? OSRM_FOOT_BASE : OSRM_DRIVING_BASE;
-  const osrmProfile = profile === "foot" ? "foot" : "car";
+  const bases = profile === "foot" ? [OSRM_FOOT_BASE] : OSRM_DRIVING_BASES;
+  // OSRM's standard car profile is named "driving". Using "car" works on
+  // some self-hosted deployments, but the public instances reject it.
+  const osrmProfile = profile === "foot" ? "foot" : "driving";
 
   // OSRM match has a practical waypoint ceiling per request; chunk generously.
   const CHUNK = 80;
   const allCoords: [number, number][] = [];
 
-  for (let i = 0; i < points.length - 1; i += CHUNK - 1) {
-    const chunk = points.slice(i, Math.min(i + CHUNK, points.length));
-    if (chunk.length < 2) continue;
-    const coordStr = chunk.map((p) => `${p[0]},${p[1]}`).join(";");
-    // Generous 80 m radius per point: tolerant of a noisy geocode without
-    // letting the match wander arbitrarily far off the intended corridor.
-    const radii = chunk.map(() => 80).join(";");
-    const url = `${base}/match/v1/${osrmProfile}/${coordStr}?geometries=geojson&overview=full&radiuses=${radii}`;
+  for (const base of bases) {
+    allCoords.length = 0;
+    let failed = false;
+    for (let i = 0; i < points.length - 1; i += CHUNK - 1) {
+      const chunk = points.slice(i, Math.min(i + CHUNK, points.length));
+      if (chunk.length < 2) continue;
+      const coordStr = chunk.map((p) => `${p[0]},${p[1]}`).join(";");
+      // Generous 80 m radius per point: tolerant of a noisy geocode without
+      // letting the match wander arbitrarily far off the intended corridor.
+      const radii = chunk.map(() => 80).join(";");
+      // `gaps=ignore` preserves the usable parts of a real GPS recording
+      // instead of rejecting the entire trip for one weak location fix.
+      const url = `${base}/match/v1/${osrmProfile}/${coordStr}?geometries=geojson&overview=full&radiuses=${radii}&gaps=ignore&tidy=true`;
 
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-      if (!res.ok) return null;
-      const data = await res.json() as {
-        code?: string;
-        matchings?: Array<{ geometry: { coordinates: [number, number][] }; confidence?: number }>;
-      };
-      if (data.code !== "Ok" || !data.matchings?.length) return null;
-      // Prefer the highest-confidence matching when OSRM splits the trace.
-      const best = [...data.matchings].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
-      const coords = best?.geometry?.coordinates;
-      if (!coords || coords.length < 2) return null;
-      if (allCoords.length === 0) allCoords.push(...coords);
-      else allCoords.push(...coords.slice(1));
-    } catch {
-      return null;
+      try {
+        const res = await fetch(url, {
+          signal: AbortSignal.timeout(15_000),
+          headers: { "User-Agent": USER_AGENT },
+        });
+        if (!res.ok) { failed = true; break; }
+        const data = await res.json() as {
+          code?: string;
+          matchings?: Array<{ geometry: { coordinates: [number, number][] }; confidence?: number }>;
+        };
+        if (data.code !== "Ok" || !data.matchings?.length) { failed = true; break; }
+        // OSRM may return several ordered matchings when GPS briefly loses
+        // the road. Keeping every segment is crucial: choosing only the
+        // highest-confidence segment previously made a whole trip appear too
+        // short and caused discovery to report a misleading service failure.
+        const matchedCoords = data.matchings.flatMap((matching) => matching.geometry?.coordinates ?? []);
+        if (matchedCoords.length < 2) { failed = true; break; }
+        if (allCoords.length === 0) allCoords.push(...matchedCoords);
+        else allCoords.push(...matchedCoords.slice(1));
+      } catch {
+        failed = true;
+        break;
+      }
     }
+    if (!failed && allCoords.length >= 2) return allCoords;
   }
-  return allCoords.length >= 2 ? allCoords : null;
+  // A directions request is less precise than map matching, but it still
+  // produces a road-bound geometry and is a better fallback than discarding
+  // a valid discovery when OSRM cannot match one noisy GPS sample.
+  const routed = await routeViaOsrm(points, profile);
+  if (routed) return routed;
+  return profile === "car" ? matchWithGoogleRoads(points) : null;
 }
 
 /** OSRM Directions fallback for when Map Matching can't find a confident match. */
@@ -286,20 +359,38 @@ export async function routeViaOsrm(
   profile: "car" | "foot" = "car",
 ): Promise<[number, number][] | null> {
   if (points.length < 2) return null;
-  const base = profile === "foot" ? OSRM_FOOT_BASE : OSRM_DRIVING_BASE;
-  const osrmProfile = profile === "foot" ? "foot" : "car";
-  const coordStr = points.map((p) => `${p[0]},${p[1]}`).join(";");
-  const url = `${base}/route/v1/${osrmProfile}/${coordStr}?overview=full&geometries=geojson`;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) return null;
-    const data = await res.json() as { code?: string; routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
-    if (data.code !== "Ok") return null;
-    const coords = data.routes?.[0]?.geometry?.coordinates;
-    return coords && coords.length >= 2 ? coords : null;
-  } catch {
-    return null;
+  const bases = profile === "foot" ? [OSRM_FOOT_BASE] : OSRM_DRIVING_BASES;
+  const osrmProfile = profile === "foot" ? "foot" : "driving";
+  // Routing services limit waypoints too. Keep the overlap so the joined
+  // route remains continuous for long trip-discovery recordings.
+  const CHUNK = 80;
+  for (const base of bases) {
+    const allCoords: [number, number][] = [];
+    let failed = false;
+    for (let i = 0; i < points.length - 1; i += CHUNK - 1) {
+      const chunk = points.slice(i, Math.min(i + CHUNK, points.length));
+      if (chunk.length < 2) continue;
+      const coordStr = chunk.map((p) => `${p[0]},${p[1]}`).join(";");
+      const url = `${base}/route/v1/${osrmProfile}/${coordStr}?overview=full&geometries=geojson&steps=false`;
+      try {
+        const res = await fetch(url, {
+          signal: AbortSignal.timeout(15_000),
+          headers: { "User-Agent": USER_AGENT },
+        });
+        if (!res.ok) { failed = true; break; }
+        const data = await res.json() as { code?: string; routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
+        const coords = data.code === "Ok" ? data.routes?.[0]?.geometry?.coordinates : null;
+        if (!coords || coords.length < 2) { failed = true; break; }
+        if (allCoords.length === 0) allCoords.push(...coords);
+        else allCoords.push(...coords.slice(1));
+      } catch {
+        failed = true;
+        break;
+      }
+    }
+    if (!failed && allCoords.length >= 2) return allCoords;
   }
+  return null;
 }
 
 export interface WalkingStep {
