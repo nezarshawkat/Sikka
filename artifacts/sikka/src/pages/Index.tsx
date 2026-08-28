@@ -28,6 +28,7 @@ import MicrobusUsedDialog from '@/components/trip/MicrobusUsedDialog';
 import IntercityChoiceDialog from '@/components/trip/IntercityChoiceDialog';
 import ReportDialog from '@/components/ReportDialog';
 import ContributeTransportDialog from '@/components/ContributeTransportDialog';
+import RateUsDialog from '@/components/RateUsDialog';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { nativeLocationIsEnabled, openNativeAppSettings, openNativeLocationSettings } from '@/lib/nativeLocationSettings';
@@ -155,7 +156,7 @@ const tripReportKeyFor = (plan: ActiveTripPlan) => [
 ].join(':');
 
 const Index = () => {
-  const { user, isLoading, language } = useAuth();
+  const { user, isLoading, language, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const { style: mapStyle, mode: mapMode } = useMapStyle();
   const mapRef = useRef<MapRef | null>(null);
@@ -199,6 +200,7 @@ const Index = () => {
   const [reviewSeg, setReviewSeg] = useState<ReviewSegment | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [tripReviewOpen, setTripReviewOpen] = useState(false);
+  const [showRateUs, setShowRateUs] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [cancelTripOpen, setCancelTripOpen] = useState(false);
 
@@ -1376,10 +1378,23 @@ const Index = () => {
       <SegmentReviewDialog
         open={!pipMapOnly && tripReviewOpen}
         onClose={() => setTripReviewOpen(false)}
-        onSubmitted={() => { setTripReviewOpen(false); clearTrip(); toast.success(t('tripComplete', language)); }}
+        onSubmitted={() => {
+          setTripReviewOpen(false);
+          clearTrip();
+          toast.success(t('tripComplete', language));
+          if (!profile?.hasRatedApp) setShowRateUs(true);
+        }}
         segment={null}
         tripLevel
         language={language}
+      />
+
+      {/* Post-trip Play Store rating prompt -- once per rider unless "Later" */}
+      <RateUsDialog
+        open={!pipMapOnly && showRateUs}
+        onClose={() => setShowRateUs(false)}
+        language={language}
+        refreshProfile={refreshProfile}
       />
 
       {/* Report a problem */}

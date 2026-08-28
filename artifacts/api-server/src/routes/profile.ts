@@ -10,6 +10,7 @@ interface ProfileUpdate {
   language?: string;
   nationality?: string;
   displayName?: string | null;
+  hasRatedApp?: boolean;
   updatedAt?: Date;
 }
 
@@ -37,11 +38,12 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 router.put("/", requireAuth, async (req, res) => {
-  const { language, nationality, displayName } = req.body;
+  const { language, nationality, displayName, hasRatedApp } = req.body;
   const updates: ProfileUpdate = { updatedAt: new Date() };
   if (language !== undefined) updates.language = language;
   if (nationality !== undefined) updates.nationality = nationality;
   if (displayName !== undefined) updates.displayName = displayName;
+  if (hasRatedApp !== undefined) updates.hasRatedApp = !!hasRatedApp;
 
   const [existing] = await db
     .select()

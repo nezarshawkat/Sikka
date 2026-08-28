@@ -411,10 +411,16 @@ export async function snapDiscoveryTrace(
   const attempts: Array<{ provider: SnapProvider; path: TracePoint[] | null }> = [];
   if (preferredProvider === "osrm") {
     attempts.push({ provider: "osrm", path: await matchToRoads(raw, "car") });
+    if (!attempts[0].path) {
+      attempts.push({ provider: "valhalla", path: await matchWithValhalla(raw) });
+    }
   } else if (preferredProvider === "valhalla") {
     attempts.push({ provider: "valhalla", path: await matchWithValhalla(raw) });
     if (!attempts[0].path) {
-      return { path: null, reason: VALHALLA_URL ? "snap_failed" : "valhalla_not_configured", quality: null };
+      // Valhalla is optional in production. An admin requesting it should
+      // still receive a road-matched route when OSRM is healthy rather than
+      // being blocked by a missing VALHALLA_URL deployment setting.
+      attempts.push({ provider: "osrm", path: await matchToRoads(raw, "car") });
     }
   } else {
     attempts.push({ provider: "valhalla", path: await matchWithValhalla(raw) });

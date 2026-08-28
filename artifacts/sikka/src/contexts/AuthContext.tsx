@@ -9,6 +9,7 @@ export interface Profile {
   phone: string | null;
   language: string;
   nationality: string | null;
+  hasRatedApp?: boolean;
   isAdmin?: boolean;
 }
 

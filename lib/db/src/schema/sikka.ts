@@ -23,6 +23,11 @@ export const profilesTable = pgTable("profiles", {
   phone: text("phone"),
   language: text("language").notNull().default("en"),
   nationality: text("nationality").notNull().default("egyptian"),
+  // True once the rider has gone through the post-trip "rate us" flow with
+  // a star tap (whether that sent them to the Play Store or not) -- the
+  // prompt stops appearing for them permanently. Choosing "Later" instead
+  // leaves this false, so the prompt keeps reappearing after future trips.
+  hasRatedApp: boolean("has_rated_app").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
