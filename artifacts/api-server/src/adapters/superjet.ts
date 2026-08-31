@@ -5,7 +5,7 @@ import type { InterTrip } from "../lib/intercityTypes.js";
 const BASE = "https://www.superjet.com.eg";
 const TIMEOUT = 12000;
 
-interface SuperJetCity {
+export interface SuperJetCity {
   id: string;
   name: string;
 }
@@ -40,7 +40,8 @@ export async function getSuperJetCities(): Promise<SuperJetCity[]> {
 export async function searchSuperJet(
   fromId: string,
   toId: string,
-  date: string
+  date: string,
+  bookingUrl: string
 ): Promise<InterTrip[]> {
   try {
     const formData = new URLSearchParams({
@@ -81,7 +82,7 @@ export async function searchSuperJet(
           fromStation: fromStation || "Main Terminal",
           toStation: toStation || "Main Terminal",
           bookingMethod: "online",
-          bookingUrl: `${BASE}/booking/start`,
+          bookingUrl,
           availableSeats: null,
           distanceKm: null,
           distanceScore: null,

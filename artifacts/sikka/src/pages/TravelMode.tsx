@@ -131,7 +131,7 @@ const DATA: Record<Mode, ModeData> = {
     services: FLIGHT_SERVICES,
     bookingEn: 'Open airline booking',
     bookingAr: 'فتح حجز الطيران',
-    bookingUrl: 'https://www.egyptair.com/',
+    bookingUrl: 'https://www.egyptair.com/en/booking/book-flight/Pages/default.aspx',
   },
   train: {
     icon: TrainFront,
@@ -173,6 +173,14 @@ const DATA: Record<Mode, ModeData> = {
   },
 };
 
+function buildBookingUrl(mode: Mode, baseUrl: string | undefined, from: string, to: string) {
+  if (!baseUrl) return undefined;
+  const url = new URL(baseUrl);
+  if (from) url.searchParams.set('from', from);
+  if (to) url.searchParams.set('to', to);
+  return url.toString();
+}
+
 function normalizeCity(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -189,7 +197,7 @@ export default function TravelMode() {
   const to = params.get('toLabel') || params.get('to') || '';
   const routeText = from && to ? `${from} -> ${to}` : '';
   const cityPair = `${normalizeCity(from)} ${normalizeCity(to)}`;
-  const bookingUrl = mode === 'taxi' ? null : item.bookingUrl;
+  const bookingUrl = mode === 'taxi' ? null : buildBookingUrl(mode as Mode, item.bookingUrl, params.get('from') || from, params.get('to') || to);
   const recommended =
     mode === 'taxi' ||
     (mode === 'flight' && /cairo|alexandria|luxor|aswan|hurghada|sharm/.test(cityPair)) ||

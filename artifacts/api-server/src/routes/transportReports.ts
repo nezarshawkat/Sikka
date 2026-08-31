@@ -408,7 +408,11 @@ export async function snapDiscoveryTrace(
   provider: SnapProvider;
   quality: ReturnType<typeof snapQuality>;
 } | { path: null; reason: string; quality: ReturnType<typeof snapQuality> | null }> {
+  const providers: Array<"valhalla" | "osrm"> = preferredProvider === "osrm"
+    ? ["osrm", "valhalla"]
+    : ["valhalla", "osrm"];
   const attempts: Array<{ provider: SnapProvider; path: TracePoint[] | null }> = [];
+<<<<<<< ours
   if (preferredProvider === "osrm") {
     attempts.push({ provider: "osrm", path: await matchToRoads(raw, "car") });
     if (!attempts[0].path) {
@@ -427,8 +431,16 @@ export async function snapDiscoveryTrace(
     if (!attempts[0].path) {
       attempts.push({ provider: "osrm", path: await matchToRoads(raw, "car") });
     }
+=======
+  for (const provider of providers) {
+    attempts.push({
+      provider,
+      path: provider === "osrm" ? await matchToRoads(raw, "car") : await matchWithValhalla(raw),
+    });
+>>>>>>> theirs
   }
 
+  let rejected: { reason: string; quality: ReturnType<typeof snapQuality> } | null = null;
   for (const attempt of attempts) {
     if (!attempt.path) continue;
     const snapped = simplifyTrace(attempt.path);
@@ -436,13 +448,16 @@ export async function snapDiscoveryTrace(
     if (validation.ok) {
       return { path: snapped, provider: attempt.provider, quality: validation.quality };
     }
-    return { path: null, reason: validation.reason, quality: validation.quality };
+    // A provider can return geometry that is valid syntactically but poor
+    // for this trace. Try the other provider before rejecting the discovery.
+    rejected = { reason: validation.reason, quality: validation.quality };
   }
 
   // An explicit provider choice that returned nothing at all is reported
   // as-is rather than silently substituting the raw trace -- the admin
   // asked for a specific provider's road-match, not a fallback.
   if (preferredProvider) {
+    if (rejected) return { path: null, reason: rejected.reason, quality: rejected.quality };
     return { path: null, reason: "snap_failed", quality: null };
   }
 

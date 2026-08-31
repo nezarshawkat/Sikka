@@ -30,6 +30,7 @@ interface GovernorateOption {
   hubCityId: string;
   hubCityNameEn: string;
   hubCityNameAr: string;
+  operatorCities?: { operator: string; operatorCity: string; label: string }[];
 }
 
 interface Trip {
@@ -57,6 +58,21 @@ const OPERATOR_LABELS: Record<string, string> = {
   gobus: 'GoBus',
   bluebus: 'BlueBus',
 };
+
+
+const OFFICIAL_OPERATOR_LINKS = [
+  { slug: 'superjet', label: 'SuperJet', baseUrl: 'https://www.superjet.com.eg/booking/start' },
+  { slug: 'gobus', label: 'GoBus', baseUrl: 'https://go-bus.com/en' },
+  { slug: 'bluebus', label: 'BlueBus', baseUrl: 'https://bluebus.com.eg/en' },
+];
+
+function buildOfficialOperatorUrl(baseUrl: string, from?: string, to?: string, date?: string) {
+  const url = new URL(baseUrl);
+  if (from) url.searchParams.set('from', from);
+  if (to) url.searchParams.set('to', to);
+  if (date) url.searchParams.set('date', date ?? '');
+  return url.toString();
+}
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -87,7 +103,6 @@ const Intercity = () => {
   const [searched, setSearched] = useState(false);
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
-  const [cityFilter, setCityFilter] = useState('');
   // When arriving from the home map's intercity flow (?from=&to=), preselect
   // both cities and auto-run the search once.
   const [autoSearch, setAutoSearch] = useState(false);
@@ -213,11 +228,7 @@ const Intercity = () => {
       }
     : { latitude: 26.8206, longitude: 30.8025 };
 
-  const filteredGovernorates = governorates.filter((g) =>
-    g.nameEn.toLowerCase().includes(cityFilter.toLowerCase()) ||
-    g.nameAr.includes(cityFilter) ||
-    g.governorate.toLowerCase().includes(cityFilter.toLowerCase())
-  );
+  const visibleGovernorates = governorates;
 
   const groupedByOperator = trips
     ? trips.reduce<Record<string, Trip[]>>((acc, t) => {
@@ -270,7 +281,7 @@ const Intercity = () => {
             <div>
               <p className="text-xs text-muted-foreground mb-1.5">{isAr ? 'من' : 'From'}</p>
               <button
-                onClick={() => { setCityFilter(''); setShowFromPicker(true); }}
+                onClick={() => setShowFromPicker(true)}
                 className="w-full h-12 px-4 rounded-[1.5rem] border bg-background/70 text-start flex items-center gap-3 hover:border-primary transition-colors"
               >
                 <MapPin className="h-4 w-4 text-primary shrink-0" />
@@ -291,7 +302,7 @@ const Intercity = () => {
             <div>
               <p className="text-xs text-muted-foreground mb-1.5">{isAr ? 'إلى' : 'To'}</p>
               <button
-                onClick={() => { setCityFilter(''); setShowToPicker(true); }}
+                onClick={() => setShowToPicker(true)}
                 className="w-full h-12 px-4 rounded-[1.5rem] border bg-background/70 text-start flex items-center gap-3 hover:border-primary transition-colors"
               >
                 <MapPin className="h-4 w-4 text-destructive shrink-0" />
@@ -389,11 +400,25 @@ const Intercity = () => {
             >
               <Bus className="h-12 w-12 text-muted-foreground/40" />
               <p className="font-medium text-foreground">{isAr ? 'لا توجد رحلات' : 'No trips found'}</p>
-              <p className="text-sm text-muted-foreground max-w-[260px]">
+              <p className="text-sm text-muted-foreground max-w-[300px]">
                 {isAr
-                  ? 'لم يتم العثور على رحلات في هذا الموعد. جرب تاريخ آخر.'
-                  : 'No trips found for this date. Try a different date.'}
+                  ? 'لم يرجع مزودو الحجز بيانات مباشرة لهذا الموعد. افتح الموقع الرسمي لإتمام البحث والحجز.'
+                  : 'No live operator data came back for this date. Open the official booking site to finish the search and purchase.'}
               </p>
+              <div className="mt-2 grid w-full max-w-[320px] gap-2">
+                {OFFICIAL_OPERATOR_LINKS.map((operator) => (
+                  <a
+                    key={operator.slug}
+                    href={buildOfficialOperatorUrl(operator.baseUrl, fromCity?.nameEn, toCity?.nameEn, date)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-[1.35rem] border bg-card px-4 text-sm font-semibold text-foreground transition-colors hover:border-primary hover:bg-primary/5"
+                  >
+                    {isAr ? `فتح ${operator.label}` : `Open ${operator.label}`}
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                ))}
+              </div>
             </motion.div>
           )}
 
@@ -515,16 +540,12 @@ const Intercity = () => {
                     ? (isAr ? 'اختر محافظة الانطلاق' : 'Select departure governorate')
                     : (isAr ? 'اختر محافظة الوصول' : 'Select destination governorate')}
                 </p>
-                <input
-                  autoFocus
-                  value={cityFilter}
-                  onChange={(e) => setCityFilter(e.target.value)}
-                  placeholder={isAr ? 'ابحث عن محافظة...' : 'Search governorate...'}
-                  className="w-full h-10 px-4 rounded-[1.5rem] border bg-background/70 text-sm focus:outline-none focus:border-primary"
-                />
+                <p className="text-xs text-muted-foreground text-center">
+                  {isAr ? 'اختر من القائمة؛ يتم استخدام كود كل شركة تلقائيا.' : 'Choose from the list; each operator-specific city code is resolved automatically.'}
+                </p>
               </div>
               <div className="overflow-y-auto flex-1 p-2">
-                {filteredGovernorates.map((gov) => (
+                {visibleGovernorates.map((gov) => (
                   <button
                     key={gov.governorate}
                     className="w-full text-start px-4 py-3 rounded-[1.5rem] hover:bg-muted transition-colors flex items-center justify-between"
@@ -547,6 +568,7 @@ const Intercity = () => {
                       <p className="font-medium text-foreground text-sm">{isAr ? gov.nameAr : gov.nameEn}</p>
                       <p className="text-xs text-muted-foreground">
                         {isAr ? `مركز البحث: ${gov.hubCityNameAr}` : `Searches via ${gov.hubCityNameEn}`}
+                        {gov.operatorCities?.length ? ` · ${gov.operatorCities.map((city) => `${city.operator}: ${city.label}`).join(' · ')}` : ''}
                       </p>
                     </div>
                     {(showFromPicker ? fromGovernorate?.governorate : toGovernorate?.governorate) === gov.governorate && (

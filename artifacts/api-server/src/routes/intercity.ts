@@ -3,6 +3,7 @@ import { runIntercitySearch, EGYPT_CITIES, getGovernorates, getSuperJetCities } 
 import { db } from "@workspace/db";
 import { interTripsCacheTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { getOperatorCoverage } from "../lib/intercityOperators.js";
 
 const router = Router();
 
@@ -65,6 +66,7 @@ router.get("/governorates", (_req, res) => {
     hubCityId: g.hubCity.id,
     hubCityNameEn: g.hubCity.nameEn,
     hubCityNameAr: g.hubCity.nameAr,
+    operatorCities: getOperatorCoverage(g.hubCity),
   }));
   res.json(governorates);
 });

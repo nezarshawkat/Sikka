@@ -58,23 +58,35 @@ the real route terminus.
 **Removed the "Microbus route number or windshield sign (optional)"
 field** — done, gone entirely.
 
-## About the Valhalla/OSRM errors you saw
-That's the admin "Improve route quality" button working exactly as
-designed from your last request (you specifically asked for the real
-failure reason to show there). Two different things going on:
-- **"Valhalla is not configured on this server"** — expected/fine. Valhalla
-  is optional; `VALHALLA_URL` just isn't set in your Render environment, so
-  it's honestly telling you that rather than pretending to try.
-- **"Road-matching service unavailable"** on OSRM — more concerning. OSRM
-  falls back to a free public demo server (`routing.openstreetmap.de`) when
-  no `OSRM_DRIVING_URL` is configured, and that demo instance is
-  rate-limited/best-effort, not meant for production traffic. If it's
-  failing consistently, the fix is setting `OSRM_DRIVING_URL` to a router
-  you control. I can't verify this from my sandbox (no network access to
-  either service), so I can't confirm which is happening on your end.
+## Routing-service configuration
 
-Worth noting: this button (forcing a *specific* provider) intentionally
-skips the raw-GPS fallback, since it's meant to test that provider
-specifically. Regular contributions still fall back to the raw trace
-automatically when both providers are unavailable, which is why they don't
-hit this same wall.
+Nothing needs to be entered for a basic deployment: leave both variables
+blank and discovery uses the built-in OSRM public-service failover. That is
+free, but it is best-effort and not suitable as the only dependency for a
+busy production service.
+
+For dependable production road matching, deploy one of the open-source
+routers and put its base URL in Render:
+
+- `OSRM_DRIVING_URL=https://osrm.example.com` — the URL must expose
+  `/match/v1/driving`. Do **not** append `/match` or `/route` to the value.
+- `VALHALLA_URL=https://valhalla.example.com` — the URL must expose
+  `/trace_route`. Do **not** append `/trace_route` to the value.
+
+OSRM and Valhalla are free, open-source software; neither requires an API key
+or a paid account. They are not hosted by this repository, however, so a
+self-hosted deployment still has normal server and map-data storage costs.
+Valhalla is optional: when it is blank or unreachable, both profile
+contributions and trip discovery automatically use OSRM instead. Likewise,
+the admin retry controls fall back to the other provider if the selected one
+is unavailable.
+
+### Recommended hosted fallback: Google Roads
+
+Public OSRM instances are demos and can reject or rate-limit server traffic.
+If that is happening, create a **server-restricted** Google Cloud API key,
+enable the **Roads API**, and set `GOOGLE_ROADS_API_KEY` in Render. The
+backend uses its Snap to Roads service only after OSRM fails, for both profile
+contributions and trip discovery. This is an authenticated paid Google API,
+so configure a billing budget; do not use the Android Maps SDK key or expose
+this key through a `VITE_` variable.

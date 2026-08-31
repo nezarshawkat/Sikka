@@ -56,7 +56,7 @@ import {
 } from '@/lib/offline';
 
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357 };
-const FLIGHT_CITY_IDS = new Set(['cairo', 'alexandria', 'luxor', 'aswan', 'hurghada', 'sharm']);
+const FLIGHT_CITY_IDS = new Set(['cairo', 'alexandria', 'luxor', 'aswan', 'hurghada', 'sharm', 'namaaBay']);
 const NILE_CITY_IDS = new Set(['cairo', 'giza', 'luxor', 'aswan']);
 // Mirrors the governorates actually reachable in the seeded Egyptian
 // National Railways timetables (src/data/egyptTrainsSeed.json) -- Egypt's

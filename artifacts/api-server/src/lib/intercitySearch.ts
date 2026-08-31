@@ -2,6 +2,7 @@ import { searchSuperJet, getSuperJetCities } from "../adapters/superjet.js";
 import { searchGoBus } from "../adapters/gobus.js";
 import { searchBlueBus } from "../adapters/bluebus.js";
 import { EGYPT_CITIES, getGovernorates, type InterTrip } from "./intercityTypes.js";
+import { buildOperatorBookingUrl, getOperatorCity } from "./intercityOperators.js";
 
 // Was `s.toLowerCase().replace(/[^a-z0-9]/g, " ")`, which strips every
 // character outside a-z0-9 — for an Arabic query that's *every* character,
@@ -47,8 +48,12 @@ export async function runIntercitySearch(
   userLat?: number | null,
   userLng?: number | null
 ): Promise<{ trips: InterTrip[]; fromCity: string; toCity: string; date: string }> {
-  const fromCity = findCity(fromQuery) ?? { nameEn: fromQuery, nameAr: fromQuery, id: fromQuery };
-  const toCity = findCity(toQuery) ?? { nameEn: toQuery, nameAr: toQuery, id: toQuery };
+  const fromCity = findCity(fromQuery);
+  const toCity = findCity(toQuery);
+
+  if (!fromCity || !toCity) {
+    return { trips: [], fromCity: fromQuery, toCity: toQuery, date };
+  }
 
   const fromEn = fromCity.nameEn;
   const toEn = toCity.nameEn;
@@ -58,25 +63,36 @@ export async function runIntercitySearch(
   // app's EGYPT_CITIES ids -- passing our own id straight through (as
   // before) could never match SuperJet's form, so the search would always
   // return zero real results. Resolve SuperJet's real id by matching name.
-  const superJetIds = await getSuperJetCities().catch(() => []);
+  const superJetIds: { id: string; name: string }[] = await getSuperJetCities().catch(() => []);
   const matchSuperJetId = (nameEn: string): string | null => {
     const target = normalize(nameEn);
     const hit = superJetIds.find((c) => normalize(c.name) === target)
       ?? superJetIds.find((c) => normalize(c.name).includes(target) || target.includes(normalize(c.name)));
     return hit?.id ?? null;
   };
-  const superJetFromId = matchSuperJetId(fromEn);
-  const superJetToId = matchSuperJetId(toEn);
+  const superJetMappedFrom = getOperatorCity("superjet", fromCity);
+  const superJetMappedTo = getOperatorCity("superjet", toCity);
+  const goBusMappedFrom = getOperatorCity("gobus", fromCity);
+  const goBusMappedTo = getOperatorCity("gobus", toCity);
+  const blueBusMappedFrom = getOperatorCity("bluebus", fromCity);
+  const blueBusMappedTo = getOperatorCity("bluebus", toCity);
+
+  const superJetFromId = superJetMappedFrom ? matchSuperJetId(superJetMappedFrom.operatorCity) : null;
+  const superJetToId = superJetMappedTo ? matchSuperJetId(superJetMappedTo.operatorCity) : null;
 
   const [superjetTrips, gobusTrips, bluebusTrips] = await Promise.allSettled([
     // Only actually call SuperJet's search once both ends resolved to a
     // real SuperJet city id -- otherwise this route genuinely isn't in
     // SuperJet's own network, so it isn't offered rather than guessed at.
     superJetFromId && superJetToId
-      ? searchSuperJet(superJetFromId, superJetToId, date)
+      ? searchSuperJet(superJetFromId, superJetToId, date, buildOperatorBookingUrl("superjet", superJetMappedFrom!.operatorCity, superJetMappedTo!.operatorCity, date))
       : Promise.resolve([]),
-    searchGoBus(fromEn, toEn, date),
-    searchBlueBus(fromEn, toEn, date),
+    goBusMappedFrom && goBusMappedTo
+      ? searchGoBus(goBusMappedFrom.operatorCity, goBusMappedTo.operatorCity, date, buildOperatorBookingUrl("gobus", goBusMappedFrom.operatorCity, goBusMappedTo.operatorCity, date))
+      : Promise.resolve([]),
+    blueBusMappedFrom && blueBusMappedTo
+      ? searchBlueBus(blueBusMappedFrom.operatorCity, blueBusMappedTo.operatorCity, date, buildOperatorBookingUrl("bluebus", blueBusMappedFrom.operatorCity, blueBusMappedTo.operatorCity, date))
+      : Promise.resolve([]),
   ]);
 
   const allTrips: InterTrip[] = [

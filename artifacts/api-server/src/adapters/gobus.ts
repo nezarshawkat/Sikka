@@ -7,7 +7,8 @@ const TIMEOUT = 10000;
 export async function searchGoBus(
   fromCity: string,
   toCity: string,
-  date: string
+  date: string,
+  bookingUrl: string
 ): Promise<InterTrip[]> {
   try {
     const res = await axios.get(`${BASE}/api/getTrips`, {
@@ -42,7 +43,7 @@ export async function searchGoBus(
         fromStation: t.fromStation ?? t.from_station ?? t.boardingPoint ?? fromCity,
         toStation: t.toStation ?? t.to_station ?? t.droppingPoint ?? toCity,
         bookingMethod: "online" as const,
-        bookingUrl: `${BASE}/search?from=${encodeURIComponent(fromCity)}&to=${encodeURIComponent(toCity)}&date=${date}`,
+        bookingUrl,
         availableSeats: t.availableSeats ?? t.available_seats ?? null,
         distanceKm: t.distanceKm ?? null,
         distanceScore: null,

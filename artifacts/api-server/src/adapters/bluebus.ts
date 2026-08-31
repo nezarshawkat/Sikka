@@ -25,7 +25,8 @@ const SEARCH_QUERY = `
 export async function searchBlueBus(
   fromCity: string,
   toCity: string,
-  date: string
+  date: string,
+  bookingUrl: string
 ): Promise<InterTrip[]> {
   try {
     const res = await axios.post(
@@ -61,7 +62,7 @@ export async function searchBlueBus(
       fromStation: t.fromStation?.name ?? fromCity,
       toStation: t.toStation?.name ?? toCity,
       bookingMethod: "online" as const,
-      bookingUrl: "https://www.bluebus.com.eg",
+      bookingUrl,
       availableSeats: t.availableSeats ?? null,
       distanceKm: null,
       distanceScore: null,
