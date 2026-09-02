@@ -5,6 +5,10 @@ import { phoneSessionsTable } from "@workspace/db";
 import { and, eq, gt } from "drizzle-orm";
 
 export async function clerkAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  if (!process.env.CLERK_SECRET_KEY) {
+    return next();
+  }
+
   const clerkAuth = getAuth(req);
   if (clerkAuth?.userId) {
     req.userId = clerkAuth.userId;
