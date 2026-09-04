@@ -13,6 +13,12 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+// AdMob crawls this file from the exact developer website domain listed for
+// the app, which is the Render service used by the Android build.
+app.get("/app-ads.txt", (_req, res) => {
+  res.type("text/plain").send("google.com, pub-2875822124723194, DIRECT, f08c47fec0942fa0\n");
+});
+
 app.use(
   pinoHttp({
     logger,
