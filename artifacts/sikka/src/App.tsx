@@ -29,6 +29,8 @@ import AdminReports from "./pages/admin/AdminReports";
 import AdminDiscovery from "./pages/admin/AdminDiscovery";
 import AdminAnalytics from "./pages/admin/AdminAnalytics";
 import AdminMap from "./pages/admin/AdminMap";
+import AdminAppSettings from "./pages/admin/AdminAppSettings";
+import RequiredUpdateDialog from "./components/RequiredUpdateDialog";
 import RouteDetail from "./pages/RouteDetail";
 import NotFound from "./pages/NotFound";
 import "./mobile-shell.css";
@@ -121,6 +123,7 @@ function AppRoutes() {
       <ClerkQueryClientCacheInvalidator />
       <AuthProvider>
         <StartupSplash />
+        <RequiredUpdateDialog />
         <Toaster />
         <Sonner />
         <Routes>
@@ -148,6 +151,7 @@ function AppRoutes() {
             <Route path="reports" element={<AdminReports />} />
             <Route path="discovery" element={<AdminDiscovery />} />
             <Route path="analytics" element={<AdminAnalytics />} />
+            <Route path="app-settings" element={<AdminAppSettings />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

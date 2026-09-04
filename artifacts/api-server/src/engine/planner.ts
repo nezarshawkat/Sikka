@@ -841,23 +841,23 @@ const STITCH_CONNECTOR_MODES = new Set<ModeKey>(["walk", "taxi", "tuktuk"]);
 // change a fixed route — so a real transit↔transit gap is left intact and
 // rejected by validatePlan (geometry_cut) instead of being papered over.
 function stitchSegmentGeometry(
-  segments: { route_geometry: number[][] }[],
+  segments: { geometry: number[][] }[],
   legs: PlanLeg[],
 ): void {
   if (segments.length && legs.length) {
-    const first = segments[0].route_geometry;
+    const first = segments[0].geometry;
     if (first?.length && STITCH_CONNECTOR_MODES.has(legs[0].mode)) {
       first[0] = [legs[0].startCoord.lng, legs[0].startCoord.lat];
     }
-    const last = segments[segments.length - 1].route_geometry;
+    const last = segments[segments.length - 1].geometry;
     const lastLeg = legs[legs.length - 1];
     if (last?.length && STITCH_CONNECTOR_MODES.has(lastLeg.mode)) {
       last[last.length - 1] = [lastLeg.endCoord.lng, lastLeg.endCoord.lat];
     }
   }
   for (let i = 0; i < segments.length - 1; i++) {
-    const a = segments[i].route_geometry;
-    const b = segments[i + 1].route_geometry;
+    const a = segments[i].geometry;
+    const b = segments[i + 1].geometry;
     if (!a?.length || !b?.length) continue;
     const aEnd = a[a.length - 1];
     const bStart = b[0];
@@ -999,34 +999,54 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, lang
   const isArabic = language === "ar";
   const segments = await Promise.all(plan.legs.map(async (leg) => {
     const type = leg.typeId ? graph.types.get(leg.typeId) ?? null : null;
-    const namedLeg = await legNamesFromGeometry(leg, leg.geometry, language);
     const name = leg.mode === "microbus" && leg.routeDisplayName
       ? leg.routeDisplayName
       : type
         ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}`
         : isArabic ? "مشي" : "Walk";
-    const alternatives = await buildAlternatives(graph, namedLeg, plan.plan, language);
-    const { geometry, instructions } = await walkLegDetails(namedLeg, type, language);
     return {
-      transport_type_id: leg.typeId ?? leg.mode,
-      transport_name: name,
-      government_type: type?.governmentType ?? "private",
-      category: type?.category ?? "economic",
-      start_name: namedLeg.startName, end_name: namedLeg.endName,
-      cost_egp: Math.round(leg.costEgp), duration_minutes: Math.max(1, Math.round(leg.timeMin)),
-      color: type?.color ?? "#64748B", icon: UI_ICON[leg.mode],
-      line_id: leg.lineId, line_number: leg.lineNumber,
-      info: `${Math.round(leg.distanceKm * 10) / 10} km · ${leg.crowding} crowding`,
-      instructions,
-      route_geometry: geometry,
-      crowding: leg.crowding, alternatives,
+      // Transit paths are already the exact ridden slice. Connector paths are
+      // snapped before stitching; walking retains its turn-by-turn details.
+      // Names and non-walk instructions are deliberately filled in below,
+      // after stitching, so they always describe the polyline actually sent
+      // to (and drawn by) the client.
+      leg,
+      type,
+      name,
+      ...(leg.mode === "walk"
+        ? await walkLegDetails(leg, type, language)
+        : { geometry: await onStreetGeometry(leg), instructions: [] as string[] }),
     };
   }));
 
   stitchSegmentGeometry(segments, plan.legs);
 
+  const apiSegments = await Promise.all(segments.map(async (segment) => {
+    const namedLeg = segment.leg.mode === "walk"
+      ? segment.leg
+      : await legNamesFromGeometry(segment.leg, segment.geometry, language);
+    const instructions = segment.leg.mode === "walk"
+      ? segment.instructions
+      : legInstructions(namedLeg, segment.type, language);
+    const alternatives = await buildAlternatives(graph, namedLeg, plan.plan, language);
+    return {
+      transport_type_id: segment.leg.typeId ?? segment.leg.mode,
+      transport_name: segment.name,
+      government_type: segment.type?.governmentType ?? "private",
+      category: segment.type?.category ?? "economic",
+      start_name: namedLeg.startName, end_name: namedLeg.endName,
+      cost_egp: Math.round(segment.leg.costEgp), duration_minutes: Math.max(1, Math.round(segment.leg.timeMin)),
+      color: segment.type?.color ?? "#64748B", icon: UI_ICON[segment.leg.mode],
+      line_id: segment.leg.lineId, line_number: segment.leg.lineNumber,
+      info: `${Math.round(segment.leg.distanceKm * 10) / 10} km · ${segment.leg.crowding} crowding`,
+      instructions,
+      route_geometry: segment.geometry,
+      crowding: segment.leg.crowding, alternatives,
+    };
+  }));
+
   return {
-    segments, total_cost_egp: Math.round(plan.totalCostEgp),
+    segments: apiSegments, total_cost_egp: Math.round(plan.totalCostEgp),
     total_duration_minutes: Math.max(1, Math.round(plan.totalTimeMin)),
     budget_range: { min: Math.round(plan.totalCostEgp * 0.8), max: Math.round(plan.totalCostEgp * 1.6) },
     distance_km: Math.round(plan.distanceKm * 10) / 10,

@@ -26,6 +26,7 @@ import transportReportsRouter from "./transportReports";
 import seedEgyptTransitRouter from "./seedEgyptTransit";
 import trainsRouter from "./trains";
 import fixedStopsRepairRouter from "./fixedStopsRepair";
+import appConfigRouter from "./appConfig";
 import { clerkAuth } from "../middlewares/clerkAuth";
 
 const router: IRouter = Router();
@@ -35,6 +36,7 @@ router.use(healthRouter);
 router.use("/auth", authRouter);
 router.use("/intercity", intercityRouter);
 router.use("/offline", offlineSnapshotRouter);
+router.use("/app-config", appConfigRouter);
 
 // Populate req.userId from Clerk session on all remaining routes
 router.use(clerkAuth);

@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { t } from '@/lib/i18n';
 import type { Language } from '@/lib/i18n';
 import { toast } from 'sonner';
+import { showConfiguredAd } from '@/lib/appConfig';
 
 const FACES = ['😞', '😐', '🙂', '😊', '🤩'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -126,6 +127,7 @@ export default function SegmentReviewDialog({
         });
       }
       toast.success(t('reviewThanks', language));
+      if (tripLevel) void showConfiguredAd('trip_review_complete');
       reset();
       onSubmitted?.();
       onClose();

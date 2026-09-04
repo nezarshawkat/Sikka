@@ -123,21 +123,30 @@ export async function reverseGeocodeBilingual(
   lat: number,
 ): Promise<{ nameEn: string | null; nameAr: string | null } | null> {
   if (!validLngLat(lng, lat)) return null;
-  await respectNominatimRateLimit();
-  const url = `${NOMINATIM_BASE}/reverse?format=jsonv2&namedetails=1&zoom=17&lat=${lat}&lon=${lng}`;
-  try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(10_000),
-      headers: { "User-Agent": USER_AGENT, "Accept-Language": "ar,en" },
-    });
-    if (!res.ok) return null;
-    const data = await res.json() as { display_name?: string; namedetails?: Record<string, string>; name?: string };
-    const result = extractBilingualName(data.namedetails, data.display_name, data.name);
-    if (!result.nameEn && !result.nameAr) return null;
-    return result;
-  } catch {
-    return null;
-  }
+  // Route legs share endpoints (a transfer is one leg's get-off and the next
+  // leg's get-in). Cache the exact coordinate lookup so naming instructions
+  // does not repeat external work for that shared, drawn point.
+  const cacheKey = `reverse|${lng.toFixed(6)}|${lat.toFixed(6)}`;
+  const cached = reverseGeocodeCache.get(cacheKey);
+  if (cached) return cached;
+  const lookup = (async () => {
+    await respectNominatimRateLimit();
+    const url = `${NOMINATIM_BASE}/reverse?format=jsonv2&namedetails=1&zoom=17&lat=${lat}&lon=${lng}`;
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(10_000),
+        headers: { "User-Agent": USER_AGENT, "Accept-Language": "ar,en" },
+      });
+      if (!res.ok) return null;
+      const data = await res.json() as { display_name?: string; namedetails?: Record<string, string>; name?: string };
+      const result = extractBilingualName(data.namedetails, data.display_name, data.name);
+      return result.nameEn || result.nameAr ? result : null;
+    } catch {
+      return null;
+    }
+  })();
+  reverseGeocodeCache.set(cacheKey, lookup);
+  return lookup;
 }
 
 /** Forward-searches free text (whatever language a contributor typed) and
@@ -181,12 +190,22 @@ const NOMINATIM_DELAY_MS = 1100;
 const USER_AGENT = "Sikka-Cairo-Transit-App/1.0 (route enrichment)";
 
 const geocodeCache = new Map<string, [number, number]>();
+const reverseGeocodeCache = new Map<string, Promise<{ nameEn: string | null; nameAr: string | null } | null>>();
 let lastNominatimCallAt = 0;
+let nominatimSlot: Promise<void> = Promise.resolve();
 
 async function respectNominatimRateLimit(): Promise<void> {
+  // Calls can be requested concurrently while a trip's legs are being
+  // finalized. Reserve a slot first so they cannot all observe the same old
+  // timestamp and burst past Nominatim's one-request-per-second policy.
+  let releaseSlot!: () => void;
+  const previousSlot = nominatimSlot;
+  nominatimSlot = new Promise<void>((resolve) => { releaseSlot = resolve; });
+  await previousSlot;
   const elapsed = Date.now() - lastNominatimCallAt;
   if (elapsed < NOMINATIM_DELAY_MS) await new Promise((r) => setTimeout(r, NOMINATIM_DELAY_MS - elapsed));
   lastNominatimCallAt = Date.now();
+  releaseSlot();
 }
 
 const EGYPT_VIEWBOX = "24.7,31.9,36.9,21.6"; // lon1,lat1,lon2,lat2 bounding the whole country

@@ -19,6 +19,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SikkaMapUiPlugin.class);
         registerPlugin(SikkaSharePlugin.class);
         registerPlugin(SikkaRatePlugin.class);
+        registerPlugin(SikkaAppInfoPlugin.class);
         super.onCreate(savedInstanceState);
         SikkaDiscoveryService.setEnabled(this, false);
         stopService(new Intent(this, SikkaDiscoveryService.class));

@@ -38,6 +38,13 @@ export const userRolesTable = pgTable("user_roles", {
   role: appRoleEnum("role").notNull().default("user"),
 });
 
+/** Small, admin-managed application settings that must be available before sign-in. */
+export const appSettingsTable = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const transportTypesTable = pgTable("transport_types", {
   id: uuid("id").primaryKey().defaultRandom(),
   nameEn: text("name_en").notNull(),

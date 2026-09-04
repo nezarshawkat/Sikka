@@ -33,6 +33,7 @@ import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { nativeLocationIsEnabled, openNativeAppSettings, openNativeLocationSettings } from '@/lib/nativeLocationSettings';
 import { hasAcceptedLocationDisclosure, persistLocationDisclosure } from '@/lib/locationDisclosure';
+import { showConfiguredAd } from '@/lib/appConfig';
 import {
   acknowledgeNativeDiscoveryTrip,
   getPendingNativeDiscoveryTrips,
@@ -320,6 +321,7 @@ const Index = () => {
         setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng }));
         const name = await reverseGeocode(loc.lat, loc.lng, language);
         setLocationName(name);
+        void showConfiguredAd('location_loaded');
       },
       () => {
         setUserLocation(null);
@@ -354,6 +356,7 @@ const Index = () => {
         setViewState((v) => ({ ...v, latitude: loc.lat, longitude: loc.lng, zoom: 15 }));
         const name = await reverseGeocode(loc.lat, loc.lng, language);
         setLocationName(name);
+        void showConfiguredAd('location_loaded');
       },
       async (error) => {
         attemptInFlightRef.current = false;

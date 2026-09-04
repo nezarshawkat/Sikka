@@ -3,7 +3,7 @@ import { useNavigate, Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Train, MapPin, Route, Star, BarChart3, Map, Flag, Compass } from 'lucide-react';
+import { ArrowLeft, Train, MapPin, Route, Star, BarChart3, Map, Flag, Compass, Settings } from 'lucide-react';
 
 const AdminDashboard = () => {
   const { isAdmin, isLoading, language } = useAuth();
@@ -27,6 +27,7 @@ const AdminDashboard = () => {
     { path: '/admin/reports', label: t('reports', language), icon: Flag },
     { path: '/admin/discovery', label: t('routeDiscovery', language), icon: Compass },
     { path: '/admin/analytics', label: t('analytics', language), icon: BarChart3 },
+    { path: '/admin/app-settings', label: 'App settings', icon: Settings },
   ];
 
   const isMapPage = location.pathname === '/admin' || location.pathname === '/admin/map';
