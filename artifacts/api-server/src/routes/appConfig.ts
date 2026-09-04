@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db, appSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { clerkAuth } from "../middlewares/clerkAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
 
 const router = Router();
@@ -43,7 +44,7 @@ async function readConfig(): Promise<MobileAppConfig> {
 // enforce a required update before the rider signs in.
 router.get("/", async (_req, res) => res.json(await readConfig()));
 
-router.put("/", requireAdmin, async (req, res) => {
+router.put("/", clerkAuth, requireAdmin, async (req, res) => {
   const config = normalizeConfig(req.body);
   await db.insert(appSettingsTable)
     .values({ key: SETTINGS_KEY, value: config, updatedAt: new Date() })
