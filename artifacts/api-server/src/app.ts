@@ -14,9 +14,17 @@ import { logger } from "./lib/logger";
 const app: Express = express();
 
 // AdMob crawls this file from the exact developer website domain listed for
-// the app, which is the Render service used by the Android build.
+// the app. Keep it outside the API router, authentication, and SPA fallback
+// so https://<developer-website>/app-ads.txt always returns the IAB record.
 app.get("/app-ads.txt", (_req, res) => {
-  res.type("text/plain").send("google.com, pub-2875822124723194, DIRECT, f08c47fec0942fa0\n");
+  res
+    .status(200)
+    .set({
+      "Cache-Control": "public, max-age=300",
+      "Content-Type": "text/plain; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+    })
+    .send("google.com, pub-2875822124723194, DIRECT, f08c47fec0942fa0\n");
 });
 
 app.use(
@@ -42,8 +50,8 @@ app.use(
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 app.use(cors({ credentials: true, origin: true }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 const hasClerkConfig = Boolean(
   process.env.CLERK_SECRET_KEY && process.env.CLERK_PUBLISHABLE_KEY,

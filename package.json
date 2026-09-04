@@ -7,6 +7,7 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "build:backend": "pnpm --filter @workspace/api-server run build",
     "build:frontend": "pnpm --filter @workspace/sikka run build",
+    "check:app-ads": "node scripts/check-app-ads.mjs",
     "dev:backend": "pnpm --filter @workspace/api-server run dev",
     "dev:frontend": "pnpm --filter @workspace/sikka run dev",
     "start:backend": "pnpm --filter @workspace/api-server run start",
