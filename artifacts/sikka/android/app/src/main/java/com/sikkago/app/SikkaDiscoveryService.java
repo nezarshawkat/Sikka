@@ -121,13 +121,16 @@ public class SikkaDiscoveryService extends Service implements LocationListener {
         JSONObject result = new JSONObject();
         JSONArray trace = new JSONArray();
         JSONArray timestamps = new JSONArray();
-        for (int i = 0; i < points.length(); i++) {
-            JSONObject point = points.optJSONObject(i);
-            if (point == null) continue;
-            trace.put(new JSONArray().put(point.optDouble("lng")).put(point.optDouble("lat")));
-            timestamps.put(point.optLong("timestamp"));
-        }
-        try { result.put("trace", trace); result.put("timestamps", timestamps); } catch (JSONException ignored) {}
+        try {
+            for (int i = 0; i < points.length(); i++) {
+                JSONObject point = points.optJSONObject(i);
+                if (point == null) continue;
+                trace.put(new JSONArray().put(point.optDouble("lng")).put(point.optDouble("lat")));
+                timestamps.put(point.optLong("timestamp"));
+            }
+            result.put("trace", trace);
+            result.put("timestamps", timestamps);
+        } catch (JSONException ignored) {}
         return result;
     }
 

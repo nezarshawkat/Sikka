@@ -18,6 +18,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 @CapacitorPlugin(
     name = "SikkaDiscovery",
@@ -79,7 +80,11 @@ public class SikkaDiscoveryPlugin extends Plugin {
 
     @PluginMethod
     public void stopManualContribution(PluginCall call) {
-        call.resolve(SikkaDiscoveryService.stopManualRecording(getContext()));
+        JSONObject payload = SikkaDiscoveryService.stopManualRecording(getContext());
+        JSObject result = new JSObject();
+        result.put("trace", payload.optJSONArray("trace"));
+        result.put("timestamps", payload.optJSONArray("timestamps"));
+        call.resolve(result);
     }
 
     @PluginMethod
