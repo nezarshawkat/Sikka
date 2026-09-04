@@ -10,7 +10,7 @@ export interface MobileAppConfig {
 }
 
 export const DEFAULT_APP_CONFIG: MobileAppConfig = {
-  adsEnabled: false,
+  adsEnabled: true,
   showAdAfterLocation: true,
   showAdAfterTripReview: true,
   minimumAndroidVersion: null,

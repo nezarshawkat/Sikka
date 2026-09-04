@@ -40,6 +40,8 @@ import {
   startNativeDiscovery,
   stopNativeDiscovery,
   isNativeDiscoveryEnabled,
+  startNativeContributionRecording,
+  stopNativeContributionRecording,
   type NativeDiscoveryTrip,
 } from '@/lib/nativeDiscovery';
 import { onTripPipChange, setTripPipEnabled } from '@/lib/nativeMapUi';
@@ -191,6 +193,8 @@ const Index = () => {
   const [contributionDialogOpen, setContributionDialogOpen] = useState(false);
   const [contributionOperator, setContributionOperator] = useState<'microbus' | 'bus'>('microbus');
   const contributionWatchRef = useRef<number | null>(null);
+  const nativeContributionActiveRef = useRef(false);
+  const contributionSessionRef = useRef(0);
   const nativeDiscoveryWasEnabledRef = useRef<boolean | null>(null);
   const contributionStartTsRef = useRef<number | null>(null);
   const tripReportInFlightRef = useRef<string | null>(null);
@@ -729,18 +733,25 @@ const Index = () => {
   }, [activeTrip, userPos, isFollowingUser, guideSheetHeight, pipMapOnly, viewState.zoom]);
 
   const stopContributionRecording = useCallback(() => {
+    contributionSessionRef.current += 1;
     if (contributionWatchRef.current != null && navigator.geolocation) {
       navigator.geolocation.clearWatch(contributionWatchRef.current);
       contributionWatchRef.current = null;
     }
     setIsContributingRoute(false);
-    // Restore the native durable recorder to whatever state it was in
-    // before this contribution started -- only switch it off if this
-    // session was the one that switched it on.
-    if (nativeDiscoveryWasEnabledRef.current === false) {
+    const shouldRestoreDiscovery = nativeDiscoveryWasEnabledRef.current === false;
+    nativeDiscoveryWasEnabledRef.current = null;
+    if (nativeContributionActiveRef.current) {
+      nativeContributionActiveRef.current = false;
+      void stopNativeContributionRecording().then(({ trace, timestamps }) => {
+        // Prefer the native trace: it contains every accepted point while the
+        // screen was locked or another app was foregrounded.
+        if (trace.length) { setContributionTrace(trace); setContributionTimestamps(timestamps); }
+        if (shouldRestoreDiscovery) void stopNativeDiscovery();
+      });
+    } else if (shouldRestoreDiscovery) {
       void stopNativeDiscovery();
     }
-    nativeDiscoveryWasEnabledRef.current = null;
   }, []);
 
   const clearContributionFlow = useCallback(() => {
@@ -760,6 +771,8 @@ const Index = () => {
     }
     setContributionTrace([]);
     setContributionTimestamps([]);
+    const contributionSession = contributionSessionRef.current + 1;
+    contributionSessionRef.current = contributionSession;
     setIsContributingRoute(true);
     contributionStartTsRef.current = Date.now();
     // Safety net: the JS-side watcher below only runs while this page is
@@ -771,6 +784,14 @@ const Index = () => {
     void isNativeDiscoveryEnabled().then((alreadyOn) => {
       nativeDiscoveryWasEnabledRef.current = alreadyOn;
       if (!alreadyOn) void startNativeDiscovery();
+      void startNativeContributionRecording().then((started) => {
+        // Ignore a delayed start if the rider already stopped or cancelled.
+        if (contributionSessionRef.current !== contributionSession) {
+          if (started) void stopNativeContributionRecording();
+          return;
+        }
+        nativeContributionActiveRef.current = started;
+      });
     });
     let lastAccepted: { lng: number; lat: number; ts: number } | null = null;
     contributionWatchRef.current = navigator.geolocation.watchPosition(
@@ -1527,7 +1548,7 @@ const Index = () => {
             <AlertDialogCancel>{t('keepTrip', language)}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => { clearTrip(); setCancelTripOpen(false); }}
+              onClick={() => { clearTrip(); setCancelTripOpen(false); void showConfiguredAd('trip_review_complete'); }}
             >
               {t('cancelTrip', language)}
             </AlertDialogAction>

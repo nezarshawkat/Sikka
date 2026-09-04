@@ -66,6 +66,10 @@ public class SikkaDiscoveryService extends Service implements LocationListener {
     private long stoppedSince = 0L;
     private float activeDistanceMeters = 0f;
     private Location lastLocation;
+    // Explicit profile contributions use this durable trace rather than the
+    // WebView watcher, which Android suspends while locked/backgrounded.
+    private boolean manualRecording = false;
+    private JSONArray manualTrace = new JSONArray();
 
     public static boolean isEnabled(Context context) {
         return context.getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_ENABLED, false);
@@ -91,6 +95,40 @@ public class SikkaDiscoveryService extends Service implements LocationListener {
             JSONArray value = readState(context).optJSONArray("pending");
             return value != null ? value : new JSONArray();
         }
+    }
+
+    public static void startManualRecording(Context context) {
+        synchronized (STORE_LOCK) {
+            JSONObject state = readState(context);
+            try { state.put("manualRecording", true); state.put("manualTrace", new JSONArray()); } catch (JSONException ignored) {}
+            writeState(context, state);
+            if (instance != null) { instance.manualRecording = true; instance.manualTrace = new JSONArray(); instance.updateNotification("Recording your contributed route"); }
+        }
+    }
+
+    public static JSONObject stopManualRecording(Context context) {
+        synchronized (STORE_LOCK) {
+            JSONObject state = readState(context);
+            JSONArray trace = state.optJSONArray("manualTrace");
+            if (instance != null) { instance.manualRecording = false; instance.persist(); trace = instance.manualTrace; instance.updateNotification("Watching for bus and microbus rides"); }
+            try { state.put("manualRecording", false); state.put("manualTrace", trace != null ? trace : new JSONArray()); } catch (JSONException ignored) {}
+            writeState(context, state);
+            return tracePayload(trace != null ? trace : new JSONArray());
+        }
+    }
+
+    private static JSONObject tracePayload(JSONArray points) {
+        JSONObject result = new JSONObject();
+        JSONArray trace = new JSONArray();
+        JSONArray timestamps = new JSONArray();
+        for (int i = 0; i < points.length(); i++) {
+            JSONObject point = points.optJSONObject(i);
+            if (point == null) continue;
+            trace.put(new JSONArray().put(point.optDouble("lng")).put(point.optDouble("lat")));
+            timestamps.put(point.optLong("timestamp"));
+        }
+        try { result.put("trace", trace); result.put("timestamps", timestamps); } catch (JSONException ignored) {}
+        return result;
     }
 
     public static boolean acknowledgeTrip(Context context, String id) {
@@ -157,6 +195,7 @@ public class SikkaDiscoveryService extends Service implements LocationListener {
 
         trimRecent(now);
         recent.put(point);
+        if (manualRecording) appendUnique(manualTrace, point);
         boolean moving = speed >= START_SPEED_MPS;
         movingFixes = moving ? Math.min(6, movingFixes + 1) : Math.max(0, movingFixes - 1);
 
@@ -249,7 +288,8 @@ public class SikkaDiscoveryService extends Service implements LocationListener {
         if (array.length() > 8_000) {
             JSONArray compact = new JSONArray();
             for (int i = 0; i < array.length(); i += 2) compact.put(array.opt(i));
-            active = compact;
+            if (array == active) active = compact;
+            else if (array == manualTrace) manualTrace = compact;
         }
     }
 
@@ -280,6 +320,8 @@ public class SikkaDiscoveryService extends Service implements LocationListener {
             movingFixes = state.optInt("movingFixes", 0);
             stoppedSince = state.optLong("stoppedSince", 0L);
             activeDistanceMeters = (float) state.optDouble("activeDistanceMeters", distanceOf(active));
+            manualRecording = state.optBoolean("manualRecording", false);
+            manualTrace = state.optJSONArray("manualTrace") != null ? state.optJSONArray("manualTrace") : new JSONArray();
         }
     }
 
@@ -293,6 +335,8 @@ public class SikkaDiscoveryService extends Service implements LocationListener {
             state.put("movingFixes", movingFixes);
             state.put("stoppedSince", stoppedSince);
             state.put("activeDistanceMeters", activeDistanceMeters);
+            state.put("manualRecording", manualRecording);
+            state.put("manualTrace", manualTrace);
         } catch (JSONException ignored) {}
         synchronized (STORE_LOCK) { writeState(this, state); }
     }

@@ -91,6 +91,8 @@ dependencies {
     // This makes no Directions or Sikka database requests.
     implementation "com.google.android.gms:play-services-location:21.3.0"
     implementation "com.google.android.gms:play-services-maps:19.2.0"
+    // Official Google Mobile Ads SDK for interstitials.
+    implementation "com.google.android.gms:play-services-ads:24.6.0"
     // Google Play's official in-app review flow -- shows Play's own native
     // star-rating overlay without leaving the app.
     implementation "com.google.android.play:review:2.0.2"

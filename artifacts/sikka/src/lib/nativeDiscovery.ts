@@ -17,6 +17,8 @@ type NativeDiscoveryPlugin = {
   getStatus(): Promise<{ enabled: boolean; pendingCount: number }>;
   getPendingTrips(): Promise<{ trips: NativeDiscoveryTrip[] }>;
   acknowledgeTrip(options: { id: string }): Promise<{ removed: boolean }>;
+  startManualContribution(): Promise<{ enabled: boolean }>;
+  stopManualContribution(): Promise<{ trace: [number, number][]; timestamps: number[] }>;
 };
 
 const SikkaDiscovery = registerPlugin<NativeDiscoveryPlugin>('SikkaDiscovery');
@@ -75,4 +77,26 @@ export async function getPendingNativeDiscoveryTrips(): Promise<NativeDiscoveryT
 export async function acknowledgeNativeDiscoveryTrip(id: string): Promise<void> {
   if (Capacitor.getPlatform() !== 'android' || !id) return;
   await SikkaDiscovery.acknowledgeTrip({ id });
+}
+
+
+/** Starts a profile contribution in Android's foreground location service. */
+export async function startNativeContributionRecording(): Promise<boolean> {
+  if (Capacitor.getPlatform() !== 'android') return false;
+  try {
+    await SikkaDiscovery.requestPermissions({ permissions: ['notifications'] }).catch(() => ({}));
+    return !!(await SikkaDiscovery.startManualContribution()).enabled;
+  } catch { return false; }
+}
+
+/** Returns the durable native trace, including points collected while locked. */
+export async function stopNativeContributionRecording(): Promise<{ trace: [number, number][]; timestamps: number[] }> {
+  if (Capacitor.getPlatform() !== 'android') return { trace: [], timestamps: [] };
+  try {
+    const result = await SikkaDiscovery.stopManualContribution();
+    return {
+      trace: Array.isArray(result.trace) ? result.trace : [],
+      timestamps: Array.isArray(result.timestamps) ? result.timestamps : [],
+    };
+  } catch { return { trace: [], timestamps: [] }; }
 }

@@ -1,11 +1,25 @@
+import { Capacitor, registerPlugin } from "@capacitor/core";
+
 export type AdPlacement = "location_loaded" | "trip_review_complete";
 
-/**
- * SDK-independent placement bridge.  When the AdMob Capacitor SDK is added,
- * replace this event listener with its interstitial load/show calls. Keeping
- * scheduling here prevents ad code from being spread through trip UI flows.
- */
+type NativeAdMobPlugin = {
+  showInterstitial(options: { placement: AdPlacement }): Promise<{ shown: boolean }>;
+  preload(): Promise<void>;
+};
+
+const SikkaAdMob = registerPlugin<NativeAdMobPlugin>("SikkaAdMob");
+
+/** Shows the preloaded native AdMob interstitial when one is ready. */
 export async function showInterstitialAd(placement: AdPlacement): Promise<void> {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent("sikka:show-interstitial-ad", { detail: { placement } }));
+  if (Capacitor.getPlatform() !== "android") return;
+  try {
+    await SikkaAdMob.showInterstitial({ placement });
+    void SikkaAdMob.preload();
+  } catch {
+    // An unavailable ad must never interrupt location or trip completion.
+  }
+}
+
+export function preloadInterstitialAd(): void {
+  if (Capacitor.getPlatform() === "android") void SikkaAdMob.preload().catch(() => {});
 }

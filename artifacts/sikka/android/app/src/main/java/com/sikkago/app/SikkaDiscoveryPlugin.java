@@ -57,6 +57,32 @@ public class SikkaDiscoveryPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void startManualContribution(PluginCall call) {
+        if (getPermissionState("location") != PermissionState.GRANTED) {
+            requestPermissionForAlias("location", call, "manualLocationPermissionResult");
+            return;
+        }
+        SikkaDiscoveryService.setEnabled(getContext(), true);
+        SikkaDiscoveryService.startManualRecording(getContext());
+        ContextCompat.startForegroundService(getContext(), new Intent(getContext(), SikkaDiscoveryService.class));
+        JSObject result = new JSObject(); result.put("enabled", true); call.resolve(result);
+    }
+
+    @PermissionCallback
+    private void manualLocationPermissionResult(PluginCall call) {
+        if (getPermissionState("location") != PermissionState.GRANTED) { call.reject("Location permission was not granted"); return; }
+        SikkaDiscoveryService.setEnabled(getContext(), true);
+        SikkaDiscoveryService.startManualRecording(getContext());
+        ContextCompat.startForegroundService(getContext(), new Intent(getContext(), SikkaDiscoveryService.class));
+        JSObject result = new JSObject(); result.put("enabled", true); call.resolve(result);
+    }
+
+    @PluginMethod
+    public void stopManualContribution(PluginCall call) {
+        call.resolve(SikkaDiscoveryService.stopManualRecording(getContext()));
+    }
+
+    @PluginMethod
     public void stopAlwaysOn(PluginCall call) {
         SikkaDiscoveryService.setEnabled(getContext(), false);
         Intent intent = new Intent(getContext(), SikkaDiscoveryService.class);
