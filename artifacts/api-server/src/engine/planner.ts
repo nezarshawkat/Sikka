@@ -13,7 +13,7 @@ import { buildGraph, nearestStops } from "./graph.js";
 import { findRoutes, type SearchOverlay, type SearchResult } from "./pathfinder.js";
 import { PROFILES, directFare, walkMinutes, WALK_MAX_KM } from "./cost.js";
 import { haversineKm } from "./geo.js";
-import { snapConnector, snapFootOsrm, getWalkingDirections, type WalkingStep } from "../utils/routePathGenerator.js";
+import { snapConnector, snapFootOsrm, getWalkingDirections, reverseGeocodeBilingual, type WalkingStep } from "../utils/routePathGenerator.js";
 import { estimateCrowding } from "./crowding.js";
 import { scorePlan, planConfidence } from "./score.js";
 import { explainPlan } from "./explain.js";
@@ -526,6 +526,33 @@ function localizedLegInstructions(leg: PlanLeg, type: TransportTypeInfo | null, 
   ];
 }
 
+function localizedEndpointName(
+  place: { nameEn: string | null; nameAr: string | null } | null,
+  language: PlannerLanguage,
+): string | null {
+  if (!place) return null;
+  return language === "ar" ? (place.nameAr || place.nameEn) : (place.nameEn || place.nameAr);
+}
+
+async function legNamesFromGeometry(
+  leg: PlanLeg,
+  geometry: number[][],
+  language: PlannerLanguage,
+): Promise<PlanLeg> {
+  if (geometry.length < 2) return leg;
+  const first = geometry[0];
+  const last = geometry[geometry.length - 1];
+  const [startPlace, endPlace] = await Promise.all([
+    reverseGeocodeBilingual(first[0], first[1]),
+    reverseGeocodeBilingual(last[0], last[1]),
+  ]);
+  return {
+    ...leg,
+    startName: localizedEndpointName(startPlace, language) || leg.startName,
+    endName: localizedEndpointName(endPlace, language) || leg.endName,
+  };
+}
+
 function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, languageOrArabic: boolean | string): string[] {
   const language = plannerLanguage(languageOrArabic);
   const localized = localizedLegInstructions(leg, type, language);
@@ -972,19 +999,20 @@ export async function adaptPlanToApi(graph: TransitGraph, plan: EnginePlan, lang
   const isArabic = language === "ar";
   const segments = await Promise.all(plan.legs.map(async (leg) => {
     const type = leg.typeId ? graph.types.get(leg.typeId) ?? null : null;
+    const namedLeg = await legNamesFromGeometry(leg, leg.geometry, language);
     const name = leg.mode === "microbus" && leg.routeDisplayName
       ? leg.routeDisplayName
       : type
         ? `${isArabic ? type.nameAr : type.nameEn}${leg.lineNumber ? ` ${leg.lineNumber}` : ""}`
         : isArabic ? "مشي" : "Walk";
-    const alternatives = await buildAlternatives(graph, leg, plan.plan, language);
-    const { geometry, instructions } = await walkLegDetails(leg, type, language);
+    const alternatives = await buildAlternatives(graph, namedLeg, plan.plan, language);
+    const { geometry, instructions } = await walkLegDetails(namedLeg, type, language);
     return {
       transport_type_id: leg.typeId ?? leg.mode,
       transport_name: name,
       government_type: type?.governmentType ?? "private",
       category: type?.category ?? "economic",
-      start_name: leg.startName, end_name: leg.endName,
+      start_name: namedLeg.startName, end_name: namedLeg.endName,
       cost_egp: Math.round(leg.costEgp), duration_minutes: Math.max(1, Math.round(leg.timeMin)),
       color: type?.color ?? "#64748B", icon: UI_ICON[leg.mode],
       line_id: leg.lineId, line_number: leg.lineNumber,
