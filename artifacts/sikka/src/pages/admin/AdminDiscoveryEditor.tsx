@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useIsDark, MAP_STYLE_DARK, MAP_STYLE_LIGHT } from '@/hooks/useIsDark';
 import { computeBounds, type LngLat } from '@/lib/traceBlend';
+import { saveLocalTransitLine } from '@/lib/localRouteStore';
 
 type Trace = { reportId?: string; trace: LngLat[]; color: string; roadMatched?: boolean };
 type DiscoveryLine = {
@@ -77,6 +78,7 @@ export default function AdminDiscoveryEditor() {
         routePath: { type: 'LineString', coordinates: draft }, routeStatus: 'active',
         needsReviewReason: null, verifiedAt: new Date().toISOString(),
       });
+      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
       setLine(updated); setDraft(updated.routePath?.coordinates ?? draft); toast.success('Route published');
     } catch (error) { toast.error(error instanceof Error ? error.message : 'Publish failed — your edited points were not saved'); }
     finally { setSaving(false); }

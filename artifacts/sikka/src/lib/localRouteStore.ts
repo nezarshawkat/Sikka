@@ -1,4 +1,5 @@
 import bundledSnapshotRaw from '@/data/bundledSnapshot.json';
+import { apiFetch } from '@/lib/api';
 
 type SnapshotLine = Record<string, unknown> & { id: string; transportTypeId: string; path?: [number, number][]; routeStatus?: string };
 type SnapshotType = Record<string, unknown> & { id: string };
@@ -115,6 +116,20 @@ export async function getLocalTransitLine<TLine, TType>(id: string): Promise<{ r
 }
 
 export async function saveLocalTransitLine(route: Record<string, unknown>): Promise<void> {
+  let refreshedSnapshot: OfflineSnapshot | null = null;
+  try {
+    refreshedSnapshot = await apiFetch<OfflineSnapshot>(`/offline/snapshot?refresh=${Date.now()}`, {
+      cache: 'no-store',
+    });
+  } catch {
+    refreshedSnapshot = null;
+  }
+  if (refreshedSnapshot && Array.isArray(refreshedSnapshot.lines)) {
+    await writeSnapshot(refreshedSnapshot);
+    announceUpdate();
+    return;
+  }
+
   const id = String(route.id ?? '');
   if (!id) throw new Error('Cannot cache a route without an id');
   const snapshot = await readSnapshot();
