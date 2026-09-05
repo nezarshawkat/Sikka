@@ -27,6 +27,7 @@ import AdminRoutes from "./pages/admin/AdminRoutes";
 import AdminReviews from "./pages/admin/AdminReviews";
 import AdminReports from "./pages/admin/AdminReports";
 import AdminDiscovery from "./pages/admin/AdminDiscovery";
+import AdminDiscoveryEditor from "./pages/admin/AdminDiscoveryEditor";
 import AdminAnalytics from "./pages/admin/AdminAnalytics";
 import AdminMap from "./pages/admin/AdminMap";
 import AdminAppSettings from "./pages/admin/AdminAppSettings";
@@ -150,6 +151,7 @@ function AppRoutes() {
             <Route path="reviews" element={<AdminReviews />} />
             <Route path="reports" element={<AdminReports />} />
             <Route path="discovery" element={<AdminDiscovery />} />
+            <Route path="discovery/:id/editor" element={<AdminDiscoveryEditor />} />
             <Route path="analytics" element={<AdminAnalytics />} />
             <Route path="app-settings" element={<AdminAppSettings />} />
           </Route>

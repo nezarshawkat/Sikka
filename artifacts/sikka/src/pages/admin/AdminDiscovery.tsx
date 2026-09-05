@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Map, { Source, Layer } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { api } from '@/lib/api';
@@ -11,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import {
   Search, ShieldAlert, CheckCircle2, XCircle,
-  Trash2, RotateCcw, MapPin, Sparkles, Brain, Route, MapPinned, Star, Maximize2,
+  Trash2, RotateCcw, MapPin, Sparkles, Brain, Route, MapPinned, Star, Maximize2, Pencil,
 } from 'lucide-react';
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
 import { buildBlendedSegments, computeBounds, type LngLat } from '@/lib/traceBlend';
@@ -212,6 +213,7 @@ function EnlargedMapDialog({ line, onClose }: { line: DiscoveryLine | null; onCl
 }
 
 export default function AdminDiscovery() {
+  const navigate = useNavigate();
   const [lines, setLines] = useState<DiscoveryLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'pending' | 'rejected'>('pending');
@@ -514,6 +516,9 @@ export default function AdminDiscovery() {
                 )}
 
                 <div className="flex gap-2 pt-1">
+                  <Button size="sm" variant="secondary" className="gap-1" onClick={() => navigate(`/admin/discovery/${line.id}/editor`)}>
+                    <Pencil className="h-3.5 w-3.5" /> Editor
+                  </Button>
                   {!isRejected ? (
                     <>
                       <Button size="sm" className="flex-1 gap-1" disabled={busy} onClick={() => acceptRoute(line)}>

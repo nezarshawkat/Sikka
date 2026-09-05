@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { transitLinesTable, reviewsTable, reportsTable } from "@workspace/db";
-import { eq, asc, desc, inArray, and, or, ilike, lt, sql, type SQL } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, or, ilike, sql, type SQL } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAdmin";
 import { haversineKm } from "../utils/routePathGenerator.js";
 import { snapDiscoveryTrace, type TracePoint } from "./transportReports.js";
@@ -52,13 +52,6 @@ interface TransitLineUpdate {
 }
 
 router.get("/", async (req, res) => {
-  // Rejected discoveries are cleaned up lazily here (no separate cron
-  // needed): anything rejected more than 7 days ago is deleted as a side
-  // effect of listing, before the query below runs.
-  await db
-    .delete(transitLinesTable)
-    .where(and(eq(transitLinesTable.routeStatus, "rejected"), lt(transitLinesTable.updatedAt, sql`now() - interval '7 days'`)));
-
   if (req.query.active === "true") {
     const rows = await db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true)).orderBy(asc(transitLinesTable.lineNumber));
     return res.json(rows);
