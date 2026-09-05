@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Map, { Layer, Marker, Source, type MapLayerMouseEvent } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { ArrowLeft, Check, CircleDot, Eye, EyeOff, LocateFixed, MousePointer2, Pencil, Plus, Redo2, Save, Trash2, Undo2 } from 'lucide-react';
+import { ArrowLeft, Check, CircleDot, Eye, EyeOff, LocateFixed, MousePointer2, Pencil, Plus, Redo2, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -67,18 +67,18 @@ export default function AdminDiscoveryEditor() {
     if (tool !== 'draw') return;
     commit([...draft, [event.lngLat.lng, event.lngLat.lat]]);
   };
-  const save = async (publish = false) => {
+  const publish = async () => {
     if (!line) return;
-    if (draft.length < 2) { toast.error('Draw at least two route points before saving'); return; }
+    if (draft.length < 2) { toast.error('Draw at least two route points before publishing'); return; }
     setSaving(true);
     try {
       const updated = await api.put<DiscoveryLine>(`/transit-lines/${line.id}`, {
         nameEn: nameEn.trim() || line.nameEn, fromArea: fromArea.trim(), toArea: toArea.trim(),
-        routePath: { type: 'LineString', coordinates: draft }, routeStatus: publish ? 'active' : 'needs_review',
-        needsReviewReason: publish ? null : 'Edited draft awaiting publication', verifiedAt: publish ? new Date().toISOString() : undefined,
+        routePath: { type: 'LineString', coordinates: draft }, routeStatus: 'active',
+        needsReviewReason: null, verifiedAt: new Date().toISOString(),
       });
-      setLine(updated); toast.success(publish ? 'Route published' : 'Draft saved safely');
-    } catch (error) { toast.error(error instanceof Error ? error.message : 'Save failed — your editor draft is still open'); }
+      setLine(updated); setDraft(updated.routePath?.coordinates ?? draft); toast.success('Route published');
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Publish failed — your edited points were not saved'); }
     finally { setSaving(false); }
   };
 
@@ -88,8 +88,7 @@ export default function AdminDiscoveryEditor() {
       <Button variant="ghost" size="icon" aria-label="Back to discovery" onClick={() => navigate('/admin/discovery')}><ArrowLeft className="h-5 w-5" /></Button>
       <div className="min-w-0 flex-1"><p className="font-semibold truncate">{nameEn || line.nameEn}</p><p className="text-xs text-muted-foreground truncate">Discovery editor · {line.fromArea} → {line.toArea}</p></div>
       <Badge variant="outline" className="hidden sm:inline-flex">{draft.length} editable points</Badge>
-      <Button variant="outline" className="gap-1" disabled={saving} onClick={() => save(false)}><Save className="h-4 w-4" /> Save draft</Button>
-      <Button className="gap-1" disabled={saving} onClick={() => save(true)}><Check className="h-4 w-4" /> Publish</Button>
+      <Button className="gap-1" disabled={saving} onClick={() => void publish()}><Check className="h-4 w-4" /> {saving ? 'Publishing…' : 'Publish'}</Button>
     </header>
 
     <div className="flex min-h-0 flex-1">

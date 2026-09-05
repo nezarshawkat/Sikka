@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import Map, { Source, Layer, type MapRef } from 'react-map-gl/maplibre';
 import {
   ArrowLeft, Trash2, MapPin, DollarSign, CheckCircle2,
-  Maximize2, X, Save, ShieldAlert, RefreshCw, ArrowLeftRight,
+  Maximize2, X, Save, ShieldAlert, RefreshCw, ArrowLeftRight, Pencil,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import { useMapStyle } from '@/hooks/useMapStyle';
 import { toast } from 'sonner';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { deleteLocalTransitLine, getLocalTransitLine, saveLocalTransitLine } from '@/lib/localRouteStore';
+import { RouteResnapDialog, type RouteResnapProvider } from '@/components/RouteResnapDialog';
 
 interface TransitLine {
   id: string;
@@ -46,6 +47,7 @@ interface TransitLine {
   reviewReportCount?: number;
   verifiedAt?: string | null;
   lastConfirmedAt?: string | null;
+  routeQualityDetails?: { metrics?: { roadMatched?: boolean } } | null;
 }
 
 interface TransportType {
@@ -81,12 +83,12 @@ const ICONS: Record<string, string> = {
 
 const CAIRO_CENTER = { latitude: 30.0444, longitude: 31.2357, zoom: 12 };
 
-function isProtectedGeometry(route: TransitLine, type: TransportType | null): string | null {
+function isProtectedGeometry(route: TransitLine, type: TransportType | null, allowDiscovery = false): string | null {
   const source = (route.dataSource ?? '').toLowerCase();
   const typeName = `${type?.nameEn ?? ''} ${type?.nameAr ?? ''}`.toLowerCase();
   if (route.geometryLocked) return 'This route geometry is locked';
   if (source === 'gtfs') return 'GTFS routes must keep their imported geometry';
-  if (source.includes('discovery') || source.includes('gps')) return 'Rider-recorded GPS is already the preferred geometry';
+  if (!allowDiscovery && (source.includes('discovery') || source.includes('gps'))) return 'Rider-recorded GPS is already the preferred geometry';
   if (['metro', 'monorail', 'lrt', 'tram', 'train', 'rail'].some((term) => typeName.includes(term))) {
     return 'Fixed-guideway routes must keep their verified station geometry';
   }
@@ -106,6 +108,8 @@ export default function RouteDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [resnapDialogOpen, setResnapDialogOpen] = useState(false);
+  const [resnapError, setResnapError] = useState<string | undefined>();
   const [geometryVersions, setGeometryVersions] = useState<GeometryVersion[]>([]);
   const [versionBusy, setVersionBusy] = useState<string | null>(null);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
@@ -240,32 +244,43 @@ export default function RouteDetail() {
     }
   };
 
-  const handleRegeneratePath = async () => {
+  const handleRegeneratePath = () => {
     if (!id || !route) return;
-    const protectedReason = isProtectedGeometry(route, transportType);
+    const protectedReason = isProtectedGeometry(route, transportType, true);
     if (protectedReason) {
       toast.error(protectedReason);
       return;
     }
 
+    setResnapError(undefined);
+    setResnapDialogOpen(true);
+  };
+
+  const retrySnap = async (provider: RouteResnapProvider) => {
+    if (!id || !route) return;
+
+    setResnapDialogOpen(false);
     setRegenerating(true);
+    setResnapError(undefined);
     try {
-      const result = await api.post<{
-        updated: number;
-        results: Array<{ status: string; route?: TransitLine }>;
-      }>(`/admin/re-enrich-routes?lineId=${encodeURIComponent(id)}&limit=1`, {});
-      if (result.updated < 1) {
-        const reason = result.results?.[0]?.status?.replaceAll('_', ' ') || 'no corrected path was accepted';
-        throw new Error(`Path kept for review: ${reason}`);
+      const result = await api.post<{ success: boolean; roadMatched: boolean; route?: TransitLine; reason?: string }>(
+        `/transit-lines/${id}/resnap`,
+        { provider },
+      );
+      if (!result.success || !result.route) {
+        const error = result.reason?.replaceAll('_', ' ') || 'no corrected path was accepted';
+        setResnapError(error);
+        toast.error('Still could not match this route to real roads.');
+        return;
       }
-      const updated = result.results?.[0]?.route;
-      if (!updated) throw new Error('The corrected route was not returned by the backend');
-      await saveLocalTransitLine(updated as unknown as Record<string, unknown>);
-      setRoute(updated);
+      await saveLocalTransitLine(result.route as unknown as Record<string, unknown>);
+      setRoute(result.route);
       await loadGeometryVersions();
-      toast.success('High-confidence route path accepted and road-snapped');
+      toast.success('Route successfully matched to real roads');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to regenerate path');
+      const message = err instanceof Error ? err.message : 'Retry failed';
+      setResnapError(message);
+      toast.error(message);
     } finally {
       setRegenerating(false);
     }
@@ -609,16 +624,23 @@ export default function RouteDetail() {
               <Button
                 size="sm"
                 className="gap-2"
-                onClick={() => void handleRegeneratePath()}
-                disabled={regenerating || route.hasFixedStops || route.dataSource === 'discovery'}
+                onClick={handleRegeneratePath}
+                disabled={regenerating || route.hasFixedStops}
                 title={route.hasFixedStops
                   ? 'Fixed rail geometry is locked to verified stations'
-                  : route.dataSource === 'discovery'
-                    ? 'Rider GPS geometry is already preferred'
-                    : 'Regenerate and road-snap this route'}
+                  : 'Regenerate and road-snap this route'}
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${regenerating ? 'animate-spin' : ''}`} />
                 {regenerating ? 'Regenerating path…' : 'Regenerate path'}
+              </Button>
+              {resnapError && <p className="text-xs text-red-500">Failed: {resnapError}</p>}
+              <Button
+                size="sm"
+                variant="secondary"
+                className="gap-2"
+                onClick={() => navigate(`/admin/discovery/${route.id}/editor`)}
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit route
               </Button>
               {route.routeStatus !== 'active' && (
                 <Button size="sm" onClick={() => updateStatus('active')}>Verify active</Button>
@@ -712,6 +734,14 @@ export default function RouteDetail() {
           )}
         </div>
       </div>
+
+      <RouteResnapDialog
+        open={resnapDialogOpen}
+        onOpenChange={setResnapDialogOpen}
+        onSelect={retrySnap}
+        loading={regenerating}
+        error={resnapError}
+      />
 
       {/* Full-screen interactive map */}
       <Dialog open={fullscreenOpen} onOpenChange={setFullscreenOpen}>

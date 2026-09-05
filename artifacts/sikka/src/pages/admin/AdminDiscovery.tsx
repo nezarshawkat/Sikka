@@ -17,6 +17,7 @@ import {
 import { useIsDark, MAP_STYLE_LIGHT, MAP_STYLE_DARK } from '@/hooks/useIsDark';
 import { buildBlendedSegments, computeBounds, type LngLat } from '@/lib/traceBlend';
 import { saveLocalTransitLine, deleteLocalTransitLines } from '@/lib/localRouteStore';
+import { RouteResnapDialog } from '@/components/RouteResnapDialog';
 
 interface ContributingTrace {
   reportId?: string;
@@ -545,24 +546,13 @@ export default function AdminDiscovery() {
         })}
       </div>
 
-      <Dialog open={!!providerDialogFor} onOpenChange={(open) => !open && setProviderDialogFor(null)}>
-        <DialogContent className="rounded-[2rem]">
-          <DialogHeader>
-            <DialogTitle>Improve route quality</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Choose which road-matching service to try for this route.
-          </p>
-          <div className="flex gap-2 pt-2">
-            <Button className="flex-1" onClick={() => providerDialogFor && retrySnap(providerDialogFor, 'valhalla')}>
-              Valhalla
-            </Button>
-            <Button className="flex-1" variant="outline" onClick={() => providerDialogFor && retrySnap(providerDialogFor, 'osrm')}>
-              OSRM
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <RouteResnapDialog
+        open={!!providerDialogFor}
+        onOpenChange={(open) => !open && setProviderDialogFor(null)}
+        onSelect={(provider) => providerDialogFor && retrySnap(providerDialogFor, provider)}
+        loading={providerDialogFor ? retrying.has(providerDialogFor.id) : false}
+        error={providerDialogFor ? retryErrors[providerDialogFor.id] : undefined}
+      />
 
       <EnlargedMapDialog line={enlargedMapFor} onClose={() => setEnlargedMapFor(null)} />
     </div>
