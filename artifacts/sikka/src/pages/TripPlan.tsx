@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Wallet, MapPin, ChevronRight, Bus, CarTaxiFront, TrainFront, TramFront, Footprints } from 'lucide-react';
+import { ArrowLeft, Wallet, MapPin, ChevronRight, Bus, CarTaxiFront, TrainFront, TramFront } from 'lucide-react';
 
 type TripType = 'economic' | 'comfortable' | 'premium';
 
@@ -41,16 +41,16 @@ const TripPlan = () => {
 
   const availableTransport = {
     economic: [
-      { label: t('metro', language), Icon: TrainFront }, { label: t('bus', language), Icon: Bus },
-      { label: t('microbus', language), Icon: TramFront }, { label: 'Walking', Icon: Footprints },
+      { label: t('tuktuk', language), Icon: CarTaxiFront }, { label: t('microbus', language), Icon: TramFront },
+      { label: t('bus', language), Icon: Bus },
     ],
     comfortable: [
-      { label: t('metro', language), Icon: TrainFront }, { label: 'Monorail / LRT', Icon: TramFront },
-      { label: 'BRT', Icon: Bus }, { label: t('bus', language), Icon: Bus }, { label: t('taxi', language), Icon: CarTaxiFront },
+      { label: t('bus', language), Icon: Bus }, { label: t('monorail', language), Icon: TramFront },
+      { label: t('metro', language), Icon: TrainFront }, { label: t('taxi', language), Icon: CarTaxiFront },
     ],
     premium: [
-      { label: t('taxi', language), Icon: CarTaxiFront }, { label: 'Ride-hailing', Icon: CarTaxiFront },
-      { label: t('metro', language), Icon: TrainFront }, { label: 'Monorail / LRT', Icon: TramFront },
+      { label: t('taxi', language), Icon: CarTaxiFront }, { label: t('rideHailing', language), Icon: CarTaxiFront },
+      { label: t('metro', language), Icon: TrainFront }, { label: t('monorail', language), Icon: TramFront },
     ],
   } satisfies Record<TripType, { label: string; Icon: typeof Bus }[]>;
 
@@ -117,7 +117,7 @@ const TripPlan = () => {
         </motion.div>
 
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} className="rounded-[2rem] border border-primary/15 bg-primary/[0.045] p-3 shadow-sm">
-          <p className="text-xs font-semibold text-foreground">Available transport</p>
+          <p className="text-xs font-semibold text-foreground">{t('availableTransport', language)}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {availableTransport[tripType].map(({ label, Icon }) => (
               <span key={label} className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm">

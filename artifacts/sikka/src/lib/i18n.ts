@@ -795,6 +795,8 @@ const translations: Record<Language, Record<string, string>> = {
 
 const supplementalTranslations: Record<Language, Record<string, string>> = {
   en: {
+    availableTransport: 'Available transport',
+    rideHailing: 'Ride-hailing',
     whatShouldWeCallYou: 'What should we call you?',
     namePlaceholder: 'Enter your name',
     user: 'User',
@@ -862,6 +864,8 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
     microbusNumberOptional: 'Microbus route number or windshield sign (optional)',
   },
   ar: {
+    availableTransport: 'المواصلات المتاحة',
+    rideHailing: 'سيارات عبر التطبيقات',
     whatShouldWeCallYou: 'What should we call you?',
     namePlaceholder: 'Enter your name',
     tookMicrobusInstead: 'ركبت ميكروباص بدلًا من ذلك',
@@ -929,6 +933,8 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
     contributeBusMicrobusOnly: 'تسجيل المسارات متاح للأتوبيس والميكروباص فقط. اضغط تسجيل، اركب على طول المسار، ثم أرسله من خريطة الصفحة الرئيسية.',
   },
   fr: {
+    availableTransport: 'Transports disponibles',
+    rideHailing: 'VTC',
     user: 'Utilisateur',
     bus: 'Bus',
     microbus: 'Minibus',
@@ -985,6 +991,8 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
     rateUsThanks: 'Merci d\'avoir noté Sikka !',
   },
   de: {
+    availableTransport: 'Verfügbare Verkehrsmittel',
+    rideHailing: 'Fahrdienst',
     user: 'Benutzer',
     bus: 'Bus',
     microbus: 'Minibus',
@@ -1041,6 +1049,8 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
     rateUsThanks: 'Danke für deine Bewertung von Sikka!',
   },
   es: {
+    availableTransport: 'Transportes disponibles',
+    rideHailing: 'Transporte por app',
     user: 'Usuario',
     bus: 'Autobus',
     microbus: 'Microbus',
@@ -1097,6 +1107,8 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
     rateUsThanks: '¡Gracias por calificar Sikka!',
   },
   zh: {
+    availableTransport: '可用交通方式',
+    rideHailing: '网约车',
     user: '用户',
     bus: '公交车',
     microbus: '小巴',
@@ -1173,6 +1185,8 @@ const supplementalTranslations: Record<Language, Record<string, string>> = {
     microbusNumberOptional: '小巴路线号或车窗标示（可选）',
   },
   ru: {
+    availableTransport: 'Доступный транспорт',
+    rideHailing: 'Такси по приложению',
     user: 'Пользователь',
     bus: 'Автобус',
     microbus: 'Маршрутка',

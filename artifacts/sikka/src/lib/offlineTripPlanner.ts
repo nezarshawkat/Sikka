@@ -255,8 +255,8 @@ function governorateOf(point: Coord): string {
 }
 
 function allowedModes(planKey: PlanKey): Set<ModeKey> {
-  if (planKey === "economic") return new Set(["metro", "monorail", "lrt", "brt", "train", "bus", "serfis", "microbus", "tuktuk"]);
-  if (planKey === "comfortable") return new Set(["metro", "monorail", "lrt", "brt", "train", "bus", "serfis", "taxi", "tuktuk"]);
+  if (planKey === "economic") return new Set(["tuktuk", "microbus", "bus"]);
+  if (planKey === "comfortable") return new Set(["bus", "monorail", "metro", "taxi"]);
   return new Set(["metro", "monorail", "lrt", "brt", "train", "bus", "serfis", "taxi", "tuktuk"]);
 }
 
