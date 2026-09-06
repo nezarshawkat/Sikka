@@ -701,14 +701,14 @@ function rideInstructions(candidate: Candidate, isArabic: boolean, boardingName:
           `لوّح بإيدك لأي ميكروباص رايح ناحية ${to} — مش هيقف لوحده.`,
           `وانت داخل قول وجهتك بصوت عالي زي "${to}!" — أغلب الميكروباصات مالها لافتة خط واضحة.`,
           `مرّر الأجرة لقدام إيد بإيد لحد السواق، وحوالي ${Math.round(cost)} جنيه. الباقي بيرجع بنفس الطريقة.`,
-          `لما تقرب من ${to} قول "على الطلب" قبل ما توصل بشوية — بينزّل في أي حتة مش في محطات بس.`,
+          `لما تقرب من ${to} قول "على جنب" أو "هنا" قبل ما توصل بشوية — بينزّل في أي حتة مش في محطات بس.`,
         ]
       : [
           `Stand at the edge of the road at ${from}, facing oncoming traffic, so you can flag one down easily.`,
           `Flag down any microbus heading toward ${to} — it won't stop on its own.`,
           `As you get in, call out your destination loudly, e.g. "${to}!" — most microbuses have no route signage.`,
           `Pass your fare forward hand-to-hand to the driver, about ${Math.round(cost)} EGP. Change comes back the same way.`,
-          `When you're near ${to}, say "ala el talab" (on request) a few seconds before — it stops anywhere, not just at fixed points.`,
+          `When you're near ${to}, say "ala ganb" (over here) a few seconds before — it stops anywhere, not just at fixed points.`,
         ];
   } else if (candidate.mode === "serfis") {
     result = isArabic
@@ -716,13 +716,13 @@ function rideInstructions(candidate: Candidate, isArabic: boolean, boardingName:
           `روح لـ ${from} — غالباً فيه مكان معروف بتقف فيه السرفيسات.`,
           `لوّح لسرفيس رايح ناحية ${to}، وأكّد وجهتك وانت داخل.`,
           `ادفع حوالي ${Math.round(cost)} جنيه جوه العربية، بتمريرها لقدام.`,
-          `قول "على الطلب" وانت قرب من ${to}.`,
+          `قول "على جنب" أو "هنا" وانت قرب من ${to}.`,
         ]
       : [
           `Head to ${from} — usually a known stand where serfis line up or pass by.`,
           `Flag one down heading toward ${to}, and confirm your destination as you board.`,
           `Pay about ${Math.round(cost)} EGP onboard, passed forward like in a microbus.`,
-          `Ask to stop ("ala el talab") as you near ${to}.`,
+          `Ask to stop ("ala ganb") as you near ${to}.`,
         ];
   } else {
     // CTA / NTA city bus — marked stops, route boards, more fixed than microbus.
