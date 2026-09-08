@@ -143,11 +143,12 @@ router.post("/route", requireAdmin, async (req, res) => {
     }
     return null;
   }) : [];
-  if (normalizedPoints.length < 2 || normalizedPoints.length !== (Array.isArray(points) ? points.length : 0) || normalizedPoints.length > 80 || normalizedPoints.some((point) => !point || Math.abs(point[0]) > 180 || Math.abs(point[1]) > 90)) {
+  if (normalizedPoints.length < 2 || normalizedPoints.length !== (Array.isArray(points) ? points.length : 0) || normalizedPoints.some((point) => !point || Math.abs(point[0]) > 180 || Math.abs(point[1]) > 90)) {
     return res.status(400).json({ error: "At least two valid route points are required" });
   }
   const cleanPoints = normalizedPoints as [number, number][];
   let coordinates: [number, number][] | null = null;
+  let resolvedProvider = provider;
   try {
     coordinates = provider === "valhalla"
       ? await routeViaValhalla(cleanPoints, typeName)
@@ -160,6 +161,7 @@ router.post("/route", requireAdmin, async (req, res) => {
       coordinates = provider === "valhalla"
         ? await routeViaOsrm(cleanPoints, "car")
         : await routeViaValhalla(cleanPoints, typeName);
+      if (coordinates) resolvedProvider = provider === "valhalla" ? "osrm" : "valhalla";
     } catch {
       coordinates = null;
     }
@@ -167,7 +169,7 @@ router.post("/route", requireAdmin, async (req, res) => {
   if (!coordinates || coordinates.length < 2) {
     return res.status(502).json({ error: "No road geometry was returned by OSRM or Valhalla. Check that the points are on connected roads." });
   }
-  return res.json({ provider, fallback: false, routePath: { type: "LineString", coordinates } });
+  return res.json({ provider: resolvedProvider, fallback: resolvedProvider !== provider, routePath: { type: "LineString", coordinates } });
 });
 
 router.put("/:id", requireAdmin, async (req, res) => {
