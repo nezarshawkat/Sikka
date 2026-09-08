@@ -665,7 +665,7 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, languageO
           `لوّح بإيدك لأي ميكروباص رايح في اتجاهك — مش هيقف لوحده، ولازم تلوّح بوضوح.`,
           `وانت داخل قول وجهتك بصوت عالي زي "${end}!" — أغلب الميكروباصات مالها لافتة خط واضحة.`,
           `مرّر الأجرة لقدام إيد بإيد لحد ما توصل للسواق، وحوالي ${cost} جنيه. الباقي بيرجع بنفس الطريقة.`,
-          `لما تقرب من ${end} قول "على الطلب" أو "هنا كويس" قبل ما توصل بشوية — الميكروباص بينزّل في أي حتة، مش في محطات بس.`,
+          `لما تقرب من ${end} قول "على جنب" أو "هنا" قبل ما توصل بشوية — الميكروباص بينزّل في أي حتة، مش في محطات بس.`,
           `انزل من الجنب البعيد عن السيارات، وخد بالك من الموتوسيكلات قبل ما تفتح الباب.`,
         ]
       : [
@@ -673,7 +673,7 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, languageO
           `Flag down any microbus heading your way — it won't stop on its own, so wave clearly.`,
           `As you get in, call out your destination loudly, e.g. "${end}!" — most microbuses have no route signage.`,
           `Pass your fare forward hand-to-hand until it reaches the driver, about ${cost} EGP. Change comes back the same way.`,
-          `When you're near ${end}, say "ala el talab" (on request) or just ask to stop a few seconds before — microbuses stop anywhere on request, not just at fixed points.`,
+          `When you're near ${end}, say "ala ganb" (over here) a few seconds before — microbuses stop anywhere, not just at fixed points.`,
           `Get out on the side away from traffic, and check for motorcycles passing close before opening the door.`,
         ])];
   }
@@ -686,7 +686,7 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, languageO
           `لوّح لسرفيس رايح ناحية ${end}، أو اسأل أي حد واقف هناك يدّلك على الصحيح.`,
           `أكّد وجهتك وانت داخل — السواق بينده على الخط، بس اتأكد لو مش متابع.`,
           `ادفع حوالي ${cost} جنيه جوه العربية، بتمريرها لقدام زي الميكروباص.`,
-          `قول "على الطلب" وانت قرب من ${end}.`,
+          `قول "على جنب" أو "هنا" وانت قرب من ${end}.`,
           `انزل بحذر من جنب الرصيف.`,
         ]
       : [
@@ -694,7 +694,7 @@ function legInstructions(leg: PlanLeg, type: TransportTypeInfo | null, languageO
           `Flag one down heading toward ${end}, or ask someone waiting there which one to take.`,
           `Confirm your destination as you board — drivers usually call out the route, but double-check if unsure.`,
           `Pay about ${cost} EGP onboard, passed forward like in a microbus.`,
-          `Ask to stop ("ala el talab") as you near ${end}.`,
+          `Ask to stop ("ala ganb") as you near ${end}.`,
           `Get off carefully on the curb side.`,
         ])];
   }

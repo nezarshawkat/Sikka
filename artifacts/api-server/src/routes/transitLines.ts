@@ -3,7 +3,8 @@ import { db } from "@workspace/db";
 import { transitLinesTable, reviewsTable, reportsTable } from "@workspace/db";
 import { eq, asc, desc, inArray, and, or, ilike, sql, type SQL } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAdmin";
-import { haversineKm } from "../utils/routePathGenerator.js";
+import { haversineKm, routeViaOsrm } from "../utils/routePathGenerator.js";
+import { routeViaValhalla } from "../utils/routeRepairEngine.js";
 import { snapDiscoveryTrace, type TracePoint } from "./transportReports.js";
 
 const router = Router();
@@ -114,6 +115,59 @@ router.post("/", requireAdmin, async (req, res) => {
     needsReviewReason: routePath ? null : "missing route geometry",
   }).returning();
   res.json(row);
+});
+
+router.post("/route", requireAdmin, async (req, res) => {
+  const points = req.body?.points as unknown;
+  const provider = req.body?.provider === "valhalla" ? "valhalla" : "osrm";
+  const typeName = typeof req.body?.typeName === "string" ? req.body.typeName : "bus";
+  const normalizedPoints = Array.isArray(points) ? points.map((point): [number, number] | null => {
+    if (Array.isArray(point)) {
+      const first = Number(point[0]);
+      const second = Number(point[1]);
+      if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+      if (Math.abs(first) <= 90 && Math.abs(second) > 90) return [second, first];
+      return [first, second];
+    }
+    if (point && typeof point === "object") {
+      const value = point as { lat?: unknown; latitude?: unknown; lng?: unknown; lon?: unknown; longitude?: unknown };
+      const latitude = Number(value.lat ?? value.latitude);
+      const longitude = Number(value.lng ?? value.lon ?? value.longitude);
+      return Number.isFinite(latitude) && Number.isFinite(longitude) ? [longitude, latitude] : null;
+    }
+    if (typeof point === "string") {
+      const parts = point.split(",").map((value) => Number(value.trim()));
+      if (parts.length >= 2 && parts.every(Number.isFinite)) {
+        return Math.abs(parts[0]) <= 90 && Math.abs(parts[1]) > 90 ? [parts[1], parts[0]] : [parts[0], parts[1]];
+      }
+    }
+    return null;
+  }) : [];
+  if (normalizedPoints.length < 2 || normalizedPoints.length !== (Array.isArray(points) ? points.length : 0) || normalizedPoints.length > 80 || normalizedPoints.some((point) => !point || Math.abs(point[0]) > 180 || Math.abs(point[1]) > 90)) {
+    return res.status(400).json({ error: "At least two valid route points are required" });
+  }
+  const cleanPoints = normalizedPoints as [number, number][];
+  let coordinates: [number, number][] | null = null;
+  try {
+    coordinates = provider === "valhalla"
+      ? await routeViaValhalla(cleanPoints, typeName)
+      : await routeViaOsrm(cleanPoints, "car");
+  } catch {
+    coordinates = null;
+  }
+  if (!coordinates) {
+    try {
+      coordinates = provider === "valhalla"
+        ? await routeViaOsrm(cleanPoints, "car")
+        : await routeViaValhalla(cleanPoints, typeName);
+    } catch {
+      coordinates = null;
+    }
+  }
+  if (!coordinates || coordinates.length < 2) {
+    return res.status(502).json({ error: "No road geometry was returned by OSRM or Valhalla. Check that the points are on connected roads." });
+  }
+  return res.json({ provider, fallback: false, routePath: { type: "LineString", coordinates } });
 });
 
 router.put("/:id", requireAdmin, async (req, res) => {

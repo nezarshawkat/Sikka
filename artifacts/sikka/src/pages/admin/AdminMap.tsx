@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Search, Plus, Eye, EyeOff, Pencil, Trash2, Save, Flame, MapPin, Route as RouteIcon } from 'lucide-react';
+import { Search, Plus, Eye, EyeOff, Pencil, Trash2, Save, Flame, MapPin, Route as RouteIcon, LocateFixed } from 'lucide-react';
 import Map, { Source, Layer, Marker, type MapLayerMouseEvent } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MAP_STYLE_DARK } from '@/hooks/useIsDark';
@@ -37,6 +37,8 @@ interface HeatmapPoint {
 interface Mawaqef {
   id: string; nameEn: string; nameAr: string; city: string; latitude: number; longitude: number; transportTypeIds: string[];
 }
+
+type RouteProvider = 'osrm' | 'valhalla';
 
 const ICONS: Record<string, string> = {
   bus: '🚌', train: '🚆', car: '🚕', bike: '🛺', tuktuk: '🛺', ship: '🚢', plane: '✈️', metro: '🚇', monorail: '🚝', lrt: '🚈', brt: '🚐', walk: '🚶',
@@ -91,6 +93,11 @@ const AdminMap = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawPoints, setDrawPoints] = useState<[number, number][]>([]);
   const [isSnapping, setIsSnapping] = useState(false);
+  const [routeProvider, setRouteProvider] = useState<RouteProvider>('osrm');
+  const [routedPoints, setRoutedPoints] = useState<[number, number][]>([]);
+  const [stopSearch, setStopSearch] = useState('');
+  const [stopResults, setStopResults] = useState<Array<{ name: string; point: [number, number] }>>([]);
+  const [stopSearching, setStopSearching] = useState(false);
   const [generatedPaths, setGeneratedPaths] = useState<Record<string, GeoJSONLineString>>({});
   const geocodeCacheRef = useRef<Record<string, [number, number] | null>>({});
 
@@ -224,7 +231,7 @@ const AdminMap = () => {
 
   const drawGeoJSON = {
     type: 'FeatureCollection' as const,
-    features: drawPoints.length >= 2 ? [{ type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: drawPoints } }] : [],
+    features: (routedPoints.length >= 2 ? routedPoints : drawPoints).length >= 2 ? [{ type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: routedPoints.length >= 2 ? routedPoints : drawPoints } }] : [],
   };
 
   const getTypeName = (id: string) => {
@@ -257,6 +264,7 @@ const AdminMap = () => {
   const handleMapClick = useCallback((e: MapLayerMouseEvent) => {
     if (isDrawing) {
       setDrawPoints(prev => [...prev, [e.lngLat.lng, e.lngLat.lat]]);
+      setRoutedPoints([]);
       return;
     }
     if (isHeatmapEditing) {
@@ -287,6 +295,9 @@ const AdminMap = () => {
       frequencyMinutes: 10, hasFixedStops: false,
     });
     setDrawPoints([]);
+    setRoutedPoints([]);
+    setStopSearch('');
+    setStopResults([]);
     setShowForm(true);
   };
 
@@ -306,6 +317,9 @@ const AdminMap = () => {
     });
     const geom = getLineGeometry(line);
     setDrawPoints(geom?.coordinates || []);
+    setRoutedPoints(geom?.coordinates || []);
+    setStopSearch('');
+    setStopResults([]);
     setShowForm(true);
   };
 
@@ -322,7 +336,8 @@ const AdminMap = () => {
     setIsSnapping(true);
     let routePath = null;
     try {
-      if (drawPoints.length >= 2) routePath = { type: 'LineString', coordinates: await snapToRoads(drawPoints) };
+      if (routedPoints.length >= 2) routePath = { type: 'LineString', coordinates: routedPoints };
+      else if (drawPoints.length >= 2) routePath = { type: 'LineString', coordinates: await snapToRoads(drawPoints) };
       else routePath = await buildPathFromLineText({ fromArea: formData.fromArea, toArea: formData.toArea, viaStops: formData.viaStops ? formData.viaStops.split(',').map(s => s.trim()).filter(Boolean) : [] });
     } finally {
       setIsSnapping(false);
@@ -354,8 +369,50 @@ const AdminMap = () => {
     toast.success(editingLine ? 'Route updated and snapped to roads' : 'Route added and snapped to roads');
     setShowForm(false);
     setDrawPoints([]);
+    setRoutedPoints([]);
     setIsDrawing(false);
     setEditingLine(null);
+  };
+
+  const searchStops = async () => {
+    const query = stopSearch.trim().toLowerCase();
+    if (!query) { setStopResults([]); return; }
+    setStopSearching(true);
+    try {
+      const local = stationOptions.filter((stop) => stop.toLowerCase().includes(query)).slice(0, 5);
+      const localResults = (await Promise.all(local.map(async (name) => {
+        const point = await geocodeStop(name);
+        return point ? { name, point } : null;
+      }))).filter((result): result is { name: string; point: [number, number] } => result !== null);
+      const remotePoint = await geocodeStop(stopSearch);
+      const results = remotePoint && !localResults.some((result) => result.name.toLowerCase() === query)
+        ? [...localResults, { name: stopSearch.trim(), point: remotePoint }]
+        : localResults;
+      setStopResults(results);
+    } finally { setStopSearching(false); }
+  };
+
+  const addStopPoint = (result: { name: string; point: [number, number] }) => {
+    setDrawPoints((previous) => [...previous, result.point]);
+    setRoutedPoints([]);
+    setFormData((previous) => ({ ...previous, viaStops: previous.viaStops ? `${previous.viaStops}, ${result.name}` : result.name }));
+    setStopSearch('');
+    setStopResults([]);
+  };
+
+  const routeBetweenPoints = async () => {
+    if (drawPoints.length < 2) { toast.error('Add at least two stop points first'); return; }
+    setIsSnapping(true);
+    try {
+      const result = await api.post<{ routePath: GeoJSONLineString }>('/transit-lines/route', {
+        points: drawPoints,
+        provider: routeProvider,
+        typeName: transportTypes.find((type) => type.id === formData.transportTypeId)?.nameEn ?? 'bus',
+      });
+      setRoutedPoints(result.routePath.coordinates);
+      toast.success(`${routeProvider === 'valhalla' ? 'Valhalla' : 'OSRM'} route drawn between the points`);
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : `${routeProvider} could not draw this route`); }
+    finally { setIsSnapping(false); }
   };
 
   const deleteLine = async (id: string) => {
@@ -643,15 +700,30 @@ const AdminMap = () => {
               <Input placeholder="From" value={formData.fromArea} onChange={e => setFormData(p => ({ ...p, fromArea: e.target.value }))} className="h-9 text-sm" />
               <Input placeholder="To" value={formData.toArea} onChange={e => setFormData(p => ({ ...p, toArea: e.target.value }))} className="h-9 text-sm" />
             </div>
+            <div className="relative space-y-1">
+              <div className="flex gap-1">
+                <div className="relative flex-1"><LocateFixed className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" /><Input placeholder="Search a stop to add" value={stopSearch} onChange={e => setStopSearch(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void searchStops(); } }} className="h-9 pl-7 text-sm" /></div>
+                <Button type="button" size="sm" variant="outline" className="h-9" onClick={() => void searchStops()} disabled={stopSearching}><Search className="h-3.5 w-3.5" /></Button>
+              </div>
+              {stopResults.length > 0 && <div className="absolute z-20 w-full rounded-md border bg-popover p-1 shadow-md">{stopResults.map((result) => <button type="button" key={`${result.name}-${result.point.join(',')}`} onClick={() => addStopPoint(result)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent"><MapPin className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{result.name}</span></button>)}</div>}
+            </div>
             <Input placeholder="Via stops (comma separated)" value={formData.viaStops} onChange={e => setFormData(p => ({ ...p, viaStops: e.target.value }))} className="h-9 text-sm" />
             <div className="grid grid-cols-2 gap-2">
               <Input type="number" placeholder="Price EGP" value={formData.priceEgp} onChange={e => setFormData(p => ({ ...p, priceEgp: +e.target.value }))} className="h-9 text-sm" />
               <Input type="number" placeholder="Freq (min)" value={formData.frequencyMinutes} onChange={e => setFormData(p => ({ ...p, frequencyMinutes: +e.target.value }))} className="h-9 text-sm" />
             </div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formData.hasFixedStops} onChange={e => setFormData(p => ({ ...p, hasFixedStops: e.target.checked }))} /> Fixed stops</label>
-            <Button size="sm" variant="outline" className="w-full h-9 text-xs gap-1" onClick={() => { setShowForm(false); setDrawPoints([]); setIsDrawing(true); }}>
+            <Button size="sm" variant="outline" className="w-full h-9 text-xs gap-1" onClick={() => { setShowForm(false); setDrawPoints([]); setRoutedPoints([]); setIsDrawing(true); }}>
               <Pencil className="h-3 w-3" /> Draw on Map
             </Button>
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <Select value={routeProvider} onValueChange={(value: RouteProvider) => setRouteProvider(value)}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="osrm">OSRM</SelectItem><SelectItem value="valhalla">Valhalla</SelectItem></SelectContent>
+              </Select>
+              <Button size="sm" className="h-9 gap-1 text-xs" onClick={() => void routeBetweenPoints()} disabled={isSnapping || drawPoints.length < 2}><RouteIcon className="h-3.5 w-3.5" /> Draw route</Button>
+            </div>
+            {drawPoints.length > 1 && <p className="text-[10px] text-muted-foreground">{drawPoints.length} control points ready. The selected router will draw the road path between them.</p>}
             <p className="text-[10px] text-muted-foreground">If you do not draw manually, the app will geocode the from/via/to stops and snap the route to real streets automatically.</p>
           </div>
           <DialogFooter>

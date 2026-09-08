@@ -251,8 +251,8 @@ const OSRM_FOOT_BASE = (process.env.OSRM_FOOT_URL || "https://routing.openstreet
 // instance is occasionally rate limited, and a routing outage must not make
 // a valid discovery unusable. A configured server remains the first choice.
 const OSRM_DRIVING_BASES = [...new Set([
-  OSRM_DRIVING_BASE,
   "https://router.project-osrm.org",
+  OSRM_DRIVING_BASE,
 ])];
 const GOOGLE_ROADS_URL = "https://roads.googleapis.com/v1/snapToRoads";
 

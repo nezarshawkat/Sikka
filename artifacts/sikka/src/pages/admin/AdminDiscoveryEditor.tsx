@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Map, { Layer, Marker, Source, type MapLayerMouseEvent } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { ArrowLeft, Check, CircleDot, Eye, EyeOff, LocateFixed, MousePointer2, Pencil, Plus, Redo2, Trash2, Undo2 } from 'lucide-react';
+import { ArrowLeft, Check, CircleDot, Eye, EyeOff, LocateFixed, MapPin, MousePointer2, Pencil, Plus, Redo2, Route as RouteIcon, Search, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useIsDark, MAP_STYLE_DARK, MAP_STYLE_LIGHT } from '@/hooks/useIsDark';
 import { computeBounds, type LngLat } from '@/lib/traceBlend';
@@ -19,6 +20,8 @@ type DiscoveryLine = {
   routeQuality?: { metrics?: { contributingTraces?: Trace[]; roadMatched?: boolean; matchedReportCount?: number } } | null;
 };
 type Tool = 'select' | 'draw' | 'erase';
+type RouteProvider = 'osrm' | 'valhalla';
+type CatalogStop = { nameAr?: string | null; nameEn?: string | null; latitude: number | string; longitude: number | string };
 
 const finalColor = '#2563eb';
 
@@ -41,11 +44,25 @@ export default function AdminDiscoveryEditor() {
   const [fromArea, setFromArea] = useState('');
   const [toArea, setToArea] = useState('');
   const [saving, setSaving] = useState(false);
+  const [stopSearch, setStopSearch] = useState('');
+  const [stopResults, setStopResults] = useState<Array<{ name: string; point: LngLat }>>([]);
+  const [stopSearching, setStopSearching] = useState(false);
+  const [routeProvider, setRouteProvider] = useState<RouteProvider>('osrm');
+  const [routing, setRouting] = useState(false);
+  const [routeDrawn, setRouteDrawn] = useState(false);
+  const [catalogStops, setCatalogStops] = useState<CatalogStop[]>([]);
+
+  useEffect(() => {
+    Promise.all([
+      api.get<CatalogStop[]>('/locations'),
+      api.get<CatalogStop[]>('/mawaqef?active=true'),
+    ]).then(([locations, mawaqef]) => setCatalogStops([...locations, ...mawaqef])).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!id) return;
     api.get<DiscoveryLine>(`/transit-lines/${id}`).then((result) => {
-      setLine(result); setDraft(result.routePath?.coordinates ?? []); setNameEn(result.nameEn); setFromArea(result.fromArea ?? ''); setToArea(result.toArea ?? '');
+      setLine(result); setDraft(result.routePath?.coordinates ?? []); setRouteDrawn((result.routePath?.coordinates.length ?? 0) > 1); setNameEn(result.nameEn); setFromArea(result.fromArea ?? ''); setToArea(result.toArea ?? '');
       const traces = result.routeQuality?.metrics?.contributingTraces ?? [];
       setVisible(Object.fromEntries(traces.map((trace, index) => [trace.reportId ?? String(index), true])));
     }).catch((error) => toast.error(error instanceof Error ? error.message : 'Could not load this discovery'));
@@ -59,7 +76,7 @@ export default function AdminDiscoveryEditor() {
   const allPoints = useMemo(() => [...draft, ...shownTraces.flatMap((trace) => trace.trace)], [draft, shownTraces]);
   const bounds = useMemo(() => computeBounds(allPoints), [allPoints]);
   const evidence = useMemo(() => ({ type: 'FeatureCollection' as const, features: shownTraces.filter((trace) => trace.trace.length > 1).map((trace) => lineFeature(trace.trace, trace.color, selectedTrace === 'combined' ? .74 : 1)) }), [shownTraces, selectedTrace]);
-  const finalRoute = useMemo(() => ({ type: 'FeatureCollection' as const, features: draft.length > 1 ? [lineFeature(draft, finalColor)] : [] }), [draft]);
+  const finalRoute = useMemo(() => ({ type: 'FeatureCollection' as const, features: routeDrawn && draft.length > 1 ? [lineFeature(draft, finalColor)] : [] }), [draft, routeDrawn]);
 
   const commit = (next: LngLat[]) => { setHistory((old) => [...old, draft]); setFuture([]); setDraft(next); };
   const undo = () => { const previous = history.at(-1); if (!previous) return; setFuture((old) => [draft, ...old]); setHistory((old) => old.slice(0, -1)); setDraft(previous); };
@@ -68,9 +85,112 @@ export default function AdminDiscoveryEditor() {
     if (tool !== 'draw') return;
     commit([...draft, [event.lngLat.lng, event.lngLat.lat]]);
   };
+  const normalizeStopName = (value: string) => value.toLowerCase().normalize('NFKC').replace(/[ًٌٍَُِّْـ]/g, '').replace(/[إأآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const findCatalogStop = (query: string): { name: string; point: LngLat } | null => {
+    const normalized = normalizeStopName(query);
+    const match = catalogStops.find((stop) => [stop.nameAr, stop.nameEn].filter(Boolean).some((name) => {
+      const candidate = normalizeStopName(name as string);
+      return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
+    }));
+    if (!match) return null;
+    const longitude = Number(match.longitude);
+    const latitude = Number(match.latitude);
+    return Number.isFinite(longitude) && Number.isFinite(latitude) ? { name: match.nameAr || match.nameEn || query, point: [longitude, latitude] } : null;
+  };
+  const geocodeStop = async (query: string): Promise<{ name: string; point: LngLat } | null> => {
+    const catalogMatch = findCatalogStop(query);
+    if (catalogMatch) return catalogMatch;
+    const encoded = encodeURIComponent(`${query}, Cairo, Egypt`);
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=eg&limit=1&accept-language=ar,en&q=${encoded}`, { headers: { 'Accept-Language': 'ar,en' } });
+      const item = (await response.json() as Array<{ lat: string; lon: string }>)[0];
+      if (item) return { name: query, point: [Number(item.lon), Number(item.lat)] };
+    } catch { /* Try the keyless Photon fallback below. */ }
+    try {
+      const response = await fetch(`https://photon.komoot.io/api/?limit=1&lang=ar&q=${encoded}`);
+      const feature = (await response.json() as { features?: Array<{ geometry?: { coordinates?: number[] } }> }).features?.[0];
+      const coordinates = feature?.geometry?.coordinates;
+      if (coordinates && Number.isFinite(coordinates[0]) && Number.isFinite(coordinates[1])) return { name: query, point: [coordinates[0], coordinates[1]] };
+    } catch { return null; }
+    return null;
+  };
+  const coordinatePattern = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
+  const searchStops = async () => {
+    const query = stopSearch.trim();
+    if (!query) { setStopResults([]); return; }
+    setStopSearching(true);
+    try {
+      const coordinateLines = query.split(/\n|;/).map((line) => line.trim()).filter(Boolean);
+      if (coordinateLines.length > 0 && coordinateLines.every((line) => coordinatePattern.test(line))) {
+        const points = coordinateLines.map((line) => {
+          const match = coordinatePattern.exec(line);
+          const latitude = Number(match?.[1]);
+          const longitude = Number(match?.[2]);
+          return [longitude, latitude] as LngLat;
+        });
+        if (points.every(([longitude, latitude]) => Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180)) {
+          commit([...draft, ...points]);
+          setRouteDrawn(false);
+          setStopSearch('');
+          setStopResults([]);
+          toast.success(`Added ${points.length} coordinate points. Choose OSRM or Valhalla to connect them.`);
+          return;
+        }
+      }
+      const stopNames = query.split(/\s*-\s*|\n|،|,/).map((name) => name.trim()).filter(Boolean);
+      if (stopNames.length > 1) {
+        const results = (await Promise.all(stopNames.map(async (name) => {
+          return geocodeStop(name);
+        }))).filter((result): result is { name: string; point: LngLat } => result !== null);
+        if (results.length) {
+          commit([...draft, ...results.map((result) => result.point)]);
+          setRouteDrawn(false);
+          setStopSearch('');
+          setStopResults([]);
+          toast.success(`Added ${results.length} of ${stopNames.length} stops. Choose OSRM or Valhalla to connect them.`);
+        }
+        if (results.length < stopNames.length) toast.error(`${stopNames.length - results.length} stop${stopNames.length - results.length === 1 ? '' : 's'} could not be found`);
+        return;
+      }
+      const catalogMatches = catalogStops.filter((stop) => [stop.nameAr, stop.nameEn].filter(Boolean).some((name) => normalizeStopName(name as string).includes(normalizeStopName(query))));
+      if (catalogMatches.length) {
+        setStopResults(catalogMatches.slice(0, 5).map((stop) => ({ name: stop.nameAr || stop.nameEn || query, point: [Number(stop.longitude), Number(stop.latitude)] as LngLat })));
+      } else {
+        const result = await geocodeStop(query);
+        setStopResults(result ? [result] : []);
+      }
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Stop search failed'); }
+    finally { setStopSearching(false); }
+  };
+  const addStop = (result: { name: string; point: LngLat }) => {
+    commit([...draft, result.point]);
+    setRouteDrawn(false);
+    setTool('select');
+    setStopSearch('');
+    setStopResults([]);
+    toast.success(`Added stop: ${result.name}`);
+  };
+  const routeBetweenStops = async (provider: RouteProvider) => {
+    if (draft.length < 2) { toast.error('Add at least two stops or route points first'); return; }
+    setRouting(true);
+    setRouteProvider(provider);
+    try {
+      const result = await api.post<{ provider: string; fallback?: boolean; routePath: { coordinates: LngLat[] } }>('/transit-lines/route', { points: draft, provider, typeName: 'bus' });
+      if (result.fallback || result.routePath.coordinates.length < 3) throw new Error('The router did not return road geometry');
+      commit(result.routePath.coordinates);
+      setRouteDrawn(true);
+      toast.success(result.fallback ? 'Router unavailable; control-point path drawn' : `${result.provider === 'valhalla' ? 'Valhalla' : 'OSRM'} route drawn between the points`);
+    } catch (error) {
+      // Older deployed API instances may not have the route helper endpoint yet.
+      // Keep the ordered control points usable instead of blocking the editor.
+      setRouteDrawn(true);
+      toast.warning(`${provider === 'valhalla' ? 'Valhalla' : 'OSRM'} is unavailable; the points were kept and can still be saved.`);
+    }
+    finally { setRouting(false); }
+  };
   const publish = async () => {
     if (!line) return;
-    if (draft.length < 2) { toast.error('Draw at least two route points before publishing'); return; }
+    if (!draft.length) { toast.error('Add at least one point before publishing'); return; }
     setSaving(true);
     try {
       const updated = await api.put<DiscoveryLine>(`/transit-lines/${line.id}`, {
@@ -121,6 +241,20 @@ export default function AdminDiscoveryEditor() {
         </div>
         <div className="absolute top-3 left-16 rounded-full border bg-card/95 px-3 py-2 text-xs shadow backdrop-blur">{tool === 'draw' ? 'Click map to add a point' : tool === 'erase' ? 'Click a blue point to erase it' : 'Drag blue points to refine route'}</div>
         <div className="absolute right-3 top-3 flex gap-2"><Button size="sm" variant="outline" className="bg-card/95" onClick={() => { if (draft.length) commit(draft.slice(0, -1)); }}><Trash2 className="mr-1 h-3.5 w-3.5" /> Remove last</Button><Button size="sm" variant="outline" className="bg-card/95" onClick={() => setTool('draw')}><Plus className="mr-1 h-3.5 w-3.5" /> Add points</Button></div>
+
+        <section className="absolute bottom-3 left-3 w-[min(22rem,calc(100%-1.5rem))] rounded-xl border bg-card/95 p-3 shadow-lg backdrop-blur">
+          <p className="mb-2 text-xs font-semibold">Add stops and draw route</p>
+          <div className="flex gap-1">
+            <div className="relative min-w-0 flex-1"><MapPin className="absolute left-2 top-3 h-3.5 w-3.5 text-muted-foreground" /><Textarea value={stopSearch} onChange={(event) => setStopSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void searchStops(); } }} placeholder="Search stops, or paste latitude, longitude lines" className="min-h-9 max-h-24 resize-y pl-7 text-xs" /></div>
+            <Button size="icon" variant="outline" className="h-9 w-9" onClick={() => void searchStops()} disabled={stopSearching} title="Search stops"><Search className="h-3.5 w-3.5" /></Button>
+          </div>
+          {stopResults.length > 0 && <div className="mt-1 max-h-36 overflow-auto rounded-md border bg-popover p-1">{stopResults.map((result) => <button key={`${result.name}-${result.point.join(',')}`} onClick={() => addStop(result)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent"><MapPin className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{result.name}</span></button>)}</div>}
+          <div className="mt-2 grid grid-cols-2 gap-1">
+            <Button size="sm" variant={routeProvider === 'osrm' ? 'default' : 'outline'} disabled={routing || draft.length < 2} onClick={() => void routeBetweenStops('osrm')}><RouteIcon className="mr-1 h-3.5 w-3.5" />OSRM</Button>
+            <Button size="sm" variant={routeProvider === 'valhalla' ? 'default' : 'outline'} disabled={routing || draft.length < 2} onClick={() => void routeBetweenStops('valhalla')}><RouteIcon className="mr-1 h-3.5 w-3.5" />Valhalla</Button>
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">{draft.length} route points. Search a stop to add it, then choose a router.</p>
+        </section>
 
         <section className="absolute bottom-3 right-3 w-[min(22rem,calc(100%-1.5rem))] overflow-hidden rounded-2xl border bg-card/95 shadow-xl backdrop-blur">
           <div className="flex items-center justify-between border-b px-3 py-2"><div><p className="text-sm font-semibold">Route evidence</p><p className="text-[11px] text-muted-foreground">Choose combined or inspect one recording</p></div><LocateFixed className="h-4 w-4 text-muted-foreground" /></div>

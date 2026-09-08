@@ -755,7 +755,9 @@ async function promoteDiscoveredRoute(params: {
       return true;
     }
     if (isBus) {
-      return !wantedNumber || norm(row.transportNumber) === wantedNumber;
+      return wantedNumber
+        ? norm(row.transportNumber) === wantedNumber
+        : sameDirection;
     }
     return true;
   });

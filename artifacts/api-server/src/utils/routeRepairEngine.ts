@@ -630,6 +630,24 @@ async function valhallaRouteThroughAnchors(anchors: RepairAnchor[], typeName: st
   return { ok: true, geometry, mode: "valhalla_route", controlAnchors: usable };
 }
 
+export async function routeViaValhalla(points: LngLat[], typeName = "bus"): Promise<LngLat[] | null> {
+  if (points.length < 2) return null;
+  const anchors: RepairAnchor[] = points.map((point, index) => ({
+    id: `editor-${index}`,
+    sequence: index,
+    direction: "forward",
+    name: `Editor point ${index + 1}`,
+    nameAr: null,
+    point,
+    source: "manual_admin",
+    required: true,
+    confidenceScore: 0.95,
+    anchorType: index === 0 ? "start" : index === points.length - 1 ? "end" : "corridor",
+  }));
+  const result = await valhallaRouteThroughAnchors(anchors, typeName);
+  return result.ok ? result.geometry : null;
+}
+
 function nearestDistanceToPathKm(point: LngLat, path: LngLat[]): { distanceKm: number; index: number } {
   let bestDistance = Number.POSITIVE_INFINITY;
   let bestIndex = 0;
