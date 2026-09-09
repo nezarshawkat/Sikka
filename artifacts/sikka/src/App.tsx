@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { refreshLocalRouteSnapshot } from "@/lib/localRouteStore";
+import { preloadInterstitialAd } from "@/lib/adMob";
 import Index from "./pages/Index";
 import Splash from "./pages/Splash";
 import Auth from "./pages/Auth";
@@ -33,6 +34,7 @@ import AdminAnalytics from "./pages/admin/AdminAnalytics";
 import AdminMap from "./pages/admin/AdminMap";
 import AdminAppSettings from "./pages/admin/AdminAppSettings";
 import RequiredUpdateDialog from "./components/RequiredUpdateDialog";
+import AdMobBanner from "./components/AdMobBanner";
 import RouteDetail from "./pages/RouteDetail";
 import NotFound from "./pages/NotFound";
 import "./mobile-shell.css";
@@ -119,6 +121,10 @@ function AppRoutes() {
     };
 
     refresh();
+    const adTimer = window.setTimeout(preloadInterstitialAd, 500);
+    const syncTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refresh();
+    }, 30_000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') refresh();
     };
@@ -129,6 +135,8 @@ function AppRoutes() {
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
+      window.clearTimeout(adTimer);
+      window.clearInterval(syncTimer);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('online', onFocus);
       document.removeEventListener('visibilitychange', onVisible);
@@ -180,6 +188,7 @@ function AppRoutes() {
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
+        <AdMobBanner />
       </AuthProvider>
     </ClerkProvider>
   );

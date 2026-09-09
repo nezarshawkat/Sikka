@@ -22,22 +22,42 @@ export async function getMobileAppConfig(): Promise<MobileAppConfig> {
   return { ...DEFAULT_APP_CONFIG, ...config };
 }
 
-export async function showConfiguredAd(placement: AdPlacement): Promise<void> {
-  let config = { ...DEFAULT_APP_CONFIG };
+let adInFlight = false;
+let locationAdShown = false;
+let lastKnownConfig = { ...DEFAULT_APP_CONFIG };
+
+async function requestConfiguredAd(placement: AdPlacement): Promise<void> {
+  let config = lastKnownConfig;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    config = await getMobileAppConfig();
+    config = await Promise.race([
+      getMobileAppConfig(),
+      new Promise<MobileAppConfig>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Ad config timed out')), 2000);
+      }),
+    ]);
+    lastKnownConfig = config;
   } catch {
     // The app should still show a single ad when the server config is temporarily
     // unavailable; default policy keeps the release experience working while
     // preserving the ability to disable ads centrally when the API is reachable.
-  }
+  } finally { clearTimeout(timeout); }
 
   const placementEnabled = placement === "location_loaded"
     ? config.showAdAfterLocation
     : config.showAdAfterTripReview;
 
   if (config.adsEnabled && placementEnabled) {
-    await showInterstitialAd(placement);
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    const shown = await showInterstitialAd(placement);
+    if (shown && placement === 'location_loaded') locationAdShown = true;
   }
+}
+
+export async function showConfiguredAd(placement: AdPlacement): Promise<void> {
+  if (adInFlight || (placement === 'location_loaded' && locationAdShown)) return;
+  adInFlight = true;
+  try { await requestConfiguredAd(placement); }
+  finally { adInFlight = false; }
 }

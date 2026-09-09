@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Search, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -31,6 +31,49 @@ const langForSearch = (language?: Language) => {
 };
 
 const EGYPT_VIEWBOX = '24.7,31.9,36.9,21.6';
+
+/** Suggestions use Photon so the existing Nominatim submit search stays unchanged. */
+async function fetchSuggestions(query: string, language?: Language): Promise<Suggestion[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+  const params = new URLSearchParams({
+    q: trimmed,
+    limit: '5',
+    lang: langForSearch(language),
+    bbox: '24.7,21.6,36.9,31.9',
+  });
+
+  try {
+    const res = await fetch(`https://photon.komoot.io/api/?${params.toString()}`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      features?: Array<{
+        properties?: { osm_id?: number; osm_type?: string; name?: string; city?: string; state?: string; country?: string; countrycode?: string };
+        geometry?: { coordinates?: [number, number] };
+      }>;
+    };
+    return (data.features ?? []).flatMap((feature) => {
+      const coordinates = feature.geometry?.coordinates;
+      const properties = feature.properties;
+      if (!coordinates || !properties?.osm_id) return [];
+      const country = properties.country?.trim().toLowerCase();
+      const countryCode = properties.countrycode?.trim().toLowerCase();
+      if (countryCode !== 'eg' && country !== 'egypt' && country !== 'مصر') return [];
+      const label = [properties.name, properties.city, properties.state, properties.country]
+        .filter(Boolean)
+        .join(', ');
+      if (!label) return [];
+      return [{
+        id: `photon.${properties.osm_type ?? 'n'}.${properties.osm_id}`,
+        place_name: label,
+        center: coordinates,
+        text: properties.name || label,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
 
 /** Geocode a free-text query via Nominatim and return the best single result. */
 async function geocodeQuery(query: string, language?: Language): Promise<Suggestion | null> {
@@ -74,7 +117,30 @@ const LocationAutocomplete = ({
   trailingAction, onTrailingAction, trailingLabel, readOnlyDisplay, language,
 }: LocationAutocompleteProps) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (readOnlyDisplay || value.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void fetchSuggestions(value, language).then((results) => {
+        setSuggestions(results);
+        setShowSuggestions(results.length > 0);
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [value, language, readOnlyDisplay]);
+
+  const selectSuggestion = (suggestion: Suggestion) => {
+    setShowSuggestions(false);
+    setSuggestions([]);
+    onChange(suggestion.place_name);
+    onSelect(suggestion);
+  };
 
   const handleSearch = useCallback(async () => {
     const q = value.trim();
@@ -149,6 +215,7 @@ const LocationAutocomplete = ({
           readOnly={!!readOnlyDisplay}
           title={readOnlyDisplay ?? undefined}
           onChange={(e) => onChange(e.target.value)}
+          onFocus={() => { if (suggestions.length) setShowSuggestions(true); }}
           onKeyDown={handleKeyDown}
           className={cn(
             'pl-11 shadow-xl border border-white/20 h-14 text-base rounded-[2rem] glass-panel truncate',
@@ -156,7 +223,22 @@ const LocationAutocomplete = ({
           )}
         />
       </div>
-      {/* No dropdown suggestions — search-and-confirm flow like Google Maps */}
+      {showSuggestions && suggestions.length > 0 && (
+        <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-30 overflow-hidden rounded-[2rem] border border-white/30 bg-background/95 shadow-2xl backdrop-blur-md">
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.id}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => selectSuggestion(suggestion)}
+              className="flex w-full items-start gap-3 border-b border-border/60 px-4 py-3 text-left last:border-b-0 hover:bg-primary/10"
+            >
+              <Search className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span className="min-w-0 truncate text-sm">{suggestion.place_name}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

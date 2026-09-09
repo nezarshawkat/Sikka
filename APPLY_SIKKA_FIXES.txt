@@ -1,0 +1,28 @@
+SIKKA FIXES - DIRECT REPLACEMENT ZIP
+
+1. Back up your Sikka repository.
+2. Extract this ZIP directly INTO the repository root: the folder containing
+   package.json, pnpm-lock.yaml, and the artifacts folder.
+3. Merge folders and choose Replace/Overwrite existing files.
+   The ZIP contains .github/ and artifacts/ at its root. Do not put it inside
+   artifacts/sikka, and do not leave an extra ZIP-named folder around them.
+
+No apply script is required.
+Linux example, from your Sikka repository root:
+  unzip -o /path/to/Sikka-direct-apply-v48.zip -d .
+
+Then deploy the backend and rebuild the Android app with your existing
+Build Android Release AAB GitHub workflow. Upload that AAB to Play internal
+testing before rolling it out. Both the backend deployment and Android
+update are needed. New versionCode: 48; versionName: 1.0.47. Increase the
+versionCode if Google Play already has version 48 or higher.
+
+This is a source update based on commit
+08eaccf68ca77f36f6b7a302002e3695cecd29e4, not an installable APK.
+
+Checks passed: 21 regression tests, frontend TypeScript check, shared
+library build, production web/backend builds, Android debug APK and
+instrumentation APK builds, and release Java compilation.
+The actual Play crash has not been reproduced on a physical device.
+The included Android Startup Smoke Test workflow can be run in GitHub.
+The full backend typecheck retains 33 pre-existing errors (37 in baseline).

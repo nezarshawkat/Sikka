@@ -47,9 +47,20 @@ public class SikkaDiscoveryPlugin extends Plugin {
     }
 
     private void startService(PluginCall call) {
-        SikkaDiscoveryService.setEnabled(getContext(), true);
-        Intent intent = new Intent(getContext(), SikkaDiscoveryService.class);
-        ContextCompat.startForegroundService(getContext(), intent);
+        startService(call, false);
+    }
+
+    private void startService(PluginCall call, boolean manual) {
+        try {
+            SikkaDiscoveryService.setEnabled(getContext(), true);
+            if (manual) SikkaDiscoveryService.startManualRecording(getContext());
+            Intent intent = new Intent(getContext(), SikkaDiscoveryService.class);
+            ContextCompat.startForegroundService(getContext(), intent);
+        } catch (RuntimeException error) {
+            SikkaDiscoveryService.setEnabled(getContext(), false);
+            call.reject("Android could not start location recording. Reopen the app and check location permission.", error);
+            return;
+        }
         JSObject result = new JSObject();
         result.put("enabled", true);
         result.put("notificationPermission", Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
@@ -63,19 +74,13 @@ public class SikkaDiscoveryPlugin extends Plugin {
             requestPermissionForAlias("location", call, "manualLocationPermissionResult");
             return;
         }
-        SikkaDiscoveryService.setEnabled(getContext(), true);
-        SikkaDiscoveryService.startManualRecording(getContext());
-        ContextCompat.startForegroundService(getContext(), new Intent(getContext(), SikkaDiscoveryService.class));
-        JSObject result = new JSObject(); result.put("enabled", true); call.resolve(result);
+        startService(call, true);
     }
 
     @PermissionCallback
     private void manualLocationPermissionResult(PluginCall call) {
         if (getPermissionState("location") != PermissionState.GRANTED) { call.reject("Location permission was not granted"); return; }
-        SikkaDiscoveryService.setEnabled(getContext(), true);
-        SikkaDiscoveryService.startManualRecording(getContext());
-        ContextCompat.startForegroundService(getContext(), new Intent(getContext(), SikkaDiscoveryService.class));
-        JSObject result = new JSObject(); result.put("enabled", true); call.resolve(result);
+        startService(call, true);
     }
 
     @PluginMethod

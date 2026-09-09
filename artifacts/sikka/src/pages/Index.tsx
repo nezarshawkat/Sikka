@@ -1406,6 +1406,7 @@ const Index = () => {
           setTripReviewOpen(false);
           clearTrip();
           toast.success(t('tripComplete', language));
+          void showConfiguredAd('trip_review_complete');
           if (!profile?.hasRatedApp) setShowRateUs(true);
         }}
         segment={null}

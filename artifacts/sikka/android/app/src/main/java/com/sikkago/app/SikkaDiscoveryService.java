@@ -159,8 +159,25 @@ public class SikkaDiscoveryService extends Service implements LocationListener {
         super.onCreate();
         instance = this;
         restore();
+        // Android can recreate a sticky service after an upgrade or after
+        // location permission was revoked. Check before startForeground(),
+        // which throws SecurityException on recent Android releases.
+        if (!isEnabled(this)
+            || (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED)) {
+            setEnabled(this, false);
+            stopSelf();
+            return;
+        }
         createChannel();
-        startAsForeground(recording ? "Recording a possible transit ride" : "Watching for bus and microbus rides");
+        try {
+            startAsForeground(recording ? "Recording a possible transit ride" : "Watching for bus and microbus rides");
+        } catch (RuntimeException error) {
+            android.util.Log.w("SikkaDiscovery", "Location service start rejected", error);
+            setEnabled(this, false);
+            stopSelf();
+            return;
+        }
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         requestUpdates();
     }

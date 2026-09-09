@@ -140,7 +140,20 @@ export default function RouteDetail() {
     setLoading(true);
     try {
       const local = await getLocalTransitLine<TransitLine, TransportType>(id);
-      const data = local.route;
+      let data = local.route;
+      let type = local.transportType;
+      if (isAdmin) {
+        try {
+          const [remote, types] = await Promise.all([
+            api.get<TransitLine>(`/transit-lines/${id}`),
+            api.get<TransportType[]>('/transport-types'),
+          ]);
+          data = remote;
+          type = types.find(item => item.id === remote.transportTypeId) ?? null;
+        } catch (error) {
+          if (!data) throw error;
+        }
+      }
       if (!data) throw new Error('Route is not available in the saved app snapshot');
       setRoute(data);
       setForm({
@@ -157,7 +170,7 @@ export default function RouteDetail() {
         governorate: data.governorate || 'Cairo',
       });
 
-      setTransportType(local.transportType);
+      setTransportType(type);
 
       const coords = data.routePath?.coordinates;
       if (coords?.length) {
@@ -184,7 +197,7 @@ export default function RouteDetail() {
     }
   };
 
-  useEffect(() => { void loadRoute(); }, [id]);
+  useEffect(() => { void loadRoute(); }, [id, isAdmin]);
 
   useEffect(() => {
     const coords = route?.routePath?.coordinates;

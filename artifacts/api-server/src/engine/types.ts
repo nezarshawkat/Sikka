@@ -51,6 +51,7 @@ export interface LineInfo {
   nameAr: string;
   fromArea: string;
   toArea: string;
+  governorate: string;
   priceEgp: number;
   frequencyMinutes: number | null;
   hasFixedStops: boolean;

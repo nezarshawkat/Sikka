@@ -3,13 +3,14 @@ import { apiFetch } from '@/lib/api';
 
 type SnapshotLine = Record<string, unknown> & { id: string; transportTypeId: string; path?: [number, number][]; routeStatus?: string };
 type SnapshotType = Record<string, unknown> & { id: string };
-type OfflineSnapshot = {
+export type OfflineSnapshot = {
   schemaVersion: number;
   generatedAt: string;
   revision: string;
   types: SnapshotType[];
   lines: SnapshotLine[];
   heatmaps?: unknown[];
+  authoritative?: boolean;
 };
 
 const bundledSnapshot = bundledSnapshotRaw as unknown as OfflineSnapshot;
@@ -17,6 +18,21 @@ const DB_NAME = 'sikka-offline';
 const STORE_NAME = 'snapshots';
 const SNAPSHOT_KEY = 'latest';
 export const ROUTES_UPDATED_EVENT = 'sikka:routes-updated';
+let memorySnapshot: OfflineSnapshot | null = null;
+let refreshInFlight: Promise<OfflineSnapshot | null> | null = null;
+let lastCheckedAt = 0;
+
+export function isValidSnapshot(value: unknown): value is OfflineSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const snapshot = value as OfflineSnapshot;
+  return snapshot.schemaVersion === 3 && typeof snapshot.revision === 'string'
+    && Array.isArray(snapshot.types) && snapshot.types.every(type => typeof type?.id === 'string')
+    && Array.isArray(snapshot.lines) && snapshot.lines.every(line =>
+      typeof line?.id === 'string' && typeof line.transportTypeId === 'string'
+      && (line.path == null || (Array.isArray(line.path) && line.path.every(point =>
+        Array.isArray(point) && point.length >= 2 && Number.isFinite(point[0]) && Number.isFinite(point[1])
+        && Math.abs(point[0]) <= 180 && Math.abs(point[1]) <= 90))));
+}
 
 function revisionStamp(revision: string | undefined | null): number {
   if (!revision) return 0;
@@ -28,6 +44,10 @@ function revisionStamp(revision: string | undefined | null): number {
 export function pickLatestSnapshot(current: OfflineSnapshot | null | undefined, candidate: OfflineSnapshot | null | undefined): OfflineSnapshot | null {
   if (!candidate) return current ?? null;
   if (!current) return candidate;
+  // A downloaded full snapshot is authoritative even if removing the newest
+  // line lowered the server's maximum updatedAt timestamp.
+  if (candidate.authoritative) return candidate;
+  if (current.authoritative) return current;
   const currentStamp = revisionStamp(current.revision) || Date.parse(current.generatedAt) || 0;
   const candidateStamp = revisionStamp(candidate.revision) || Date.parse(candidate.generatedAt) || 0;
   return candidateStamp >= currentStamp ? candidate : current;
@@ -41,21 +61,30 @@ function openDb(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error('Route storage is blocked'));
   });
 }
 
 async function writeSnapshot(snapshot: OfflineSnapshot): Promise<void> {
+  memorySnapshot = snapshot;
   if (typeof window === 'undefined' || !('indexedDB' in window)) return;
+  try {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     tx.objectStore(STORE_NAME).put({ snapshot, savedAt: Date.now() }, SNAPSHOT_KEY);
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror = () => { db.close(); reject(tx.error); };
+    tx.onabort = () => { db.close(); reject(tx.error); };
   });
+  } catch (error) {
+    // Routes remain usable for this session when storage is full or denied.
+    console.warn('[routes] Could not persist snapshot', error);
+  }
 }
 
-async function readSnapshot(): Promise<OfflineSnapshot> {
+export async function readSnapshot(): Promise<OfflineSnapshot> {
+  if (memorySnapshot) return memorySnapshot;
   if (typeof window === 'undefined' || !('indexedDB' in window)) return bundledSnapshot;
   try {
     const db = await openDb();
@@ -66,13 +95,16 @@ async function readSnapshot(): Promise<OfflineSnapshot> {
       request.onerror = () => resolve(null);
       tx.oncomplete = () => db.close();
     });
-    if (stored?.snapshot && Array.isArray(stored.snapshot.lines)) {
+    if (memorySnapshot) return memorySnapshot;
+    if (isValidSnapshot(stored?.snapshot)) {
       const latest = pickLatestSnapshot(bundledSnapshot, stored.snapshot);
-      return latest ?? bundledSnapshot;
+      memorySnapshot = latest ?? bundledSnapshot;
+      return memorySnapshot;
     }
   } catch {
     // Use the bundled snapshot when IndexedDB is unavailable.
   }
+  if (memorySnapshot) return memorySnapshot;
   await writeSnapshot(bundledSnapshot);
   return bundledSnapshot;
 }
@@ -82,7 +114,7 @@ function toUiLine(line: SnapshotLine): Record<string, unknown> {
   return {
     ...line,
     routePath: path.length >= 2 ? { type: 'LineString', coordinates: path } : null,
-    isActive: line.routeStatus !== 'inactive' && line.routeStatus !== 'pending_discovery',
+    isActive: line.isActive !== false && (line.routeStatus === 'active' || line.routeStatus === 'needs_review' || !line.routeStatus),
     routeDirection: line.routeDirection ?? 'forward',
     governorate: line.governorate ?? 'Cairo',
     viaStops: Array.isArray(line.viaStops) ? line.viaStops : [],
@@ -117,20 +149,38 @@ function announceUpdate(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(ROUTES_UPDATED_EVENT));
 }
 
-export async function refreshLocalRouteSnapshot(): Promise<OfflineSnapshot | null> {
+async function refreshSnapshot(force: boolean): Promise<OfflineSnapshot | null> {
   const current = await readSnapshot();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
   try {
-    const refreshed = await apiFetch<OfflineSnapshot>(`/offline/snapshot?refresh=${Date.now()}`);
-    if (!refreshed || !Array.isArray(refreshed.lines)) return current;
-    const next = pickLatestSnapshot(current, refreshed);
-    if (next && next !== current) {
-      await writeSnapshot(next);
-      announceUpdate();
+    if (!force) {
+      const manifest = await apiFetch<{ revision: string }>('/offline/manifest', { cache: 'no-store', signal: controller.signal });
+      if (current.authoritative && current.revision === manifest.revision) {
+        lastCheckedAt = Date.now();
+        return current;
+      }
     }
-    return next ?? current;
+    const refreshed = await apiFetch<OfflineSnapshot>('/offline/snapshot', { cache: 'no-store', signal: controller.signal });
+    if (!isValidSnapshot(refreshed)) return current;
+    const next = { ...refreshed, authoritative: true };
+    await writeSnapshot(next);
+    lastCheckedAt = Date.now();
+    if (current.revision !== next.revision || !current.authoritative) announceUpdate();
+    return next;
   } catch {
     return current;
+  } finally { clearTimeout(timer); }
+}
+
+export function refreshLocalRouteSnapshot(force = false): Promise<OfflineSnapshot | null> {
+  if (refreshInFlight) {
+    // An admin save must not join a request that started before the mutation.
+    return force ? refreshInFlight.then(() => refreshLocalRouteSnapshot(true)) : refreshInFlight;
   }
+  if (!force && Date.now() - lastCheckedAt < 15_000) return readSnapshot();
+  refreshInFlight = refreshSnapshot(force).finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
 }
 
 export async function getLocalRouteCatalog<TLine, TType>(): Promise<{ routes: TLine[]; transportTypes: TType[] }> {
@@ -146,21 +196,6 @@ export async function getLocalTransitLine<TLine, TType>(id: string): Promise<{ r
 }
 
 export async function saveLocalTransitLine(route: Record<string, unknown>): Promise<void> {
-  let refreshedSnapshot: OfflineSnapshot | null = null;
-  try {
-    refreshedSnapshot = await apiFetch<OfflineSnapshot>(`/offline/snapshot?refresh=${Date.now()}`, {
-      cache: 'no-store',
-    });
-  } catch {
-    refreshedSnapshot = null;
-  }
-  if (refreshedSnapshot && Array.isArray(refreshedSnapshot.lines)) {
-    const latest = pickLatestSnapshot(await readSnapshot(), refreshedSnapshot) ?? refreshedSnapshot;
-    await writeSnapshot(latest);
-    announceUpdate();
-    return;
-  }
-
   const id = String(route.id ?? '');
   if (!id) throw new Error('Cannot cache a route without an id');
   const snapshot = await readSnapshot();
@@ -169,6 +204,7 @@ export async function saveLocalTransitLine(route: Record<string, unknown>): Prom
   const lines = existing ? snapshot.lines.map((item) => item.id === id ? next : item) : [...snapshot.lines, next];
   await writeSnapshot(changedSnapshot(snapshot, lines));
   announceUpdate();
+  await refreshLocalRouteSnapshot(true);
 }
 
 export async function deleteLocalTransitLine(id: string): Promise<void> {

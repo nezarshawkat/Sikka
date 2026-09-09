@@ -1,18 +1,13 @@
-// Bundled fallback snapshot — ships inside the app build itself, so a fresh
-// install has routes immediately with ZERO network calls. Regenerate this
-// file (see scripts/exportBundledSnapshot.mjs) before each release so new
-// installs start from current data; after that, the existing manifest/delta
-// check (see getSnapshot below) only ever pulls a small delta, and only when
-// an admin has actually changed something — never a full re-fetch per trip
-// or per install.
+// Offline route planning uses the same synchronized store as the dashboard.
 import bundledSnapshotRaw from '@/data/bundledSnapshot.json';
+import { readSnapshot, refreshLocalRouteSnapshot } from '@/lib/localRouteStore';
 
 type LngLat = [number, number];
 type Coord = { lat: number; lng: number };
 type PlanKey = "economic" | "comfortable" | "premium";
 type ModeKey = "metro" | "monorail" | "lrt" | "brt" | "train" | "bus" | "serfis" | "microbus" | "taxi" | "tuktuk" | "walk";
 type RouteVariantKey = "recommended" | "cheapest" | "fastest" | "fewest_transfers";
-type RouteStatus = "active" | "needs_review" | "inactive" | "pending_discovery";
+type RouteStatus = "active" | "needs_review" | "inactive" | "pending_discovery" | "rejected";
 
 type OfflineType = {
   id: string;
@@ -46,6 +41,8 @@ type OfflineLine = {
   sourcePriority?: number;
   confidenceScore?: number;
   routeStatus?: RouteStatus;
+  isActive?: boolean;
+  routeDirection?: string;
   /** Real average speed (km/h) computed server-side from timestamped rider
    *  GPS traces. Preferred over the transport type's generic speed for this
    *  line's duration estimate whenever it's set. */
@@ -196,9 +193,6 @@ type PlanCandidate = {
   usesRail: boolean;
 };
 
-const SNAPSHOT_DB = "sikka-offline";
-const SNAPSHOT_STORE = "snapshots";
-const SNAPSHOT_KEY = "latest";
 const WALK_MAX_KM = 0.8;
 const WALK_TOTAL_MAX_KM = 1.6;
 const WALK_SPEED_KMH = 4.5;
@@ -965,59 +959,11 @@ async function makePlan(
   };
 }
 
-function openSnapshotDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(SNAPSHOT_DB, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(SNAPSHOT_STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function readCachedSnapshot(): Promise<{ snapshot: OfflineSnapshot; savedAt: number } | null> {
-  if (!("indexedDB" in window)) return null;
-  const db = await openSnapshotDb();
-  return new Promise((resolve) => {
-    const tx = db.transaction(SNAPSHOT_STORE, "readonly");
-    const req = tx.objectStore(SNAPSHOT_STORE).get(SNAPSHOT_KEY);
-    req.onsuccess = () => resolve(req.result ?? null);
-    req.onerror = () => resolve(null);
-    tx.oncomplete = () => db.close();
-  });
-}
-
-async function writeCachedSnapshot(snapshot: OfflineSnapshot): Promise<void> {
-  if (!("indexedDB" in window)) return;
-  const db = await openSnapshotDb();
-  await new Promise<void>((resolve) => {
-    const tx = db.transaction(SNAPSHOT_STORE, "readwrite");
-    tx.objectStore(SNAPSHOT_STORE).put({ snapshot, savedAt: Date.now() }, SNAPSHOT_KEY);
-    tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror = () => { db.close(); resolve(); };
-  });
-}
-
 async function getSnapshot(): Promise<OfflineSnapshot | null> {
-  const cached = await readCachedSnapshot().catch(() => null);
-
-  if (!cached) {
-    // Fresh install, nothing in IndexedDB yet: seed instantly from the data
-    // bundled into the app build — zero network calls, works the moment the
-    // app opens for the very first time, even with no signal at all.
-    if (bundledSnapshot.lines?.length) {
-      await writeCachedSnapshot(bundledSnapshot).catch(() => {});
-      // Still worth a single lightweight manifest check in the background so
-      // anything an admin changed since this build was released shows up
-      // without the rider having to wait — but the trip being planned right
-      // now already has data to work with immediately, regardless of result.
-      return bundledSnapshot;
-    }
-    // No bundled data at all (e.g. a dev build before the export step has
-    // ever been run) — only in that case fall back to a live fetch so the
-    // app isn't simply unusable.
-    return null;
-  }
-  return cached.snapshot;
+  // If startup/resume is already syncing, planning waits for that bounded
+  // request. Offline or failed requests retain the last usable route set.
+  const snapshot = await refreshLocalRouteSnapshot() ?? await readSnapshot();
+  return snapshot as unknown as OfflineSnapshot;
 }
 
 function buildCandidates(snapshot: OfflineSnapshot, point: Coord, planKey: PlanKey, limit: number): Candidate[] {
@@ -1027,7 +973,8 @@ function buildCandidates(snapshot: OfflineSnapshot, point: Coord, planKey: PlanK
   const riderGovernorate = governorateOf(point);
   const candidates: Candidate[] = [];
   for (const line of snapshot.lines) {
-    if (line.routeStatus === "inactive" || line.routeStatus === "pending_discovery") continue;
+    if (line.isActive === false || (line.routeStatus && line.routeStatus !== "active" && line.routeStatus !== "needs_review")) continue;
+    if (line.dataSource === "discovery" && line.routeStatus !== "active") continue;
     if (!line.path || line.path.length < 2) continue;
     // Only suggest routes that actually serve the governorate the rider is
     // currently in — a Cairo line should never appear as an option while

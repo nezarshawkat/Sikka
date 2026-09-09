@@ -11,7 +11,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { MAP_STYLE_DARK } from '@/hooks/useIsDark';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { deleteLocalTransitLine, getLocalRouteCatalog, saveLocalTransitLine } from '@/lib/localRouteStore';
+import { deleteLocalTransitLine, getLocalRouteCatalog, saveLocalTransitLine, ROUTES_UPDATED_EVENT } from '@/lib/localRouteStore';
 
 interface GeoJSONLineString {
   type: 'LineString';
@@ -125,7 +125,12 @@ const AdminMap = () => {
     setIsLoading(false);
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    void fetchData();
+    const onRoutesUpdated = () => { void fetchData(); };
+    window.addEventListener(ROUTES_UPDATED_EVENT, onRoutesUpdated);
+    return () => window.removeEventListener(ROUTES_UPDATED_EVENT, onRoutesUpdated);
+  }, [fetchData]);
 
   const tuktukType = transportTypes.find(t => t.nameEn.toLowerCase().includes('tuk'));
   const whiteTaxiType = transportTypes.find(t => t.nameEn.toLowerCase().includes('white taxi'));

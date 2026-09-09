@@ -227,6 +227,8 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
     register(l.nameAr, { lat: l.latitude, lng: l.longitude });
   }
   for (const l of lineRows) {
+    if (l.routeStatus !== "active" && l.routeStatus !== "needs_review") continue;
+    if (l.dataSource === "discovery" && l.routeStatus !== "active") continue;
     const type = types.get(l.transportTypeId);
     if (type && (
       l.hasFixedStops
@@ -316,6 +318,7 @@ export async function buildGraph(force = false): Promise<TransitGraph> {
       hasFixedStops: fixedStopMode,
       dataSource: l.dataSource,
       routeStatus: l.routeStatus,
+      governorate: l.governorate,
       path,
       stops,
       pathSuspect: maxConsecutiveStepKm(path) > PATH_SUSPECT_STEP_KM,

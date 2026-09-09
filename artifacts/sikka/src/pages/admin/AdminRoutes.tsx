@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Route, Search, ShieldAlert, RefreshCw } from 'lucide-react';
-import { deleteLocalTransitLines, getLocalRouteCatalog, saveLocalTransitLine } from '@/lib/localRouteStore';
+import { deleteLocalTransitLines, getLocalRouteCatalog, saveLocalTransitLine, ROUTES_UPDATED_EVENT } from '@/lib/localRouteStore';
 
 interface TransitLine {
   id: string;
@@ -68,9 +68,18 @@ const AdminRoutes = () => {
   const fetchRoutes = async () => {
     setIsLoading(true);
     try {
-      const catalog = await getLocalRouteCatalog<TransitLine, TransportType>();
-      setRoutes(catalog.routes);
-      setTransportTypes(catalog.transportTypes);
+      // Admins must also be able to reopen inactive/unpublished routes, which
+      // are intentionally absent from the rider's offline snapshot.
+      const [routes, types] = await Promise.all([
+        api.get<TransitLine[]>('/transit-lines'),
+        api.get<TransportType[]>('/transport-types'),
+      ]);
+      setRoutes(routes);
+      setTransportTypes(types);
+    } catch {
+      const cached = await getLocalRouteCatalog<TransitLine, TransportType>();
+      setRoutes(cached.routes);
+      setTransportTypes(cached.transportTypes);
     } finally {
       setIsLoading(false);
     }
@@ -78,6 +87,9 @@ const AdminRoutes = () => {
 
   useEffect(() => {
     fetchRoutes();
+    const onRoutesUpdated = () => { void fetchRoutes(); };
+    window.addEventListener(ROUTES_UPDATED_EVENT, onRoutesUpdated);
+    return () => window.removeEventListener(ROUTES_UPDATED_EVENT, onRoutesUpdated);
   }, []);
 
   const filteredRoutes = useMemo(() => {

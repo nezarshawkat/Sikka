@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Router } from "express";
 import { db, transportHeatmapsTable, transportTypesTable, transitLinesTable } from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
@@ -130,7 +131,8 @@ function revisionOf(typeRows: { createdAt: unknown }[], lineRows: { updatedAt: u
     ...lineRows.map((l) => stampOf(l.updatedAt)),
     ...heatRows.map((h) => stampOf(h.createdAt)),
   );
-  return `${SNAPSHOT_VERSION}-${newest}-${typeRows.length}-${lineRows.length}-${heatRows.length}`;
+  const hash = createHash("sha256").update(JSON.stringify([typeRows, lineRows, heatRows])).digest("hex").slice(0, 24);
+  return `${SNAPSHOT_VERSION}-${newest}-${typeRows.length}-${lineRows.length}-${heatRows.length}-${hash}`;
 }
 
 function revisionStamp(revision: unknown): number {
@@ -142,11 +144,11 @@ function revisionStamp(revision: unknown): number {
 export async function buildOfflinePayload(sinceRevision?: string) {
   const sinceMs = revisionStamp(sinceRevision);
   const [typeRows, allLineRows, heatRows] = await Promise.all([
-    db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true)).orderBy(asc(transportTypesTable.nameEn)),
-    db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true)).orderBy(asc(transitLinesTable.lineNumber)),
-    db.select().from(transportHeatmapsTable).orderBy(asc(transportHeatmapsTable.transportTypeId)),
+    db.select().from(transportTypesTable).where(eq(transportTypesTable.isActive, true)).orderBy(asc(transportTypesTable.nameEn), asc(transportTypesTable.id)),
+    db.select().from(transitLinesTable).where(eq(transitLinesTable.isActive, true)).orderBy(asc(transitLinesTable.lineNumber), asc(transitLinesTable.id)),
+    db.select().from(transportHeatmapsTable).orderBy(asc(transportHeatmapsTable.transportTypeId), asc(transportHeatmapsTable.id)),
   ]);
-  const acceptedLineRows = allLineRows.filter((l) => ACCEPTED_ROUTE_STATUSES.has(l.routeStatus ?? "active"));
+  const acceptedLineRows = allLineRows.filter((l) => ACCEPTED_ROUTE_STATUSES.has(l.routeStatus ?? "active") && (l.dataSource !== "discovery" || l.routeStatus === "active"));
   const lineRows = sinceMs > 0
     ? acceptedLineRows.filter((l) => stampOf(l.updatedAt) > sinceMs)
     : acceptedLineRows;
@@ -179,6 +181,8 @@ export async function buildOfflinePayload(sinceRevision?: string) {
         fromArea: l.fromArea,
         toArea: l.toArea,
         governorate: l.governorate,
+        routeDirection: l.routeDirection,
+        isActive: l.isActive,
         viaStops: l.viaStops ?? [],
         stops: l.stops ?? null,
         path: compactedPath,
@@ -216,6 +220,7 @@ export async function buildOfflinePayload(sinceRevision?: string) {
   }));
 
   return {
+    activeLineIds: acceptedLineRows.filter(l => (l.routePath?.coordinates?.length ?? 0) >= 2).map(l => l.id),
     schemaVersion: SNAPSHOT_VERSION,
     generatedAt: new Date().toISOString(),
     revision: revisionOf(typeRows, acceptedLineRows, heatRows),
@@ -228,7 +233,7 @@ export async function buildOfflinePayload(sinceRevision?: string) {
 // Manifest is intentionally tiny: the app uses it to decide whether it needs a delta.
 router.get("/manifest", async (_req, res) => {
   const payload = await buildOfflinePayload();
-  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=86400");
+  res.setHeader("Cache-Control", "no-store");
   res.json({
     schemaVersion: payload.schemaVersion,
     generatedAt: payload.generatedAt,
@@ -245,14 +250,14 @@ router.get("/manifest", async (_req, res) => {
 router.get("/delta", async (req, res) => {
   const sinceRevision = typeof req.query.sinceRevision === "string" ? req.query.sinceRevision : undefined;
   const payload = await buildOfflinePayload(sinceRevision);
-  res.setHeader("Cache-Control", "public, max-age=120, stale-while-revalidate=86400");
+  res.setHeader("Cache-Control", "no-store");
   res.json(payload);
 });
 
 // Backwards-compatible full snapshot for older mobile builds.
 router.get("/snapshot", async (_req, res) => {
   const payload = await buildOfflinePayload();
-  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=86400");
+  res.setHeader("Cache-Control", "no-store");
   res.json(payload);
 });
 

@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { invalidateGraph } from "../engine/graph.js";
+import { routeUpdateForPublication } from "../utils/routePublication.js";
 import { db } from "@workspace/db";
 import { transitLinesTable, reviewsTable, reportsTable } from "@workspace/db";
 import { eq, asc, desc, inArray, and, or, ilike, sql, type SQL } from "drizzle-orm";
@@ -44,12 +46,13 @@ interface TransitLineUpdate {
   dataSource?: string;
   sourcePriority?: number;
   confidenceScore?: number;
-  routeStatus?: "active" | "needs_review" | "inactive" | "pending_discovery";
-  verifiedAt?: Date | string | null;
-  lastConfirmedAt?: Date | string | null;
+  routeStatus?: "active" | "needs_review" | "inactive" | "pending_discovery" | "rejected";
+  verifiedAt?: Date | null;
+  lastConfirmedAt?: Date | null;
   needsReviewReason?: string | null;
   reviewReportCount?: number;
   updatedAt?: Date;
+  routeQuality?: typeof transitLinesTable.$inferInsert.routeQuality;
 }
 
 router.get("/", async (req, res) => {
@@ -114,6 +117,7 @@ router.post("/", requireAdmin, async (req, res) => {
     verifiedAt: routePath ? new Date() : null,
     needsReviewReason: routePath ? null : "missing route geometry",
   }).returning();
+  invalidateGraph();
   res.json(row);
 });
 
@@ -173,6 +177,11 @@ router.post("/route", requireAdmin, async (req, res) => {
 });
 
 router.put("/:id", requireAdmin, async (req, res) => {
+  const [existing] = await db.select().from(transitLinesTable).where(eq(transitLinesTable.id, req.params.id as string));
+  if (!existing) return res.status(404).json({ error: "route not found" });
+  let publication;
+  try { publication = routeUpdateForPublication(existing, req.body); }
+  catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : "Invalid route" }); }
   const allowed: (keyof TransitLineUpdate)[] = [
     "lineNumber", "nameEn", "nameAr", "fromArea", "toArea", "viaStops",
     "routePath", "routeDirection", "governorate", "priceEgp", "frequencyMinutes", "hasFixedStops", "isActive", "transportTypeId",
@@ -190,12 +199,15 @@ router.put("/:id", requireAdmin, async (req, res) => {
       }
     }
   }
+  Object.assign(updates, publication);
   const [row] = await db.update(transitLinesTable).set(updates).where(eq(transitLinesTable.id, req.params.id as string)).returning();
-  res.json(row);
+  invalidateGraph();
+  return res.json(row);
 });
 
 router.delete("/:id", requireAdmin, async (req, res) => {
   await db.delete(transitLinesTable).where(eq(transitLinesTable.id, req.params.id as string));
+  invalidateGraph();
   res.json({ success: true });
 });
 
@@ -247,7 +259,8 @@ router.post("/:id/resnap", requireAdmin, async (req, res) => {
     .where(eq(transitLinesTable.id, line.id))
     .returning();
 
-  res.json({ success: true, roadMatched: true, provider: result.provider, route: updated });
+  invalidateGraph();
+  return res.json({ success: true, roadMatched: true, provider: result.provider, route: updated });
 });
 
 interface DuplicateGroup {
@@ -362,6 +375,7 @@ router.post("/dedupe", requireAdmin, async (req, res) => {
     }
   }
 
+  if (apply) invalidateGraph();
   res.json({
     applied: apply,
     groupsFound: groups.length,

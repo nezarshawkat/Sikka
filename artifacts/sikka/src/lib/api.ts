@@ -80,6 +80,10 @@ export async function apiFetch<T = unknown>(
     ...(options.headers as Record<string, string>),
   };
 
+  // These endpoints are public and needed before Clerk has initialized.
+  // Waiting for a session token here can stall startup route sync and ads.
+  const publicRequest = path.startsWith('/offline/') || path === '/app-config';
+  if (!publicRequest) {
   const adminToken = localStorage.getItem("sikka_admin_token");
   const sessionToken = localStorage.getItem("sikka_session_token");
   if (adminToken) {
@@ -97,6 +101,7 @@ export async function apiFetch<T = unknown>(
     }
   }
 
+  }
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
