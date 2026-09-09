@@ -61,7 +61,10 @@ android {
             if (releaseSigningReady) {
                 signingConfig signingConfigs.release
             }
-            minifyEnabled false
+            // Run R8 for release builds so app and dependency bytecode is
+            // optimized, obfuscated, and removed when it is unreachable.
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
