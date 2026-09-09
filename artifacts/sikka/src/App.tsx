@@ -7,6 +7,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { refreshLocalRouteSnapshot } from "@/lib/localRouteStore";
 import Index from "./pages/Index";
 import Splash from "./pages/Splash";
 import Auth from "./pages/Auth";
@@ -111,6 +112,28 @@ function ClerkQueryClientCacheInvalidator() {
 
 function AppRoutes() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const refresh = () => {
+      void refreshLocalRouteSnapshot();
+    };
+
+    refresh();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const onFocus = () => refresh();
+
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('online', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   return (
     <ClerkProvider

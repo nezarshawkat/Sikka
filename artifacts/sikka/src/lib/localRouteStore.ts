@@ -18,6 +18,21 @@ const STORE_NAME = 'snapshots';
 const SNAPSHOT_KEY = 'latest';
 export const ROUTES_UPDATED_EVENT = 'sikka:routes-updated';
 
+function revisionStamp(revision: string | undefined | null): number {
+  if (!revision) return 0;
+  const parts = revision.split('-');
+  const stamp = Number(parts[1]);
+  return Number.isFinite(stamp) ? stamp : 0;
+}
+
+export function pickLatestSnapshot(current: OfflineSnapshot | null | undefined, candidate: OfflineSnapshot | null | undefined): OfflineSnapshot | null {
+  if (!candidate) return current ?? null;
+  if (!current) return candidate;
+  const currentStamp = revisionStamp(current.revision) || Date.parse(current.generatedAt) || 0;
+  const candidateStamp = revisionStamp(candidate.revision) || Date.parse(candidate.generatedAt) || 0;
+  return candidateStamp >= currentStamp ? candidate : current;
+}
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
@@ -52,9 +67,8 @@ async function readSnapshot(): Promise<OfflineSnapshot> {
       tx.oncomplete = () => db.close();
     });
     if (stored?.snapshot && Array.isArray(stored.snapshot.lines)) {
-      const bundledTime = Date.parse(bundledSnapshot.generatedAt) || 0;
-      const cachedTime = Date.parse(stored.snapshot.generatedAt) || 0;
-      return bundledTime > cachedTime ? bundledSnapshot : stored.snapshot;
+      const latest = pickLatestSnapshot(bundledSnapshot, stored.snapshot);
+      return latest ?? bundledSnapshot;
     }
   } catch {
     // Use the bundled snapshot when IndexedDB is unavailable.
@@ -103,6 +117,22 @@ function announceUpdate(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(ROUTES_UPDATED_EVENT));
 }
 
+export async function refreshLocalRouteSnapshot(): Promise<OfflineSnapshot | null> {
+  const current = await readSnapshot();
+  try {
+    const refreshed = await apiFetch<OfflineSnapshot>(`/offline/snapshot?refresh=${Date.now()}`);
+    if (!refreshed || !Array.isArray(refreshed.lines)) return current;
+    const next = pickLatestSnapshot(current, refreshed);
+    if (next && next !== current) {
+      await writeSnapshot(next);
+      announceUpdate();
+    }
+    return next ?? current;
+  } catch {
+    return current;
+  }
+}
+
 export async function getLocalRouteCatalog<TLine, TType>(): Promise<{ routes: TLine[]; transportTypes: TType[] }> {
   const snapshot = await readSnapshot();
   return { routes: snapshot.lines.map(toUiLine) as TLine[], transportTypes: snapshot.types as TType[] };
@@ -125,7 +155,8 @@ export async function saveLocalTransitLine(route: Record<string, unknown>): Prom
     refreshedSnapshot = null;
   }
   if (refreshedSnapshot && Array.isArray(refreshedSnapshot.lines)) {
-    await writeSnapshot(refreshedSnapshot);
+    const latest = pickLatestSnapshot(await readSnapshot(), refreshedSnapshot) ?? refreshedSnapshot;
+    await writeSnapshot(latest);
     announceUpdate();
     return;
   }

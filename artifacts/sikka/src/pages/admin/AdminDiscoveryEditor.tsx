@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Map, { Layer, Marker, Source, type MapLayerMouseEvent } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { ArrowLeft, Check, CircleDot, Eye, EyeOff, LocateFixed, MapPin, MousePointer2, Pencil, Plus, Redo2, Route as RouteIcon, Search, Trash2, Undo2 } from 'lucide-react';
+import { ArrowLeft, Check, CircleDot, Eye, EyeOff, LocateFixed, MapPin, MousePointer2, Pencil, Plus, Redo2, Route as RouteIcon, Scissors, Search, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -19,14 +19,39 @@ type DiscoveryLine = {
   priceEgp: number; routeStatus: string; routePath: { type?: string; coordinates: LngLat[] } | null;
   routeQuality?: { metrics?: { contributingTraces?: Trace[]; roadMatched?: boolean; matchedReportCount?: number } } | null;
 };
-type Tool = 'select' | 'box-select' | 'draw' | 'insert' | 'erase';
+type Tool = 'select' | 'box-select' | 'draw' | 'insert' | 'erase' | 'cut';
 type RouteProvider = 'osrm' | 'valhalla';
 type CatalogStop = { nameAr?: string | null; nameEn?: string | null; latitude: number | string; longitude: number | string };
+type RouteCutPoint = { segmentIndex: number; fraction: number; point: LngLat };
 
 const finalColor = '#2563eb';
+const scissorsCursor = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3" fill="white" stroke="black" stroke-width="1.5"/><circle cx="6" cy="18" r="3" fill="white" stroke="black" stroke-width="1.5"/><path d="M8.6 7.5 21 2M8.6 16.5 21 22M8.5 8.5 15 15.5" fill="none" stroke="black" stroke-width="1.8" stroke-linecap="round"/></svg>')}" 5 5, crosshair`;
 
 function lineFeature(coordinates: LngLat[], color: string, opacity = 1) {
   return { type: 'Feature' as const, properties: { color, opacity }, geometry: { type: 'LineString' as const, coordinates } };
+}
+
+function nearestRoutePoint(route: LngLat[], point: LngLat): RouteCutPoint | null {
+  if (route.length < 2) return null;
+  let nearest: RouteCutPoint | null = null;
+  let closestDistance = Number.POSITIVE_INFINITY;
+  for (let segmentIndex = 0; segmentIndex < route.length - 1; segmentIndex += 1) {
+    const start = route[segmentIndex];
+    const end = route[segmentIndex + 1];
+    const deltaLongitude = end[0] - start[0];
+    const deltaLatitude = end[1] - start[1];
+    const segmentLengthSquared = deltaLongitude ** 2 + deltaLatitude ** 2;
+    const fraction = segmentLengthSquared === 0
+      ? 0
+      : Math.max(0, Math.min(1, ((point[0] - start[0]) * deltaLongitude + (point[1] - start[1]) * deltaLatitude) / segmentLengthSquared));
+    const projected: LngLat = [start[0] + fraction * deltaLongitude, start[1] + fraction * deltaLatitude];
+    const distance = (point[0] - projected[0]) ** 2 + (point[1] - projected[1]) ** 2;
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      nearest = { segmentIndex, fraction, point: projected };
+    }
+  }
+  return nearest;
 }
 
 export default function AdminDiscoveryEditor() {
@@ -36,6 +61,7 @@ export default function AdminDiscoveryEditor() {
   const [line, setLine] = useState<DiscoveryLine | null>(null);
   const [draft, setDraft] = useState<LngLat[]>([]);
   const [selectedPoints, setSelectedPoints] = useState<Set<number>>(new Set());
+  const [cutStart, setCutStart] = useState<RouteCutPoint | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number; longitude: number; latitude: number } | null>(null);
   const [history, setHistory] = useState<LngLat[][]>([]);
@@ -103,12 +129,38 @@ export default function AdminDiscoveryEditor() {
     commit([...draft.slice(0, segmentIndex + 1), point, ...draft.slice(segmentIndex + 1)]);
     setRouteDrawn(false);
   };
+  const cutBetweenPoints = (point: LngLat) => {
+    const cutPoint = nearestRoutePoint(draft, point);
+    if (!cutPoint) return;
+    if (!cutStart) {
+      setCutStart(cutPoint);
+      return;
+    }
+    const first = cutStart.segmentIndex + cutStart.fraction <= cutPoint.segmentIndex + cutPoint.fraction ? cutStart : cutPoint;
+    const second = first === cutStart ? cutPoint : cutStart;
+    const next = [
+      ...draft.slice(0, first.segmentIndex + 1),
+      first.point,
+      second.point,
+      ...draft.slice(second.segmentIndex + 1),
+    ];
+    const deduplicated = next.filter((item, index) => index === 0 || item[0] !== next[index - 1][0] || item[1] !== next[index - 1][1]);
+    if (deduplicated.length === draft.length && deduplicated.every((item, index) => item[0] === draft[index][0] && item[1] === draft[index][1])) {
+      toast.error('Choose two different points along the route');
+    } else {
+      commit(deduplicated);
+      setRouteDrawn(true);
+      toast.success('Route segment cut');
+    }
+    setCutStart(null);
+  };
   const undo = () => { const previous = history.at(-1); if (!previous) return; setFuture((old) => [draft, ...old]); setHistory((old) => old.slice(0, -1)); setDraft(previous); };
   const redo = () => { const next = future[0]; if (!next) return; setHistory((old) => [...old, draft]); setFuture((old) => old.slice(1)); setDraft(next); };
   const onMapClick = (event: MapLayerMouseEvent) => {
     const point: LngLat = [event.lngLat.lng, event.lngLat.lat];
     if (tool === 'draw') commit([...draft, point]);
     if (tool === 'insert') insertPoint(point);
+    if (tool === 'cut') cutBetweenPoints(point);
   };
   const onMapMouseDown = (event: MapLayerMouseEvent) => {
     if (tool !== 'box-select' || event.originalEvent.button !== 0) return;
@@ -270,7 +322,7 @@ export default function AdminDiscoveryEditor() {
       </aside>
 
       <main className="relative min-w-0 flex-1">
-        <Map key={`${line.id}-${selectedTrace}`} initialViewState={bounds ? { bounds, fitBoundsOptions: { padding: 80 } } : { longitude: 31.2357, latitude: 30.0444, zoom: 11 }} onClick={onMapClick} onMouseDown={onMapMouseDown} onMouseMove={onMapMouseMove} onMouseUp={onMapMouseUp} dragPan={tool !== 'box-select'} style={{ width: '100%', height: '100%' }} mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT} cursor={tool === 'draw' ? 'crosshair' : tool === 'erase' ? 'not-allowed' : tool === 'box-select' ? 'crosshair' : 'grab'}>
+        <Map key={`${line.id}-${selectedTrace}`} initialViewState={bounds ? { bounds, fitBoundsOptions: { padding: 80 } } : { longitude: 31.2357, latitude: 30.0444, zoom: 11 }} onClick={onMapClick} onMouseDown={onMapMouseDown} onMouseMove={onMapMouseMove} onMouseUp={onMapMouseUp} dragPan={tool !== 'box-select' && tool !== 'cut'} style={{ width: '100%', height: '100%' }} mapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT} cursor={tool === 'cut' ? scissorsCursor : tool === 'draw' ? 'crosshair' : tool === 'erase' ? 'not-allowed' : tool === 'box-select' ? 'crosshair' : 'grab'}>
           <Source id="evidence" type="geojson" data={evidence}><Layer id="evidence-line" type="line" paint={{ 'line-color': ['get', 'color'], 'line-width': 4, 'line-opacity': ['get', 'opacity'] }} layout={{ 'line-cap': 'round', 'line-join': 'round' }} /></Source>
           <Source id="final-route" type="geojson" data={finalRoute}><Layer id="final-route-line" type="line" paint={{ 'line-color': finalColor, 'line-width': 6, 'line-opacity': .96 }} layout={{ 'line-cap': 'round', 'line-join': 'round' }} /></Source>
           {draft.map((point, index) => <Marker key={`${point.join(',')}-${index}`} longitude={point[0]} latitude={point[1]} draggable={tool === 'select'} onDragEnd={(event) => commit(draft.map((item, itemIndex) => itemIndex === index ? [event.lngLat.lng, event.lngLat.lat] : item))}>
@@ -285,9 +337,10 @@ export default function AdminDiscoveryEditor() {
           <Button size="icon" variant={tool === 'draw' ? 'default' : 'ghost'} title="Draw route points on the map" onClick={() => setTool('draw')}><Pencil className="h-4 w-4" /></Button>
           <Button size="icon" variant={tool === 'insert' ? 'default' : 'ghost'} title="Insert a point into the nearest route segment" onClick={() => setTool('insert')}><Plus className="h-4 w-4" /></Button>
           <Button size="icon" variant={tool === 'erase' ? 'destructive' : 'ghost'} title="Click a route point to erase it" onClick={() => setTool('erase')}><Trash2 className="h-4 w-4" /></Button>
+          <Button size="icon" variant={tool === 'cut' ? 'default' : 'ghost'} title="Cut the route between two map points" onClick={() => { setTool('cut'); setCutStart(null); }}><Scissors className="h-4 w-4" /></Button>
           <div className="border-t pt-2"><Button size="icon" variant="ghost" disabled={!history.length} title="Undo" onClick={undo}><Undo2 className="h-4 w-4" /></Button><Button size="icon" variant="ghost" disabled={!future.length} title="Redo" onClick={redo}><Redo2 className="h-4 w-4" /></Button></div>
         </div>
-        <div className="absolute top-3 left-16 rounded-full border bg-card/95 px-3 py-2 text-xs shadow backdrop-blur">{tool === 'draw' ? 'Click map to add a point' : tool === 'insert' ? 'Click between route points to insert a point' : tool === 'erase' ? 'Click a blue point to erase it' : tool === 'box-select' ? 'Drag a blue rectangle around points to select them' : 'Drag blue points to refine route'}</div>
+        <div className="absolute top-3 left-16 rounded-full border bg-card/95 px-3 py-2 text-xs shadow backdrop-blur">{tool === 'draw' ? 'Click map to add a point' : tool === 'insert' ? 'Click between route points to insert a point' : tool === 'erase' ? 'Click a blue point to erase it' : tool === 'cut' ? (cutStart ? 'Click the second point to cut between both points' : 'Click the first point of the route segment to cut') : tool === 'box-select' ? 'Drag a blue rectangle around points to select them' : 'Drag blue points to refine route'}</div>
         <div className="absolute right-3 top-3 flex gap-2"><Button size="sm" variant="outline" className="bg-card/95" disabled={!selectedPoints.size} onClick={() => commit(draft.filter((_, index) => !selectedPoints.has(index)))}><Trash2 className="mr-1 h-3.5 w-3.5" /> Remove selected{selectedPoints.size ? ` (${selectedPoints.size})` : ''}</Button><Button size="sm" variant="outline" className="bg-card/95" onClick={() => { if (draft.length) commit(draft.slice(0, -1)); }}><Trash2 className="mr-1 h-3.5 w-3.5" /> Remove last</Button><Button size="sm" variant="outline" className="bg-card/95" onClick={() => setTool('draw')}><Plus className="mr-1 h-3.5 w-3.5" /> Add points</Button></div>
 
         <section className="absolute bottom-3 left-3 w-[min(22rem,calc(100%-1.5rem))] rounded-xl border bg-card/95 p-3 shadow-lg backdrop-blur">

@@ -23,13 +23,21 @@ export async function getMobileAppConfig(): Promise<MobileAppConfig> {
 }
 
 export async function showConfiguredAd(placement: AdPlacement): Promise<void> {
+  let config = { ...DEFAULT_APP_CONFIG };
+
   try {
-    const config = await getMobileAppConfig();
-    const placementEnabled = placement === "location_loaded"
-      ? config.showAdAfterLocation
-      : config.showAdAfterTripReview;
-    if (config.adsEnabled && placementEnabled) await showInterstitialAd(placement);
+    config = await getMobileAppConfig();
   } catch {
-    // Advertising must never block location use or review submission.
+    // The app should still show a single ad when the server config is temporarily
+    // unavailable; default policy keeps the release experience working while
+    // preserving the ability to disable ads centrally when the API is reachable.
+  }
+
+  const placementEnabled = placement === "location_loaded"
+    ? config.showAdAfterLocation
+    : config.showAdAfterTripReview;
+
+  if (config.adsEnabled && placementEnabled) {
+    await showInterstitialAd(placement);
   }
 }
