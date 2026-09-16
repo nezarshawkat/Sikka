@@ -163,6 +163,10 @@ async function refreshSnapshot(force: boolean): Promise<OfflineSnapshot | null> 
     }
     const refreshed = await apiFetch<OfflineSnapshot>('/offline/snapshot', { cache: 'no-store', signal: controller.signal });
     if (!isValidSnapshot(refreshed)) return current;
+    if (!refreshed.lines.length && bundledSnapshot.lines.length && (!current.authoritative || !current.lines.length)) {
+      // Do not let an unseeded database erase the routes shipped with the app.
+      return current.lines.length ? current : bundledSnapshot;
+    }
     const next = { ...refreshed, authoritative: true };
     await writeSnapshot(next);
     lastCheckedAt = Date.now();
