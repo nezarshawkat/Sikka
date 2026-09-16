@@ -97,6 +97,10 @@ export async function readSnapshot(): Promise<OfflineSnapshot> {
     });
     if (memorySnapshot) return memorySnapshot;
     if (isValidSnapshot(stored?.snapshot)) {
+      if (!stored.snapshot.lines.length && bundledSnapshot.lines.length) {
+        memorySnapshot = bundledSnapshot;
+        return memorySnapshot;
+      }
       const latest = pickLatestSnapshot(bundledSnapshot, stored.snapshot);
       memorySnapshot = latest ?? bundledSnapshot;
       return memorySnapshot;
