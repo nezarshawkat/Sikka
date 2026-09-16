@@ -8,6 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --max-old-space-size=1536 --enable-source-maps ./dist/index.mjs",
     "merge:secondary": "node --enable-source-maps ./dist/scripts/mergeSecondaryDatabase.mjs",
+    "sync:routes-to-secondary": "node --enable-source-maps ./dist/scripts/mergeSecondaryDatabase.mjs --primary-to-secondary",
     "seed:stops": "node --enable-source-maps ./dist/scripts/importStops.mjs",
     "enrich:bus-paths": "node --enable-source-maps ./dist/scripts/enrichBusPaths.mjs",
     "enrich-routes": "node --enable-source-maps ./dist/scripts/enrichBusPaths.mjs",

@@ -6,6 +6,7 @@ const primaryUrl = (
   process.env.DATABASE_URL_OVERRIDE?.trim() || process.env.DATABASE_URL?.trim()
 );
 const secondaryUrl = process.env.DATABASE_URL_2?.trim();
+const primaryToSecondary = process.argv.includes("--primary-to-secondary");
 
 if (!primaryUrl || !secondaryUrl) {
   throw new Error(
@@ -127,14 +128,28 @@ async function ensureAdmin(destination: pg.PoolClient): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const source = new Client({ connectionString: secondaryUrl });
-  const destination = new Client({ connectionString: primaryUrl });
+  const source = new Client({
+    connectionString: primaryToSecondary ? primaryUrl : secondaryUrl,
+  });
+  const destination = new Client({
+    connectionString: primaryToSecondary ? secondaryUrl : primaryUrl,
+  });
 
   await source.connect();
   await destination.connect();
 
   try {
-    const sourceTables = await getTables(source);
+    const allSourceTables = await getTables(source);
+    const routeTables = new Set([
+      "public.transport_types",
+      "public.transit_lines",
+      "public.route_repair_anchors",
+      "public.route_geometry_versions",
+      "public.route_repair_segments",
+    ]);
+    const sourceTables = primaryToSecondary
+      ? allSourceTables.filter((table) => routeTables.has(tableKey(table)))
+      : allSourceTables;
     const destinationTables = new Set((await getTables(destination)).map(tableKey));
     const missingTables = sourceTables.filter((table) => !destinationTables.has(tableKey(table)));
     if (missingTables.length > 0) {
@@ -154,7 +169,9 @@ async function main(): Promise<void> {
       }
       await ensureAdmin(destination);
       await destination.query("commit");
-      console.log(`[merge] committed ${copied} rows and ensured the Nezar admin account.`);
+      console.log(
+        `[merge] committed ${copied} rows (${primaryToSecondary ? "primary to secondary routes" : "secondary to primary"}).`,
+      );
     } catch (error) {
       await destination.query("rollback");
       throw error;

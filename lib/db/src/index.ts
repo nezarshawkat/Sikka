@@ -22,7 +22,6 @@ const secondaryPool = secondaryConnectionString
   : undefined;
 
 let activeTarget: DatabaseTarget = "primary";
-let lastPrimaryProbeAt = 0;
 let lastMonthKey = getMonthKey();
 
 function getMonthKey(date = new Date()): string {
@@ -59,11 +58,9 @@ async function probePrimary(): Promise<boolean> {
 async function prepareTarget(): Promise<void> {
   const currentMonthKey = getMonthKey();
   const monthChanged = currentMonthKey !== lastMonthKey;
-  const probeDue = Date.now() - lastPrimaryProbeAt >= 60_000;
 
-  if (monthChanged || (activeTarget === "secondary" && probeDue)) {
+  if (monthChanged) {
     lastMonthKey = currentMonthKey;
-    lastPrimaryProbeAt = Date.now();
     await probePrimary();
   }
 }
