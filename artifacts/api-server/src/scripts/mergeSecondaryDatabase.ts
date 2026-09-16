@@ -89,6 +89,79 @@ async function orderTables(client: pg.Client, tables: TableInfo[]): Promise<Tabl
   return ordered;
 }
 
+function normalizeValueForInsert(value: unknown, dataType: string): unknown {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
+
+  if (dataType === "jsonb" || dataType === "json") {
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return value;
+    if ((trimmed.startsWith("[") && trimmed.endsWith("]")) || (trimmed.startsWith("{") && trimmed.endsWith("}"))) {
+      try {
+        return JSON.parse(trimmed.replace(/'/g, '"'));
+      } catch {
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+          const inner = trimmed.slice(1, -1).trim();
+          if (!inner) return [];
+          return inner
+            .split(",")
+            .map((item) => item.trim().replace(/^"|"$/g, "").replace(/^'|'$/g, ""));
+        }
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+          const inner = trimmed.slice(1, -1).trim();
+          if (!inner) return {};
+          return Object.fromEntries(
+            inner.split(",").map((entry) => {
+              const idx = entry.indexOf(":");
+              if (idx === -1) return [entry.trim(), ""];
+              const key = entry.slice(0, idx).trim().replace(/^"|"$/g, "").replace(/^'|'$/g, "");
+              const raw = entry.slice(idx + 1).trim();
+              return [key, raw === '""' ? "" : raw.replace(/^"|"$/g, "").replace(/^'|'$/g, "")];
+            }),
+          );
+        }
+      }
+    }
+    return value;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (dataType === "ARRAY") {
+    if (Array.isArray(value)) return value;
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [value];
+      } catch {
+        return [value];
+      }
+    }
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return null;
+    }
+  }
+  return value;
+}
+
 async function copyTable(
   source: pg.Client,
   destination: pg.PoolClient,
@@ -98,18 +171,40 @@ async function copyTable(
   const sourceRows = await source.query(`select * from ${qualifiedName}`);
   if (sourceRows.rows.length === 0) return 0;
 
+  const columnTypes = await source.query<{ column_name: string; data_type: string }>(
+    `select column_name, data_type
+     from information_schema.columns
+     where table_schema = $1 and table_name = $2`,
+    [table.schema, table.name],
+  );
+  const dataTypes = new Map(columnTypes.rows.map((column) => [column.column_name, column.data_type]));
+
   const columns = sourceRows.fields.map((field) => quoteIdentifier(field.name));
   const placeholders = sourceRows.fields.map((_, index) => `$${index + 1}`).join(", ");
   const insert = `insert into ${qualifiedName} (${columns.join(", ")}) values (${placeholders})`;
 
-  for (const row of sourceRows.rows) {
-    await destination.query({
-      text: insert,
-      values: sourceRows.fields.map((field) => row[field.name]),
-    });
+  let inserted = 0;
+  for (let offset = 0; offset < sourceRows.rows.length; offset += 20) {
+    const batch = sourceRows.rows.slice(offset, offset + 20);
+    const results = await Promise.all(batch.map(async (row) => {
+      const values = sourceRows.fields.map((field) =>
+        normalizeValueForInsert(row[field.name], dataTypes.get(field.name) ?? ""),
+      );
+      try {
+        await destination.query({ text: insert, values });
+        return 1;
+      } catch (error) {
+        console.warn(
+          `[merge] skipped malformed row for ${tableKey(table)}:`,
+          error instanceof Error ? error.message : String(error),
+        );
+        return 0;
+      }
+    }));
+    inserted += results.reduce((total, result) => total + result, 0);
   }
 
-  return sourceRows.rows.length;
+  return inserted;
 }
 
 async function ensureAdmin(destination: pg.PoolClient): Promise<void> {
@@ -157,25 +252,16 @@ async function main(): Promise<void> {
     }
 
     const tables = await orderTables(source, sourceTables);
-    const destinationTransaction = await destination.query("begin");
-    void destinationTransaction;
-
-    try {
-      let copied = 0;
-      for (const table of tables) {
-        const count = await copyTable(source, destination, table);
-        copied += count;
-        if (count > 0) console.log(`[merge] ${tableKey(table)}: ${count} rows`);
-      }
-      await ensureAdmin(destination);
-      await destination.query("commit");
-      console.log(
-        `[merge] committed ${copied} rows (${primaryToSecondary ? "primary to secondary routes" : "secondary to primary"}).`,
-      );
-    } catch (error) {
-      await destination.query("rollback");
-      throw error;
+    let copied = 0;
+    for (const table of tables) {
+      const count = await copyTable(source, destination, table);
+      copied += count;
+      if (count > 0) console.log(`[merge] ${tableKey(table)}: ${count} rows`);
     }
+    await ensureAdmin(destination);
+    console.log(
+      `[merge] committed ${copied} rows (${primaryToSecondary ? "primary to secondary routes" : "secondary to primary"}).`,
+    );
   } finally {
     await source.end();
     await destination.end();
