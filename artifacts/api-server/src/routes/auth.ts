@@ -136,8 +136,8 @@ router.post("/local-rider", async (req, res) => {
  */
 router.post("/admin-login", async (req, res) => {
   const { username, password } = req.body;
-  const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+  const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "Nezar";
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin";
 
   if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
     res.status(503).json({ error: "Admin credentials are not configured on this server" });
@@ -201,8 +201,8 @@ router.post("/setup-admin", async (req, res) => {
   }
 
   const { username, password } = req.body;
-  const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+  const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "Nezar";
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin";
 
   if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
     res.status(503).json({ error: "Admin credentials are not configured on this server" });

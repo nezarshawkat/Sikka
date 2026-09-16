@@ -36,6 +36,7 @@ async function buildAll() {
       path.resolve(artifactDir, "src/scripts/prepareDeviceRouteSeed.ts"),
       path.resolve(artifactDir, "src/scripts/seedPreparedDeviceRoutes.ts"),
       path.resolve(artifactDir, "src/scripts/applyPreparedDeviceRouteSeedToBackend.ts"),
+      path.resolve(artifactDir, "src/scripts/mergeSecondaryDatabase.ts"),
     ],
     platform: "node",
     bundle: true,
