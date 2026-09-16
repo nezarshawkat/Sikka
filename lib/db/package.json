@@ -9,7 +9,8 @@
   },
   "scripts": {
     "push": "drizzle-kit push --config ./drizzle.config.ts",
-    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts"
+    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts",
+    "push:secondary": "sh -c 'DATABASE_URL_OVERRIDE=\"${DATABASE_URL_2:?Set DATABASE_URL_2}\" pnpm run push'"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",
