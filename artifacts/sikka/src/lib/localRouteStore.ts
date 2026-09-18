@@ -17,6 +17,7 @@ const bundledSnapshot = bundledSnapshotRaw as unknown as OfflineSnapshot;
 const DB_NAME = 'sikka-offline';
 const STORE_NAME = 'snapshots';
 const SNAPSHOT_KEY = 'latest';
+const ROUTE_SYNC_MIN_INTERVAL_MS = 10 * 60 * 1000;
 export const ROUTES_UPDATED_EVENT = 'sikka:routes-updated';
 let memorySnapshot: OfflineSnapshot | null = null;
 let refreshInFlight: Promise<OfflineSnapshot | null> | null = null;
@@ -51,6 +52,26 @@ export function pickLatestSnapshot(current: OfflineSnapshot | null | undefined, 
   const currentStamp = revisionStamp(current.revision) || Date.parse(current.generatedAt) || 0;
   const candidateStamp = revisionStamp(candidate.revision) || Date.parse(candidate.generatedAt) || 0;
   return candidateStamp >= currentStamp ? candidate : current;
+}
+
+export function mergeSnapshotUpdates(current: OfflineSnapshot, update: OfflineSnapshot): OfflineSnapshot {
+  const linesById = new Map(current.lines.map((line) => [line.id, line]));
+  for (const line of update.lines) {
+    linesById.set(line.id, {
+      ...linesById.get(line.id),
+      ...line,
+    });
+  }
+
+  return {
+    ...current,
+    generatedAt: update.generatedAt || new Date().toISOString(),
+    revision: update.revision || current.revision,
+    types: update.types.length ? update.types : current.types,
+    lines: [...linesById.values()],
+    heatmaps: Array.isArray(update.heatmaps) ? update.heatmaps : current.heatmaps,
+    authoritative: true,
+  };
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -101,8 +122,7 @@ export async function readSnapshot(): Promise<OfflineSnapshot> {
         memorySnapshot = bundledSnapshot;
         return memorySnapshot;
       }
-      const latest = pickLatestSnapshot(bundledSnapshot, stored.snapshot);
-      memorySnapshot = latest ?? bundledSnapshot;
+      memorySnapshot = stored.snapshot;
       return memorySnapshot;
     }
   } catch {
@@ -158,25 +178,47 @@ async function refreshSnapshot(force: boolean): Promise<OfflineSnapshot | null> 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12_000);
   try {
-    if (!force) {
-      const manifest = await apiFetch<{ revision: string }>('/offline/manifest', { cache: 'no-store', signal: controller.signal });
-      if (current.authoritative && current.revision === manifest.revision) {
+    const manifest = await apiFetch<{ revision: string; deltaUrl?: string }>('/offline/manifest', { cache: 'no-store', signal: controller.signal });
+    if (!force && current.authoritative && current.revision === manifest.revision) {
+      lastCheckedAt = Date.now();
+      return current;
+    }
+
+    const deltaPath = manifest.deltaUrl || '/api/offline/delta';
+    const deltaUrl = deltaPath.replace(/^\/api/, '');
+    const refreshed = await apiFetch<OfflineSnapshot>(
+      `${deltaUrl}?sinceRevision=${encodeURIComponent(current.revision)}`,
+      { cache: 'no-store', signal: controller.signal },
+    );
+    if (!isValidSnapshot(refreshed)) return current;
+
+    const next = mergeSnapshotUpdates(current, refreshed);
+    if (!next.lines.length && bundledSnapshot.lines.length) {
+      // Do not let an unseeded database erase the routes shipped with the app.
+      const fallback = { ...bundledSnapshot, authoritative: true };
+      await writeSnapshot(fallback);
+      lastCheckedAt = Date.now();
+      return fallback;
+    }
+
+    await writeSnapshot(next);
+    lastCheckedAt = Date.now();
+    if (current.revision !== next.revision || !current.authoritative || refreshed.lines.length > 0) announceUpdate();
+    return next;
+  } catch {
+    if (force) {
+      try {
+        const refreshed = await apiFetch<OfflineSnapshot>('/offline/snapshot', { cache: 'no-store', signal: controller.signal });
+        if (!isValidSnapshot(refreshed)) return current;
+        const next = mergeSnapshotUpdates(current, refreshed);
+        await writeSnapshot(next);
         lastCheckedAt = Date.now();
+        if (current.revision !== next.revision || !current.authoritative || refreshed.lines.length > 0) announceUpdate();
+        return next;
+      } catch {
         return current;
       }
     }
-    const refreshed = await apiFetch<OfflineSnapshot>('/offline/snapshot', { cache: 'no-store', signal: controller.signal });
-    if (!isValidSnapshot(refreshed)) return current;
-    if (!refreshed.lines.length && bundledSnapshot.lines.length && (!current.authoritative || !current.lines.length)) {
-      // Do not let an unseeded database erase the routes shipped with the app.
-      return current.lines.length ? current : bundledSnapshot;
-    }
-    const next = { ...refreshed, authoritative: true };
-    await writeSnapshot(next);
-    lastCheckedAt = Date.now();
-    if (current.revision !== next.revision || !current.authoritative) announceUpdate();
-    return next;
-  } catch {
     return current;
   } finally { clearTimeout(timer); }
 }
@@ -186,7 +228,7 @@ export function refreshLocalRouteSnapshot(force = false): Promise<OfflineSnapsho
     // An admin save must not join a request that started before the mutation.
     return force ? refreshInFlight.then(() => refreshLocalRouteSnapshot(true)) : refreshInFlight;
   }
-  if (!force && Date.now() - lastCheckedAt < 15_000) return readSnapshot();
+  if (!force && Date.now() - lastCheckedAt < ROUTE_SYNC_MIN_INTERVAL_MS) return readSnapshot();
   refreshInFlight = refreshSnapshot(force).finally(() => { refreshInFlight = null; });
   return refreshInFlight;
 }

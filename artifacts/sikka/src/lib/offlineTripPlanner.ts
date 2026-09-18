@@ -1,6 +1,6 @@
 // Offline route planning uses the same synchronized store as the dashboard.
 import bundledSnapshotRaw from '@/data/bundledSnapshot.json';
-import { readSnapshot, refreshLocalRouteSnapshot } from '@/lib/localRouteStore';
+import { readSnapshot } from '@/lib/localRouteStore';
 
 type LngLat = [number, number];
 type Coord = { lat: number; lng: number };
@@ -960,9 +960,10 @@ async function makePlan(
 }
 
 async function getSnapshot(): Promise<OfflineSnapshot | null> {
-  // If startup/resume is already syncing, planning waits for that bounded
-  // request. Offline or failed requests retain the last usable route set.
-  const snapshot = await refreshLocalRouteSnapshot() ?? await readSnapshot();
+  // Trip planning is strictly local. Startup/resume sync may update this
+  // snapshot in the background, but a rider's search never waits on route DB
+  // traffic or replaces the saved phone catalog mid-plan.
+  const snapshot = await readSnapshot();
   return snapshot as unknown as OfflineSnapshot;
 }
 

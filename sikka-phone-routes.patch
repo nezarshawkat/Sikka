@@ -1,0 +1,266 @@
+diff --git a/artifacts/sikka/src/App.tsx b/artifacts/sikka/src/App.tsx
+index 313b962..6f5e304 100644
+--- a/artifacts/sikka/src/App.tsx
++++ b/artifacts/sikka/src/App.tsx
+@@ -124,7 +124,7 @@ function AppRoutes() {
+     const adTimer = window.setTimeout(preloadInterstitialAd, 500);
+     const syncTimer = window.setInterval(() => {
+       if (document.visibilityState === 'visible') refresh();
+-    }, 30_000);
++    }, 30 * 60 * 1000);
+     const onVisible = () => {
+       if (document.visibilityState === 'visible') refresh();
+     };
+diff --git a/artifacts/sikka/src/lib/localRouteStore.test.ts b/artifacts/sikka/src/lib/localRouteStore.test.ts
+index a4765c2..25f96ad 100644
+--- a/artifacts/sikka/src/lib/localRouteStore.test.ts
++++ b/artifacts/sikka/src/lib/localRouteStore.test.ts
+@@ -6,6 +6,7 @@ vi.mock('@/lib/api', () => ({ apiFetch }));
+ const type = { id: 'bus', nameEn: 'Bus', nameAr: 'Bus', icon: 'bus', color: '#123456', category: 'public', governmentType: 'government', averageSpeedKmh: 30, basePriceEgp: 5, pricePerKmEgp: 0 };
+ const line = { id: 'accepted', transportTypeId: 'bus', nameEn: 'Published route', nameAr: 'Published route', lineNumber: '1', fromArea: 'A', toArea: 'B', governorate: 'Cairo', routeStatus: 'active', dataSource: 'discovery', viaStops: [], priceEgp: 9, frequencyMinutes: 5, hasFixedStops: false, path: [[31.23, 30.04], [31.24, 30.04], [31.25, 30.04], [31.26, 30.04]] };
+ const snapshot = (revision = '3-200-new', lines = [line]) => ({ schemaVersion: 3, generatedAt: '2026-09-09T00:00:00Z', revision, types: [type], lines });
++const manifest = (revision = '3-200-new') => ({ schemaVersion: 3, generatedAt: '2026-09-09T00:00:00Z', revision, deltaUrl: '/api/offline/delta' });
+ 
+ beforeEach(() => {
+   vi.resetModules();
+@@ -16,14 +17,20 @@ beforeEach(() => {
+ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+ 
+ describe('route synchronization', () => {
+-  it('accepts the server after deletion lowers its timestamp, including an empty catalog', async () => {
++  it('merges server additions and updates without erasing saved phone routes', async () => {
+     const store = await import('./localRouteStore');
++    apiFetch.mockResolvedValueOnce(manifest('3-900-old'));
+     apiFetch.mockResolvedValueOnce(snapshot('3-900-old'));
+     await store.refreshLocalRouteSnapshot(true);
+-    apiFetch.mockResolvedValueOnce(snapshot('3-100-deleted', []));
++    apiFetch.mockResolvedValueOnce(manifest('3-100-empty'));
++    apiFetch.mockResolvedValueOnce(snapshot('3-100-empty', []));
+     await store.refreshLocalRouteSnapshot(true);
+-    expect((await store.getLocalRouteCatalog()).routes).toEqual([]);
+-    expect((await store.readSnapshot()).revision).toBe('3-100-deleted');
++    expect((await store.getLocalRouteCatalog()).routes).toHaveLength(1);
++    expect((await store.readSnapshot()).revision).toBe('3-100-empty');
++    apiFetch.mockResolvedValueOnce(manifest('3-950-added'));
++    apiFetch.mockResolvedValueOnce(snapshot('3-950-added', [{ ...line, id: 'new-route', lineNumber: '2' }]));
++    await store.refreshLocalRouteSnapshot(true);
++    expect((await store.readSnapshot()).lines.map(route => route.id).sort()).toEqual(['accepted', 'new-route']);
+   });
+ 
+   it('keeps a downloaded snapshot ahead of a newer bundled timestamp', async () => {
+@@ -34,10 +41,12 @@ describe('route synchronization', () => {
+ 
+   it('keeps the last working routes when the network fails or the payload is malformed', async () => {
+     const store = await import('./localRouteStore');
++    apiFetch.mockResolvedValueOnce(manifest());
+     apiFetch.mockResolvedValueOnce(snapshot());
+     await store.refreshLocalRouteSnapshot(true);
+     apiFetch.mockRejectedValueOnce(new Error('offline'));
+     await store.refreshLocalRouteSnapshot(true);
++    apiFetch.mockResolvedValueOnce(manifest('3-201-bad'));
+     apiFetch.mockResolvedValueOnce({ ...snapshot(), types: null });
+     await store.refreshLocalRouteSnapshot(true);
+     expect((await store.readSnapshot()).lines[0].id).toBe('accepted');
+@@ -46,13 +55,14 @@ describe('route synchronization', () => {
+   it('checks only the manifest when data is unchanged', async () => {
+     vi.useFakeTimers();
+     const store = await import('./localRouteStore');
++    apiFetch.mockResolvedValueOnce(manifest());
+     apiFetch.mockResolvedValueOnce(snapshot());
+     await store.refreshLocalRouteSnapshot(true);
+-    vi.advanceTimersByTime(30_000);
++    vi.advanceTimersByTime(10 * 60 * 1000);
+     apiFetch.mockResolvedValueOnce({ revision: '3-200-new' });
+     await store.refreshLocalRouteSnapshot();
+-    expect(apiFetch).toHaveBeenCalledTimes(2);
+-    expect(apiFetch.mock.calls[1][0]).toBe('/offline/manifest');
++    expect(apiFetch).toHaveBeenCalledTimes(3);
++    expect(apiFetch.mock.calls[2][0]).toBe('/offline/manifest');
+   });
+ 
+   it('remains usable when Android WebView denies IndexedDB storage', async () => {
+@@ -62,6 +72,7 @@ describe('route synchronization', () => {
+     vi.stubGlobal('window', { indexedDB, dispatchEvent: vi.fn(), setTimeout, clearTimeout });
+     const store = await import('./localRouteStore');
+     await expect(store.readSnapshot()).resolves.toHaveProperty('lines');
++    apiFetch.mockResolvedValueOnce(manifest());
+     apiFetch.mockResolvedValueOnce(snapshot());
+     await store.refreshLocalRouteSnapshot(true);
+     expect((await store.readSnapshot()).lines[0].id).toBe('accepted');
+@@ -70,26 +81,32 @@ describe('route synchronization', () => {
+ 
+   it('makes an edit visible to the actual on-device trip planner', async () => {
+     const store = await import('./localRouteStore');
++    apiFetch.mockResolvedValueOnce(manifest());
+     apiFetch.mockResolvedValueOnce(snapshot());
+     await store.refreshLocalRouteSnapshot(true);
+     const { planTripOnDevice } = await import('./offlineTripPlanner');
+     const request = { startLat: 30.04, startLng: 31.23, endLat: 30.04, endLng: 31.26, tripType: 'economic' };
++    apiFetch.mockReset();
+     const before = await planTripOnDevice(request);
+     expect(before?.segments.some(segment => segment.line_id === 'accepted')).toBe(true);
++    expect(apiFetch).not.toHaveBeenCalled();
++    apiFetch.mockResolvedValueOnce(manifest('3-201-edited'));
+     apiFetch.mockResolvedValueOnce(snapshot('3-201-edited', [{ ...line, priceEgp: 17, nameEn: 'Edited route' }]));
+     await store.refreshLocalRouteSnapshot(true);
+     const after = await planTripOnDevice(request);
+     expect(after?.snapshot_revision).toBe('3-201-edited');
+     expect(after?.segments.find(segment => segment.line_id === 'accepted')?.cost_egp)
+       .toBeGreaterThan(before!.segments.find(segment => segment.line_id === 'accepted')!.cost_egp);
++    apiFetch.mockResolvedValueOnce(manifest('3-100-removed'));
+     apiFetch.mockResolvedValueOnce(snapshot('3-100-removed', []));
+     await store.refreshLocalRouteSnapshot(true);
+     const removed = await planTripOnDevice(request);
+-    expect(removed?.segments.some(segment => segment.line_id === 'accepted') ?? false).toBe(false);
++    expect(removed?.segments.some(segment => segment.line_id === 'accepted') ?? false).toBe(true);
+   });
+ 
+   it('does not publish pending or rejected discovery routes through local fallback', async () => {
+     const store = await import('./localRouteStore');
++    apiFetch.mockResolvedValueOnce(manifest('3-300'));
+     apiFetch.mockResolvedValueOnce(snapshot('3-300', [{ ...line, routeStatus: 'rejected' }]));
+     await store.refreshLocalRouteSnapshot(true);
+     const { planTripOnDevice } = await import('./offlineTripPlanner');
+diff --git a/artifacts/sikka/src/lib/localRouteStore.ts b/artifacts/sikka/src/lib/localRouteStore.ts
+index 52a678a..a76b09a 100644
+--- a/artifacts/sikka/src/lib/localRouteStore.ts
++++ b/artifacts/sikka/src/lib/localRouteStore.ts
+@@ -17,6 +17,7 @@ const bundledSnapshot = bundledSnapshotRaw as unknown as OfflineSnapshot;
+ const DB_NAME = 'sikka-offline';
+ const STORE_NAME = 'snapshots';
+ const SNAPSHOT_KEY = 'latest';
++const ROUTE_SYNC_MIN_INTERVAL_MS = 10 * 60 * 1000;
+ export const ROUTES_UPDATED_EVENT = 'sikka:routes-updated';
+ let memorySnapshot: OfflineSnapshot | null = null;
+ let refreshInFlight: Promise<OfflineSnapshot | null> | null = null;
+@@ -53,6 +54,26 @@ export function pickLatestSnapshot(current: OfflineSnapshot | null | undefined,
+   return candidateStamp >= currentStamp ? candidate : current;
+ }
+ 
++export function mergeSnapshotUpdates(current: OfflineSnapshot, update: OfflineSnapshot): OfflineSnapshot {
++  const linesById = new Map(current.lines.map((line) => [line.id, line]));
++  for (const line of update.lines) {
++    linesById.set(line.id, {
++      ...linesById.get(line.id),
++      ...line,
++    });
++  }
++
++  return {
++    ...current,
++    generatedAt: update.generatedAt || new Date().toISOString(),
++    revision: update.revision || current.revision,
++    types: update.types.length ? update.types : current.types,
++    lines: [...linesById.values()],
++    heatmaps: Array.isArray(update.heatmaps) ? update.heatmaps : current.heatmaps,
++    authoritative: true,
++  };
++}
++
+ function openDb(): Promise<IDBDatabase> {
+   return new Promise((resolve, reject) => {
+     const request = indexedDB.open(DB_NAME, 1);
+@@ -101,8 +122,7 @@ export async function readSnapshot(): Promise<OfflineSnapshot> {
+         memorySnapshot = bundledSnapshot;
+         return memorySnapshot;
+       }
+-      const latest = pickLatestSnapshot(bundledSnapshot, stored.snapshot);
+-      memorySnapshot = latest ?? bundledSnapshot;
++      memorySnapshot = stored.snapshot;
+       return memorySnapshot;
+     }
+   } catch {
+@@ -158,25 +178,47 @@ async function refreshSnapshot(force: boolean): Promise<OfflineSnapshot | null>
+   const controller = new AbortController();
+   const timer = setTimeout(() => controller.abort(), 12_000);
+   try {
+-    if (!force) {
+-      const manifest = await apiFetch<{ revision: string }>('/offline/manifest', { cache: 'no-store', signal: controller.signal });
+-      if (current.authoritative && current.revision === manifest.revision) {
+-        lastCheckedAt = Date.now();
+-        return current;
+-      }
++    const manifest = await apiFetch<{ revision: string; deltaUrl?: string }>('/offline/manifest', { cache: 'no-store', signal: controller.signal });
++    if (!force && current.authoritative && current.revision === manifest.revision) {
++      lastCheckedAt = Date.now();
++      return current;
+     }
+-    const refreshed = await apiFetch<OfflineSnapshot>('/offline/snapshot', { cache: 'no-store', signal: controller.signal });
++
++    const deltaPath = manifest.deltaUrl || '/api/offline/delta';
++    const deltaUrl = deltaPath.replace(/^\/api/, '');
++    const refreshed = await apiFetch<OfflineSnapshot>(
++      `${deltaUrl}?sinceRevision=${encodeURIComponent(current.revision)}`,
++      { cache: 'no-store', signal: controller.signal },
++    );
+     if (!isValidSnapshot(refreshed)) return current;
+-    if (!refreshed.lines.length && bundledSnapshot.lines.length && (!current.authoritative || !current.lines.length)) {
++
++    const next = mergeSnapshotUpdates(current, refreshed);
++    if (!next.lines.length && bundledSnapshot.lines.length) {
+       // Do not let an unseeded database erase the routes shipped with the app.
+-      return current.lines.length ? current : bundledSnapshot;
++      const fallback = { ...bundledSnapshot, authoritative: true };
++      await writeSnapshot(fallback);
++      lastCheckedAt = Date.now();
++      return fallback;
+     }
+-    const next = { ...refreshed, authoritative: true };
++
+     await writeSnapshot(next);
+     lastCheckedAt = Date.now();
+-    if (current.revision !== next.revision || !current.authoritative) announceUpdate();
++    if (current.revision !== next.revision || !current.authoritative || refreshed.lines.length > 0) announceUpdate();
+     return next;
+   } catch {
++    if (force) {
++      try {
++        const refreshed = await apiFetch<OfflineSnapshot>('/offline/snapshot', { cache: 'no-store', signal: controller.signal });
++        if (!isValidSnapshot(refreshed)) return current;
++        const next = mergeSnapshotUpdates(current, refreshed);
++        await writeSnapshot(next);
++        lastCheckedAt = Date.now();
++        if (current.revision !== next.revision || !current.authoritative || refreshed.lines.length > 0) announceUpdate();
++        return next;
++      } catch {
++        return current;
++      }
++    }
+     return current;
+   } finally { clearTimeout(timer); }
+ }
+@@ -186,7 +228,7 @@ export function refreshLocalRouteSnapshot(force = false): Promise<OfflineSnapsho
+     // An admin save must not join a request that started before the mutation.
+     return force ? refreshInFlight.then(() => refreshLocalRouteSnapshot(true)) : refreshInFlight;
+   }
+-  if (!force && Date.now() - lastCheckedAt < 15_000) return readSnapshot();
++  if (!force && Date.now() - lastCheckedAt < ROUTE_SYNC_MIN_INTERVAL_MS) return readSnapshot();
+   refreshInFlight = refreshSnapshot(force).finally(() => { refreshInFlight = null; });
+   return refreshInFlight;
+ }
+diff --git a/artifacts/sikka/src/lib/offlineTripPlanner.ts b/artifacts/sikka/src/lib/offlineTripPlanner.ts
+index a57128c..031bc87 100644
+--- a/artifacts/sikka/src/lib/offlineTripPlanner.ts
++++ b/artifacts/sikka/src/lib/offlineTripPlanner.ts
+@@ -1,6 +1,6 @@
+ // Offline route planning uses the same synchronized store as the dashboard.
+ import bundledSnapshotRaw from '@/data/bundledSnapshot.json';
+-import { readSnapshot, refreshLocalRouteSnapshot } from '@/lib/localRouteStore';
++import { readSnapshot } from '@/lib/localRouteStore';
+ 
+ type LngLat = [number, number];
+ type Coord = { lat: number; lng: number };
+@@ -960,9 +960,10 @@ async function makePlan(
+ }
+ 
+ async function getSnapshot(): Promise<OfflineSnapshot | null> {
+-  // If startup/resume is already syncing, planning waits for that bounded
+-  // request. Offline or failed requests retain the last usable route set.
+-  const snapshot = await refreshLocalRouteSnapshot() ?? await readSnapshot();
++  // Trip planning is strictly local. Startup/resume sync may update this
++  // snapshot in the background, but a rider's search never waits on route DB
++  // traffic or replaces the saved phone catalog mid-plan.
++  const snapshot = await readSnapshot();
+   return snapshot as unknown as OfflineSnapshot;
+ }
+ 

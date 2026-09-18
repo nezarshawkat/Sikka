@@ -124,7 +124,7 @@ function AppRoutes() {
     const adTimer = window.setTimeout(preloadInterstitialAd, 500);
     const syncTimer = window.setInterval(() => {
       if (document.visibilityState === 'visible') refresh();
-    }, 30_000);
+    }, 30 * 60 * 1000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') refresh();
     };
